@@ -19,8 +19,11 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
     if (status !== "running") return;
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    // Extract auth token from cookies for WebSocket auth
+    const tokenMatch = document.cookie.match(/better-auth\.session_token=([^;]+)/);
+    const tokenParam = tokenMatch ? `?token=${encodeURIComponent(tokenMatch[1])}` : "";
     const ws = new WebSocket(
-      `${protocol}//${window.location.host}/api/terminal/${sessionId}`,
+      `${protocol}//${window.location.host}/api/terminal/${sessionId}${tokenParam}`,
     );
     wsRef.current = ws;
 

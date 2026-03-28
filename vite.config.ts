@@ -11,7 +11,15 @@ export default defineConfig({
   resolve: {
     tsconfigPaths: true,
   },
-  plugins: [tailwindcss(), tanstackStart(), react(), nitro()],
+  plugins: [
+    tailwindcss(),
+    tanstackStart(),
+    react(),
+    nitro({
+      features: { websocket: true },
+      serverDir: "./server",
+    }),
+  ],
   ssr: {
     external: ["better-auth", "dockerode", "ssh2", "cpu-features"],
   },
