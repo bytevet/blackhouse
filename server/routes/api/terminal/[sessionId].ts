@@ -110,7 +110,6 @@ export default defineWebSocketHandler({
               stdin: true,
               stdout: true,
               stderr: true,
-              hijack: true,
             })) as NodeJS.ReadWriteStream;
             lastErr = null;
             break;
@@ -134,15 +133,6 @@ export default defineWebSocketHandler({
 
         // Set up stream listeners ONCE (shared across all peers)
         terminal.stream.on("data", (chunk: Buffer) => {
-          // Filter Docker attach/hijack metadata that can appear in any chunk
-          const str = chunk.toString("utf-8").trim();
-          if (
-            str === '{"stream":true,"stdin":true,"stdout":true,"stderr":true,"hijack":true}' ||
-            (str.startsWith("{") && str.includes('"hijack"') && str.includes('"stream"'))
-          ) {
-            return;
-          }
-
           // Cache in scrollback ring buffer
           terminal.scrollback.push(Buffer.from(chunk));
           terminal.scrollbackSize += chunk.length;
