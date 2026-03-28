@@ -59,12 +59,14 @@ export function AppSidebar() {
             <SidebarMenu>
               {navItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
-                  <Link to={item.to} className="block">
-                    <SidebarMenuButton isActive={location.pathname.startsWith(item.to)}>
-                      <item.icon className="shrink-0" />
-                      <span className="truncate">{item.title}</span>
-                    </SidebarMenuButton>
-                  </Link>
+                  <SidebarMenuButton
+                    isActive={location.pathname.startsWith(item.to)}
+                    render={<Link to={item.to} />}
+                    nativeButton={false}
+                  >
+                    <item.icon className="shrink-0" />
+                    <span className="truncate">{item.title}</span>
+                  </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
             </SidebarMenu>
