@@ -17,8 +17,6 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR_VER:-22}.x | bash -
 # Install Gemini CLI
 RUN npm install -g @google/gemini-cli
 
-# Install Skills CLI (cross-agent skill support)
-RUN npm install -g @anthropic-ai/skills
 
 # Create non-root workspace user
 RUN groupadd --gid 1001 workspace \
