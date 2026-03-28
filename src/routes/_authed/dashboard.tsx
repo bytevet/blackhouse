@@ -205,11 +205,15 @@ function DashboardPage() {
               </div>
               <div className="grid gap-1.5">
                 <Label>Template</Label>
-                <Select value={templateId} onValueChange={setTemplateId}>
+                <Select
+                  value={templateId || "__none__"}
+                  onValueChange={(v) => setTemplateId(v === "__none__" ? "" : v)}
+                >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="None" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="__none__">None</SelectItem>
                     {templates.map((t: Template) => (
                       <SelectItem key={t.id} value={t.id}>
                         {t.name}
