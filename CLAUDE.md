@@ -66,3 +66,10 @@ npm run db:studio    # Open Drizzle Studio
 - `timeAgo()` utility is in `src/lib/time.ts` (NOT in utils.ts — shadcn init overwrites utils.ts)
 - CSS variables for theming are in `src/index.css` — border overrides must be unlayered (not in `@layer base`) to beat Tailwind v4 preflight
 - All pages must be responsive — use `hidden sm:table-cell` for table columns, `md:flex-row` for layout switches
+
+## Do Not Modify (shadcn/ui managed files)
+
+These files are generated and managed by shadcn/ui. Do not edit them manually — they will be overwritten by `npx shadcn init` or `npx shadcn add`.
+
+- `src/lib/utils.ts` — only contains `cn()`, managed by shadcn. Put custom utilities in separate files (e.g. `src/lib/time.ts`).
+- `src/components/ui/*` — all files in this directory are shadcn/ui components. Never modify them directly.
