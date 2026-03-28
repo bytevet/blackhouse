@@ -1,5 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
+import { z } from "zod";
+import { authMiddleware, adminMiddleware } from "@/server/middleware";
 import { auth } from "@/lib/auth";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
@@ -9,30 +11,22 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as tar from "tar-stream";
 
-async function requireSession() {
-  const request = getRequest();
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) throw new Error("Unauthorized");
-  return session;
-}
-
-function requireAdmin(session: { user: { role?: string | null } }) {
-  if (session.user.role !== "admin") {
-    throw new Error("Forbidden: admin access required");
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Profile
 // ---------------------------------------------------------------------------
 
 export const updateProfile = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
   .inputValidator(
-    (input: { name?: string; password?: string; currentPassword?: string; newPassword?: string }) =>
-      input,
+    z.object({
+      name: z.string().optional(),
+      password: z.string().optional(),
+      currentPassword: z.string().optional(),
+      newPassword: z.string().optional(),
+    }),
   )
-  .handler(async ({ data }) => {
-    const session = await requireSession();
+  .handler(async ({ data, context }) => {
+    const session = context.session;
 
     const updateData: Record<string, unknown> = { updatedAt: new Date() };
     if (data.name !== undefined) updateData.name = data.name;
@@ -62,29 +56,27 @@ export const updateProfile = createServerFn({ method: "POST" })
 // Agent Configs (admin only)
 // ---------------------------------------------------------------------------
 
-export const listAgentConfigs = createServerFn({ method: "GET" }).handler(async () => {
-  await requireSession();
-
-  return db.select().from(schema.agentConfigs).orderBy(desc(schema.agentConfigs.createdAt));
-});
+export const listAgentConfigs = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async () => {
+    return db.select().from(schema.agentConfigs).orderBy(desc(schema.agentConfigs.createdAt));
+  });
 
 export const upsertAgentConfig = createServerFn({ method: "POST" })
+  .middleware([adminMiddleware])
   .inputValidator(
-    (input: {
-      id?: string;
-      agentType: string;
-      displayName: string;
-      apiKeyEncrypted?: string;
-      apiKey?: string;
-      defaultModel?: string;
-      extraArgs?: unknown;
-      dockerfileContent?: string | null;
-    }) => input,
+    z.object({
+      id: z.string().optional(),
+      agentType: z.string(),
+      displayName: z.string(),
+      apiKeyEncrypted: z.string().optional(),
+      apiKey: z.string().optional(),
+      defaultModel: z.string().optional(),
+      extraArgs: z.unknown().optional(),
+      dockerfileContent: z.string().nullable().optional(),
+    }),
   )
   .handler(async ({ data }) => {
-    const session = await requireSession();
-    requireAdmin(session);
-
     const values: Record<string, unknown> = {
       agentType: data.agentType,
       displayName: data.displayName,
@@ -127,11 +119,9 @@ export const upsertAgentConfig = createServerFn({ method: "POST" })
   });
 
 export const deleteAgentConfig = createServerFn({ method: "POST" })
-  .inputValidator((input: { id: string }) => input)
+  .middleware([adminMiddleware])
+  .inputValidator(z.object({ id: z.string() }))
   .handler(async ({ data }) => {
-    const session = await requireSession();
-    requireAdmin(session);
-
     await db.delete(schema.agentConfigs).where(eq(schema.agentConfigs.id, data.id));
 
     return { success: true };
@@ -142,11 +132,9 @@ export const deleteAgentConfig = createServerFn({ method: "POST" })
 // ---------------------------------------------------------------------------
 
 export const buildAgentImage = createServerFn({ method: "POST" })
-  .inputValidator((input: { agentConfigId: string }) => input)
+  .middleware([adminMiddleware])
+  .inputValidator(z.object({ agentConfigId: z.string() }))
   .handler(async ({ data }) => {
-    const session = await requireSession();
-    requireAdmin(session);
-
     const rows = await db
       .select()
       .from(schema.agentConfigs)
@@ -251,10 +239,9 @@ export const buildAgentImage = createServerFn({ method: "POST" })
 // ---------------------------------------------------------------------------
 
 export const getAgentBuildStatus = createServerFn({ method: "GET" })
-  .inputValidator((input: { agentConfigId: string }) => input)
+  .middleware([authMiddleware])
+  .inputValidator(z.object({ agentConfigId: z.string() }))
   .handler(async ({ data }) => {
-    await requireSession();
-
     const rows = await db
       .select({
         imageBuildStatus: schema.agentConfigs.imageBuildStatus,
@@ -274,43 +261,39 @@ export const getAgentBuildStatus = createServerFn({ method: "GET" })
 // Get Default Dockerfile
 // ---------------------------------------------------------------------------
 
-export const getDefaultDockerfile = createServerFn({ method: "GET" }).handler(async () => {
-  const session = await requireSession();
-  requireAdmin(session);
+export const getDefaultDockerfile = createServerFn({ method: "GET" })
+  .middleware([adminMiddleware])
+  .handler(async () => {
+    const content = fs.readFileSync(path.resolve(process.cwd(), "Dockerfile.session"), "utf-8");
 
-  const content = fs.readFileSync(path.resolve(process.cwd(), "Dockerfile.session"), "utf-8");
-
-  return content;
-});
+    return content;
+  });
 
 // ---------------------------------------------------------------------------
 // Docker Config (admin only)
 // ---------------------------------------------------------------------------
 
-export const getDockerConfig = createServerFn({ method: "GET" }).handler(async () => {
-  const session = await requireSession();
-  requireAdmin(session);
+export const getDockerConfig = createServerFn({ method: "GET" })
+  .middleware([adminMiddleware])
+  .handler(async () => {
+    const rows = await db.select().from(schema.dockerConfigs).limit(1);
 
-  const rows = await db.select().from(schema.dockerConfigs).limit(1);
-
-  return rows[0] ?? null;
-});
+    return rows[0] ?? null;
+  });
 
 export const updateDockerConfig = createServerFn({ method: "POST" })
+  .middleware([adminMiddleware])
   .inputValidator(
-    (input: {
-      socketPath?: string;
-      host?: string;
-      port?: number;
-      tlsCa?: string;
-      tlsCert?: string;
-      tlsKey?: string;
-    }) => input,
+    z.object({
+      socketPath: z.string().optional(),
+      host: z.string().optional(),
+      port: z.number().optional(),
+      tlsCa: z.string().optional(),
+      tlsCert: z.string().optional(),
+      tlsKey: z.string().optional(),
+    }),
   )
   .handler(async ({ data }) => {
-    const session = await requireSession();
-    requireAdmin(session);
-
     // Upsert with id=1 (singleton row)
     const existing = await db.select().from(schema.dockerConfigs).limit(1);
 
@@ -350,114 +333,114 @@ export const updateDockerConfig = createServerFn({ method: "POST" })
 // Docker Status (admin only)
 // ---------------------------------------------------------------------------
 
-export const getDockerStatus = createServerFn({ method: "GET" }).handler(async () => {
-  const session = await requireSession();
-  requireAdmin(session);
+export const getDockerStatus = createServerFn({ method: "GET" })
+  .middleware([adminMiddleware])
+  .handler(async () => {
+    try {
+      const docker = await getDockerClient();
+      const info = await docker.info();
 
-  try {
-    const docker = await getDockerClient();
-    const info = await docker.info();
-
-    return {
-      connected: true,
-      serverVersion: info.ServerVersion as string,
-      os: info.OperatingSystem as string,
-      totalMemory: info.MemTotal as number,
-      containers: info.Containers as number,
-      containersRunning: info.ContainersRunning as number,
-      containersStopped: info.ContainersStopped as number,
-      images: info.Images as number,
-    };
-  } catch (err) {
-    return {
-      connected: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
-});
+      return {
+        connected: true,
+        serverVersion: info.ServerVersion as string,
+        os: info.OperatingSystem as string,
+        totalMemory: info.MemTotal as number,
+        containers: info.Containers as number,
+        containersRunning: info.ContainersRunning as number,
+        containersStopped: info.ContainersStopped as number,
+        images: info.Images as number,
+      };
+    } catch (err) {
+      return {
+        connected: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  });
 
 // ---------------------------------------------------------------------------
 // List Containers (admin only)
 // ---------------------------------------------------------------------------
 
-export const listContainers = createServerFn({ method: "GET" }).handler(async () => {
-  const session = await requireSession();
-  requireAdmin(session);
+export const listContainers = createServerFn({ method: "GET" })
+  .middleware([adminMiddleware])
+  .handler(async () => {
+    try {
+      const docker = await getDockerClient();
+      const containers = await docker.listContainers({
+        all: true,
+        filters: { label: ["blackhouse.managed=true"] },
+      });
 
-  try {
-    const docker = await getDockerClient();
-    const containers = await docker.listContainers({
-      all: true,
-      filters: { label: ["blackhouse.managed=true"] },
-    });
+      // Enrich with session info from DB
+      const sessionIds = containers
+        .map((c) => c.Labels?.["blackhouse.session_id"])
+        .filter(Boolean) as string[];
 
-    // Enrich with session info from DB
-    const sessionIds = containers
-      .map((c) => c.Labels?.["blackhouse.session_id"])
-      .filter(Boolean) as string[];
+      let sessionsMap = new Map<string, typeof schema.codingSessions.$inferSelect>();
 
-    let sessionsMap = new Map<string, typeof schema.codingSessions.$inferSelect>();
+      if (sessionIds.length > 0) {
+        const sessions = await db
+          .select()
+          .from(schema.codingSessions)
+          .where(inArray(schema.codingSessions.id, sessionIds));
 
-    if (sessionIds.length > 0) {
-      const sessions = await db
-        .select()
-        .from(schema.codingSessions)
-        .where(inArray(schema.codingSessions.id, sessionIds));
-
-      for (const s of sessions) {
-        sessionsMap.set(s.id, s);
+        for (const s of sessions) {
+          sessionsMap.set(s.id, s);
+        }
       }
-    }
 
-    return containers.map((c) => {
-      const sessionId = c.Labels?.["blackhouse.session_id"];
-      return {
-        containerId: c.Id,
-        image: c.Image,
-        state: c.State,
-        status: c.Status,
-        created: c.Created,
-        sessionId,
-        session: sessionId ? (sessionsMap.get(sessionId) ?? null) : null,
-      };
-    });
-  } catch (err) {
-    throw new Error(
-      `Failed to list containers: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-});
+      return containers.map((c) => {
+        const sessionId = c.Labels?.["blackhouse.session_id"];
+        return {
+          containerId: c.Id,
+          image: c.Image,
+          state: c.State,
+          status: c.Status,
+          created: c.Created,
+          sessionId,
+          session: sessionId ? (sessionsMap.get(sessionId) ?? null) : null,
+        };
+      });
+    } catch (err) {
+      throw new Error(
+        `Failed to list containers: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  });
 
 // ---------------------------------------------------------------------------
 // User Management (admin only)
 // ---------------------------------------------------------------------------
 
-export const listUsers = createServerFn({ method: "GET" }).handler(async () => {
-  const session = await requireSession();
-  requireAdmin(session);
-
-  return db
-    .select({
-      id: schema.user.id,
-      name: schema.user.name,
-      email: schema.user.email,
-      role: schema.user.role,
-      banned: schema.user.banned,
-      createdAt: schema.user.createdAt,
-    })
-    .from(schema.user)
-    .orderBy(desc(schema.user.createdAt));
-});
+export const listUsers = createServerFn({ method: "GET" })
+  .middleware([adminMiddleware])
+  .handler(async () => {
+    return db
+      .select({
+        id: schema.user.id,
+        name: schema.user.name,
+        email: schema.user.email,
+        role: schema.user.role,
+        banned: schema.user.banned,
+        createdAt: schema.user.createdAt,
+      })
+      .from(schema.user)
+      .orderBy(desc(schema.user.createdAt));
+  });
 
 export const createUser = createServerFn({ method: "POST" })
+  .middleware([adminMiddleware])
   .inputValidator(
-    (input: { name: string; email: string; username?: string; password: string; role?: string }) =>
-      input,
+    z.object({
+      name: z.string(),
+      email: z.string(),
+      username: z.string().optional(),
+      password: z.string(),
+      role: z.string().optional(),
+    }),
   )
   .handler(async ({ data }) => {
-    const session = await requireSession();
-    requireAdmin(session);
-
     const result = await auth.api.signUpEmail({
       body: {
         name: data.name,
@@ -478,10 +461,10 @@ export const createUser = createServerFn({ method: "POST" })
   });
 
 export const deleteUser = createServerFn({ method: "POST" })
-  .inputValidator((input: { id?: string; userId?: string }) => input)
-  .handler(async ({ data }) => {
-    const session = await requireSession();
-    requireAdmin(session);
+  .middleware([adminMiddleware])
+  .inputValidator(z.object({ id: z.string().optional(), userId: z.string().optional() }))
+  .handler(async ({ data, context }) => {
+    const session = context.session;
 
     const targetId = data.id ?? data.userId;
     if (!targetId) throw new Error("Missing user id");
@@ -496,10 +479,12 @@ export const deleteUser = createServerFn({ method: "POST" })
   });
 
 export const updateUserRole = createServerFn({ method: "POST" })
-  .inputValidator((input: { id?: string; userId?: string; role: string }) => input)
-  .handler(async ({ data }) => {
-    const session = await requireSession();
-    requireAdmin(session);
+  .middleware([adminMiddleware])
+  .inputValidator(
+    z.object({ id: z.string().optional(), userId: z.string().optional(), role: z.string() }),
+  )
+  .handler(async ({ data, context }) => {
+    const session = context.session;
 
     const targetId = data.id ?? data.userId;
     if (!targetId) throw new Error("Missing user id");

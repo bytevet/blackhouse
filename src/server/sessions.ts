@@ -1,37 +1,10 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getRequest } from "@tanstack/react-start/server";
-import { auth } from "@/lib/auth";
+import { z } from "zod";
+import { authMiddleware } from "@/server/middleware";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { getDockerClient } from "@/lib/docker";
-
-async function requireSession() {
-  const request = getRequest();
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) throw new Error("Unauthorized");
-  return session;
-}
-
-function requireAdmin(session: { user: { role?: string | null } }) {
-  if (session.user.role !== "admin") {
-    throw new Error("Forbidden: admin access required");
-  }
-}
-
-async function requireSessionOwnership(sessionId: string) {
-  const session = await requireSession();
-  const [codingSession] = await db
-    .select()
-    .from(schema.codingSessions)
-    .where(eq(schema.codingSessions.id, sessionId))
-    .limit(1);
-  if (!codingSession) throw new Error("Session not found");
-  if (codingSession.userId !== session.user.id && session.user.role !== "admin") {
-    throw new Error("Forbidden");
-  }
-  return { session, codingSession };
-}
 
 function generateEntrypoint(opts: {
   gitRepoUrl?: string | null;
@@ -67,11 +40,12 @@ function generateEntrypoint(opts: {
 // ---------------------------------------------------------------------------
 
 export const listSessions = createServerFn({ method: "GET" })
-  .inputValidator((input: { all?: boolean } | undefined) => input ?? {})
-  .handler(async ({ data }) => {
-    const session = await requireSession();
+  .middleware([authMiddleware])
+  .inputValidator(z.object({ all: z.boolean().optional() }).optional())
+  .handler(async ({ data, context }) => {
+    const session = context.session;
 
-    if (data.all && session.user.role === "admin") {
+    if (data?.all && session.user.role === "admin") {
       const rows = await db
         .select({
           session: schema.codingSessions,
@@ -100,9 +74,19 @@ export const listSessions = createServerFn({ method: "GET" })
 // ---------------------------------------------------------------------------
 
 export const getSession = createServerFn({ method: "GET" })
-  .inputValidator((input: { id: string }) => input)
-  .handler(async ({ data }) => {
-    const { codingSession } = await requireSessionOwnership(data.id);
+  .middleware([authMiddleware])
+  .inputValidator(z.object({ id: z.string() }))
+  .handler(async ({ data, context }) => {
+    const session = context.session;
+    const [codingSession] = await db
+      .select()
+      .from(schema.codingSessions)
+      .where(eq(schema.codingSessions.id, data.id))
+      .limit(1);
+    if (!codingSession) throw new Error("Session not found");
+    if (codingSession.userId !== session.user.id && session.user.role !== "admin") {
+      throw new Error("Forbidden");
+    }
     return codingSession;
   });
 
@@ -111,18 +95,19 @@ export const getSession = createServerFn({ method: "GET" })
 // ---------------------------------------------------------------------------
 
 export const createSession = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
   .inputValidator(
-    (input: {
-      name: string;
-      gitRepoUrl?: string;
-      gitBranch?: string;
-      templateId?: string;
-      agentType?: string;
-      agentConfigId?: string;
-    }) => input,
+    z.object({
+      name: z.string(),
+      gitRepoUrl: z.string().optional(),
+      gitBranch: z.string().optional(),
+      templateId: z.string().optional(),
+      agentType: z.string().optional(),
+      agentConfigId: z.string().optional(),
+    }),
   )
-  .handler(async ({ data }) => {
-    const session = await requireSession();
+  .handler(async ({ data, context }) => {
+    const session = context.session;
 
     // Look up agent config for docker image & keys
     let agentConfigRows;
@@ -268,9 +253,19 @@ export const createSession = createServerFn({ method: "POST" })
 // ---------------------------------------------------------------------------
 
 export const stopSession = createServerFn({ method: "POST" })
-  .inputValidator((input: { id: string }) => input)
-  .handler(async ({ data }) => {
-    const { codingSession } = await requireSessionOwnership(data.id);
+  .middleware([authMiddleware])
+  .inputValidator(z.object({ id: z.string() }))
+  .handler(async ({ data, context }) => {
+    const session = context.session;
+    const [codingSession] = await db
+      .select()
+      .from(schema.codingSessions)
+      .where(eq(schema.codingSessions.id, data.id))
+      .limit(1);
+    if (!codingSession) throw new Error("Session not found");
+    if (codingSession.userId !== session.user.id && session.user.role !== "admin") {
+      throw new Error("Forbidden");
+    }
 
     if (!codingSession.containerId) {
       throw new Error("No container associated with this session");
@@ -302,9 +297,19 @@ export const stopSession = createServerFn({ method: "POST" })
 // ---------------------------------------------------------------------------
 
 export const destroySession = createServerFn({ method: "POST" })
-  .inputValidator((input: { id: string }) => input)
-  .handler(async ({ data }) => {
-    const { codingSession } = await requireSessionOwnership(data.id);
+  .middleware([authMiddleware])
+  .inputValidator(z.object({ id: z.string() }))
+  .handler(async ({ data, context }) => {
+    const session = context.session;
+    const [codingSession] = await db
+      .select()
+      .from(schema.codingSessions)
+      .where(eq(schema.codingSessions.id, data.id))
+      .limit(1);
+    if (!codingSession) throw new Error("Session not found");
+    if (codingSession.userId !== session.user.id && session.user.role !== "admin") {
+      throw new Error("Forbidden");
+    }
 
     if (codingSession.containerId) {
       try {
@@ -329,9 +334,19 @@ export const destroySession = createServerFn({ method: "POST" })
 // ---------------------------------------------------------------------------
 
 export const restartSession = createServerFn({ method: "POST" })
-  .inputValidator((input: { id: string }) => input)
-  .handler(async ({ data }) => {
-    const { codingSession } = await requireSessionOwnership(data.id);
+  .middleware([authMiddleware])
+  .inputValidator(z.object({ id: z.string() }))
+  .handler(async ({ data, context }) => {
+    const session = context.session;
+    const [codingSession] = await db
+      .select()
+      .from(schema.codingSessions)
+      .where(eq(schema.codingSessions.id, data.id))
+      .limit(1);
+    if (!codingSession) throw new Error("Session not found");
+    if (codingSession.userId !== session.user.id && session.user.role !== "admin") {
+      throw new Error("Forbidden");
+    }
 
     if (!codingSession.containerId) {
       throw new Error("No container associated with this session");

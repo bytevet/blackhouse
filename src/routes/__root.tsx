@@ -2,8 +2,15 @@
 import type { ReactNode } from "react";
 import { Outlet, createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
 import appCss from "@/index.css?url";
+import { DefaultErrorComponent } from "@/components/default-error";
+import { NotFound } from "@/components/not-found";
+import { getServerSession } from "@/lib/auth-server";
 
 export const Route = createRootRoute({
+  beforeLoad: async () => {
+    const user = await getServerSession();
+    return { user };
+  },
   head: () => ({
     meta: [
       { charSet: "utf-8" },
@@ -15,6 +22,16 @@ export const Route = createRootRoute({
       { rel: "stylesheet", href: appCss },
     ],
   }),
+  errorComponent: (props) => (
+    <RootDocument>
+      <DefaultErrorComponent {...props} />
+    </RootDocument>
+  ),
+  notFoundComponent: () => (
+    <RootDocument>
+      <NotFound />
+    </RootDocument>
+  ),
   component: RootComponent,
 });
 

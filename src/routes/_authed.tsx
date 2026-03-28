@@ -1,14 +1,15 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { AppHeader } from "@/components/app-header";
-import { getServerSession } from "@/lib/auth-server";
 
 export const Route = createFileRoute("/_authed")({
-  beforeLoad: async () => {
-    const session = await getServerSession();
-    if (!session) {
-      throw redirect({ to: "/login" });
+  beforeLoad: async ({ location, context }) => {
+    if (!context.user) {
+      throw redirect({
+        to: "/login",
+        search: { redirect: location.href },
+      });
     }
-    return { session };
+    return { user: context.user };
   },
   component: AuthedLayout,
 });

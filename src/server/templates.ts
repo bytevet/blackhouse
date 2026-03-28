@@ -1,25 +1,19 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getRequest } from "@tanstack/react-start/server";
-import { auth } from "@/lib/auth";
+import { z } from "zod";
+import { authMiddleware } from "@/server/middleware";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
 import { eq, and, or, desc } from "drizzle-orm";
-
-async function requireSession() {
-  const request = getRequest();
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) throw new Error("Unauthorized");
-  return session;
-}
 
 // ---------------------------------------------------------------------------
 // listTemplates
 // ---------------------------------------------------------------------------
 
 export const listTemplates = createServerFn({ method: "GET" })
-  .inputValidator((input: { mine?: boolean }) => input)
-  .handler(async ({ data }) => {
-    const session = await requireSession();
+  .middleware([authMiddleware])
+  .inputValidator(z.object({ mine: z.boolean().optional() }))
+  .handler(async ({ data, context }) => {
+    const session = context.session;
 
     if (data.mine) {
       return db
@@ -42,9 +36,10 @@ export const listTemplates = createServerFn({ method: "GET" })
 // ---------------------------------------------------------------------------
 
 export const getTemplate = createServerFn({ method: "GET" })
-  .inputValidator((input: { id: string }) => input)
-  .handler(async ({ data }) => {
-    const session = await requireSession();
+  .middleware([authMiddleware])
+  .inputValidator(z.object({ id: z.string() }))
+  .handler(async ({ data, context }) => {
+    const session = context.session;
 
     const rows = await db
       .select()
@@ -68,19 +63,20 @@ export const getTemplate = createServerFn({ method: "GET" })
 // ---------------------------------------------------------------------------
 
 export const createTemplate = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
   .inputValidator(
-    (input: {
-      name: string;
-      description?: string;
-      systemPrompt?: string;
-      skills?: unknown;
-      mcpConfig?: unknown;
-      isPublic?: boolean;
-      yoloMode?: boolean;
-    }) => input,
+    z.object({
+      name: z.string(),
+      description: z.string().optional(),
+      systemPrompt: z.string().optional(),
+      skills: z.unknown().optional(),
+      mcpConfig: z.unknown().optional(),
+      isPublic: z.boolean().optional(),
+      yoloMode: z.boolean().optional(),
+    }),
   )
-  .handler(async ({ data }) => {
-    const session = await requireSession();
+  .handler(async ({ data, context }) => {
+    const session = context.session;
 
     const inserted = await db
       .insert(schema.templates)
@@ -104,20 +100,21 @@ export const createTemplate = createServerFn({ method: "POST" })
 // ---------------------------------------------------------------------------
 
 export const updateTemplate = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
   .inputValidator(
-    (input: {
-      id: string;
-      name?: string;
-      description?: string;
-      systemPrompt?: string;
-      skills?: unknown;
-      mcpConfig?: unknown;
-      isPublic?: boolean;
-      yoloMode?: boolean;
-    }) => input,
+    z.object({
+      id: z.string(),
+      name: z.string().optional(),
+      description: z.string().optional(),
+      systemPrompt: z.string().optional(),
+      skills: z.unknown().optional(),
+      mcpConfig: z.unknown().optional(),
+      isPublic: z.boolean().optional(),
+      yoloMode: z.boolean().optional(),
+    }),
   )
-  .handler(async ({ data }) => {
-    const session = await requireSession();
+  .handler(async ({ data, context }) => {
+    const session = context.session;
 
     // Ownership check
     const rows = await db
@@ -157,9 +154,10 @@ export const updateTemplate = createServerFn({ method: "POST" })
 // ---------------------------------------------------------------------------
 
 export const deleteTemplate = createServerFn({ method: "POST" })
-  .inputValidator((input: { id: string }) => input)
-  .handler(async ({ data }) => {
-    const session = await requireSession();
+  .middleware([authMiddleware])
+  .inputValidator(z.object({ id: z.string() }))
+  .handler(async ({ data, context }) => {
+    const session = context.session;
 
     const rows = await db
       .select()

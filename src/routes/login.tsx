@@ -1,22 +1,31 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router";
 import { useState } from "react";
+import { z } from "zod";
 import { signIn, useSession } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 
+const loginSearchSchema = z.object({
+  redirect: z.string().optional(),
+});
+
 export const Route = createFileRoute("/login")({
+  validateSearch: loginSearchSchema,
   component: LoginPage,
 });
 
 function LoginPage() {
   const { data: session } = useSession();
   const navigate = useNavigate();
+  const { redirect: redirectTo } = useSearch({ from: "/login" });
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const destination = redirectTo || "/dashboard";
+
   if (session) {
-    navigate({ to: "/dashboard" });
+    navigate({ to: destination });
     return null;
   }
 
@@ -34,7 +43,7 @@ function LoginPage() {
         setError(result.error.message ?? "Sign in failed");
         return;
       }
-      navigate({ to: "/dashboard" });
+      navigate({ to: destination });
     } catch {
       setError("An unexpected error occurred");
     } finally {
@@ -43,7 +52,7 @@ function LoginPage() {
   }
 
   async function handleGitHubLogin() {
-    await signIn.social({ provider: "github", callbackURL: "/dashboard" });
+    await signIn.social({ provider: "github", callbackURL: destination });
   }
 
   return (
