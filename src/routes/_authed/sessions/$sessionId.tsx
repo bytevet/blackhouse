@@ -44,12 +44,13 @@ function SessionViewPage() {
   const toggleExplorer = useCallback(() => {
     const panel = explorerPanelRef.current;
     if (!panel) return;
-    if (explorerOpen) {
-      panel.collapse();
+    const isCollapsed = panel.isCollapsed();
+    if (isCollapsed) {
+      panel.resize(35);
     } else {
-      panel.expand();
+      panel.resize(0);
     }
-  }, [explorerOpen]);
+  }, []);
 
   useEffect(() => {
     if (!session || session.status !== "running") return;
