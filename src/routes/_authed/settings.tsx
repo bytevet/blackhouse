@@ -334,12 +334,13 @@ function AgentsTab() {
         </Button>
       </div>
 
+      <div className="overflow-x-auto">
       <Table>
         <TableHeader>
           <TableRow>
             <TableHead>Agent Type</TableHead>
             <TableHead>Display Name</TableHead>
-            <TableHead>Docker Image</TableHead>
+            <TableHead className="hidden sm:table-cell">Docker Image</TableHead>
             <TableHead>Yolo</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
@@ -356,7 +357,7 @@ function AgentsTab() {
               <TableRow key={c.id}>
                 <TableCell>{c.agentType}</TableCell>
                 <TableCell>{c.displayName}</TableCell>
-                <TableCell className="max-w-48 truncate text-muted-foreground">
+                <TableCell className="hidden max-w-48 truncate text-muted-foreground sm:table-cell">
                   {c.dockerImage || "—"}
                 </TableCell>
                 <TableCell>
@@ -387,6 +388,7 @@ function AgentsTab() {
           )}
         </TableBody>
       </Table>
+      </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-md">
@@ -607,14 +609,15 @@ function DockerTab() {
 
       <div className="space-y-3">
         <h3 className="text-sm font-medium text-foreground">Containers</h3>
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Container ID</TableHead>
               <TableHead>Image</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead>Session</TableHead>
-              <TableHead>Created</TableHead>
+              <TableHead className="hidden sm:table-cell">Session</TableHead>
+              <TableHead className="hidden sm:table-cell">Created</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -639,10 +642,10 @@ function DockerTab() {
                   <TableCell>
                     <Badge variant="outline">{c.status}</Badge>
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
+                  <TableCell className="hidden sm:table-cell text-muted-foreground">
                     {c.sessionName || "—"}
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
+                  <TableCell className="hidden sm:table-cell text-muted-foreground">
                     {c.createdAt ? timeAgo(c.createdAt) : "—"}
                   </TableCell>
                 </TableRow>
@@ -650,6 +653,7 @@ function DockerTab() {
             )}
           </TableBody>
         </Table>
+      </div>
       </div>
     </div>
   );
@@ -750,12 +754,13 @@ function UsersTab() {
         </Button>
       </div>
 
+      <div className="overflow-x-auto">
       <Table>
         <TableHeader>
           <TableRow>
             <TableHead>Name</TableHead>
-            <TableHead>Email</TableHead>
-            <TableHead>Username</TableHead>
+            <TableHead className="hidden sm:table-cell">Email</TableHead>
+            <TableHead className="hidden sm:table-cell">Username</TableHead>
             <TableHead>Role</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
@@ -764,8 +769,8 @@ function UsersTab() {
           {users.map((u) => (
             <TableRow key={u.id}>
               <TableCell>{u.name}</TableCell>
-              <TableCell className="text-muted-foreground">{u.email}</TableCell>
-              <TableCell className="text-muted-foreground">
+              <TableCell className="hidden sm:table-cell text-muted-foreground">{u.email}</TableCell>
+              <TableCell className="hidden sm:table-cell text-muted-foreground">
                 {u.username || "—"}
               </TableCell>
               <TableCell>
@@ -798,6 +803,7 @@ function UsersTab() {
           ))}
         </TableBody>
       </Table>
+      </div>
 
       {/* Add User Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

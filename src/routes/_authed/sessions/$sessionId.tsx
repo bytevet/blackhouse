@@ -93,9 +93,9 @@ function SessionViewPage() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-6.5rem)] flex-col">
+    <div className="flex h-[calc(100dvh-6.5rem)] flex-col">
       {/* Meta section */}
-      <div className="flex items-center gap-3 border-b border-border px-4 py-2">
+      <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2 md:gap-3 md:px-4">
         <h1 className="text-sm font-semibold text-foreground">
           {session.name}
         </h1>
@@ -108,11 +108,9 @@ function SessionViewPage() {
         >
           {session.status}
         </Badge>
-        {session.gitRepoUrl && (
-          <span className="text-xs text-muted-foreground">
-            {session.gitRepoUrl}
-          </span>
-        )}
+        <span className="hidden text-xs text-muted-foreground sm:inline">
+          {session.gitRepoUrl}
+        </span>
 
         <div className="ml-auto flex items-center gap-1">
           {session.status === "running" && (
@@ -123,7 +121,7 @@ function SessionViewPage() {
               disabled={actionLoading}
             >
               <Square className="size-3" />
-              Stop
+              <span className="hidden sm:inline">Stop</span>
             </Button>
           )}
           {session.status === "stopped" && (
@@ -134,7 +132,7 @@ function SessionViewPage() {
               disabled={actionLoading}
             >
               <Play className="size-3" />
-              Restart
+              <span className="hidden sm:inline">Restart</span>
             </Button>
           )}
           {session.status !== "destroyed" && (
@@ -145,7 +143,7 @@ function SessionViewPage() {
               disabled={actionLoading}
             >
               <Trash2 className="size-3" />
-              Destroy
+              <span className="hidden sm:inline">Destroy</span>
             </Button>
           )}
           <Button
@@ -162,26 +160,28 @@ function SessionViewPage() {
         </div>
       </div>
 
-      {/* Main content */}
-      <div className="flex flex-1 overflow-hidden">
+      {/* Main content — stack on mobile, side-by-side on desktop */}
+      <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
         {/* Terminal */}
         <div
           className={
-            explorerOpen ? "flex-1 border-r border-border" : "flex-1"
+            explorerOpen
+              ? "min-h-[200px] flex-1 border-b md:border-b-0 md:border-r"
+              : "flex-1"
           }
         >
           <TerminalPanel sessionId={session.id} status={session.status} />
         </div>
 
-        {/* Explorer panel */}
+        {/* Explorer panel — full width on mobile, fixed on desktop */}
         {explorerOpen && (
-          <div className="flex w-[480px] flex-col">
+          <div className="flex w-full flex-col md:w-[480px]">
             <Tabs
               value={explorerTab}
               onValueChange={setExplorerTab}
               className="flex h-full flex-col"
             >
-              <TabsList className="w-full justify-start border-b border-border bg-transparent px-2">
+              <TabsList className="w-full shrink-0 justify-start border-b bg-transparent px-2">
                 <TabsTrigger value="files" className="text-xs">
                   File Explorer
                 </TabsTrigger>
@@ -196,9 +196,9 @@ function SessionViewPage() {
                 </TabsTrigger>
               </TabsList>
 
-              <TabsContent value="files" className="flex-1 overflow-hidden m-0">
-                <div className="flex h-full">
-                  <div className="w-48 border-r border-border overflow-auto">
+              <TabsContent value="files" className="m-0 flex-1 overflow-hidden">
+                <div className="flex h-full flex-col sm:flex-row">
+                  <div className="w-full shrink-0 border-b sm:w-40 sm:border-b-0 sm:border-r md:w-48 overflow-auto max-h-[200px] sm:max-h-none">
                     <FileExplorer
                       sessionId={session.id}
                       onFileSelect={setSelectedFile}
@@ -220,7 +220,7 @@ function SessionViewPage() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="result" className="flex-1 overflow-hidden m-0">
+              <TabsContent value="result" className="m-0 flex-1 overflow-hidden">
                 {session.resultHtml ? (
                   <ResultViewer html={session.resultHtml} />
                 ) : (
