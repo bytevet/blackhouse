@@ -63,10 +63,22 @@ async function validateSession(
   return { containerId: codingSession.containerId };
 }
 
+function getSessionId(peer: { request?: { url?: string } }): string {
+  const url = new URL(peer.request?.url ?? "", "http://localhost");
+  return url.pathname.split("/").pop() ?? "";
+}
+
+function tagOutput(chunk: Buffer): Uint8Array {
+  const tagged = Buffer.allocUnsafe(1 + chunk.length);
+  tagged[0] = 0x00;
+  chunk.copy(tagged, 1);
+  return new Uint8Array(tagged);
+}
+
 export default defineWebSocketHandler({
   async open(peer) {
+    const sessionId = getSessionId(peer);
     const url = new URL(peer.request?.url ?? "", "http://localhost");
-    const sessionId = url.pathname.split("/").pop() ?? "";
     const token = url.searchParams.get("token") ?? undefined;
 
     const result = await validateSession(sessionId, token);
@@ -87,10 +99,7 @@ export default defineWebSocketHandler({
         // Replay cached scrollback so the new peer sees previous output
         for (const chunk of existing.scrollback) {
           try {
-            const tagged = Buffer.allocUnsafe(1 + chunk.length);
-            tagged[0] = 0x00;
-            chunk.copy(tagged, 1);
-            peer.send(new Uint8Array(tagged));
+            peer.send(tagOutput(chunk));
           } catch {
             break;
           }
@@ -142,10 +151,7 @@ export default defineWebSocketHandler({
           }
 
           // Broadcast to ALL connected peers
-          const tagged = Buffer.allocUnsafe(1 + chunk.length);
-          tagged[0] = 0x00;
-          chunk.copy(tagged, 1);
-          const data = new Uint8Array(tagged);
+          const data = tagOutput(chunk);
           for (const p of terminal.peers) {
             try {
               p.send(data);
@@ -188,8 +194,7 @@ export default defineWebSocketHandler({
   },
 
   async message(peer, message) {
-    const url = new URL(peer.request?.url ?? "", "http://localhost");
-    const sessionId = url.pathname.split("/").pop() ?? "";
+    const sessionId = getSessionId(peer);
     const terminal = activeTerminals.get(sessionId);
 
     if (!terminal) return;
@@ -252,9 +257,7 @@ export default defineWebSocketHandler({
   },
 
   close(peer) {
-    // Remove this peer from the set — stream stays alive for other peers / reconnection
-    const url = new URL(peer.request?.url ?? "", "http://localhost");
-    const sessionId = url.pathname.split("/").pop() ?? "";
+    const sessionId = getSessionId(peer);
     const terminal = activeTerminals.get(sessionId);
 
     if (terminal) {

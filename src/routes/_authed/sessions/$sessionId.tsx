@@ -75,7 +75,7 @@ function SessionViewPage() {
           navigate({ to: "/dashboard" });
         }
       } catch {
-        // handle error
+        // ignored — UI already shows stale state until next poll
       } finally {
         setActionLoading(false);
       }
