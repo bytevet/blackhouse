@@ -58,6 +58,30 @@ export const getSession = createServerFn({ method: "GET" })
     if (codingSession.userId !== session.user.id && session.user.role !== "admin") {
       throw new Error("Forbidden");
     }
+
+    // Auto-detect stopped containers: if DB says "running" but container is not, update status
+    if (codingSession.status === "running" && codingSession.containerId) {
+      try {
+        const docker = await getDockerClient();
+        const container = docker.getContainer(codingSession.containerId);
+        const info = await container.inspect();
+        if (!info.State.Running) {
+          await db
+            .update(schema.codingSessions)
+            .set({ status: "stopped", updatedAt: new Date() })
+            .where(eq(schema.codingSessions.id, data.id));
+          return { ...codingSession, status: "stopped" as const };
+        }
+      } catch {
+        // Container doesn't exist — mark as stopped
+        await db
+          .update(schema.codingSessions)
+          .set({ status: "stopped", updatedAt: new Date() })
+          .where(eq(schema.codingSessions.id, data.id));
+        return { ...codingSession, status: "stopped" as const };
+      }
+    }
+
     return codingSession;
   });
 

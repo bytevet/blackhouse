@@ -123,8 +123,19 @@ export default defineWebSocketHandler({
         }
       });
 
-      terminal.stream.on("end", () => {
+      terminal.stream.on("end", async () => {
         activeTerminals.delete(sessionId);
+
+        // Update session status to "stopped" when container process exits
+        try {
+          await db
+            .update(codingSessions)
+            .set({ status: "stopped", updatedAt: new Date() })
+            .where(eq(codingSessions.id, sessionId));
+        } catch {
+          // ignore DB errors during cleanup
+        }
+
         try {
           peer.close(1000, "Stream ended");
         } catch {
