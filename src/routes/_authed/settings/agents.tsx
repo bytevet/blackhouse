@@ -1,5 +1,5 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   listAgentConfigs,
   upsertAgentConfig,
@@ -47,6 +47,22 @@ export const Route = createFileRoute("/_authed/settings/agents")({
   },
   component: AgentsTab,
 });
+
+function BuildLogView({ content }: { content: string }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [content]);
+
+  return (
+    <div ref={scrollRef} className="max-h-96 overflow-auto rounded border bg-muted p-3">
+      <pre className="whitespace-pre-wrap font-mono text-xs">{content}</pre>
+    </div>
+  );
+}
 
 function BuildStatusBadge({
   status,
@@ -108,6 +124,7 @@ function AgentsTab() {
   const [buildLogDialogOpen, setBuildLogDialogOpen] = useState(false);
   const [buildLogContent, setBuildLogContent] = useState("");
   const [buildLogTitle, setBuildLogTitle] = useState("");
+  const [buildLogAgentId, setBuildLogAgentId] = useState<string | null>(null);
 
   // Form
   const [agentType, setAgentType] = useState("");
@@ -141,6 +158,10 @@ function AgentsTab() {
               imageBuildLog: status.imageBuildLog,
               lastBuiltAt: status.lastBuiltAt,
             };
+            // Auto-update the build log dialog if it's open for this agent
+            if (buildLogAgentId === bc.id && status.imageBuildLog) {
+              setBuildLogContent(status.imageBuildLog);
+            }
             if (status.imageBuildStatus !== "building") {
               hasChanges = true;
             }
@@ -224,6 +245,7 @@ function AgentsTab() {
   };
 
   const handleBuild = async (agentConfigId: string) => {
+    const config = configs.find((c: AgentConfig) => c.id === agentConfigId);
     await buildAgentImage({ data: { agentConfigId } });
     // Immediately update local state to show building
     setConfigs((prev) =>
@@ -231,6 +253,11 @@ function AgentsTab() {
         c.id === agentConfigId ? { ...c, imageBuildStatus: "building", imageBuildLog: null } : c,
       ),
     );
+    // Auto-open build log dialog
+    setBuildLogTitle(`Build Log: ${config?.displayName || config?.agentType || "Agent"}`);
+    setBuildLogContent("Build started...");
+    setBuildLogAgentId(agentConfigId);
+    setBuildLogDialogOpen(true);
   };
 
   const handleLoadDefault = async () => {
@@ -241,6 +268,7 @@ function AgentsTab() {
   const openBuildLog = (config: AgentConfig) => {
     setBuildLogTitle(`Build Log: ${config.displayName || config.agentType}`);
     setBuildLogContent(config.imageBuildLog || "No build log available.");
+    setBuildLogAgentId(config.id);
     setBuildLogDialogOpen(true);
   };
 
@@ -280,11 +308,7 @@ function AgentsTab() {
                     <BuildStatusBadge
                       status={c.imageBuildStatus}
                       lastBuiltAt={c.lastBuiltAt}
-                      onClick={
-                        c.imageBuildStatus === "built" || c.imageBuildStatus === "failed"
-                          ? () => openBuildLog(c)
-                          : undefined
-                      }
+                      onClick={c.imageBuildStatus !== "none" ? () => openBuildLog(c) : undefined}
                     />
                   </TableCell>
                   <TableCell className="text-right">
@@ -397,15 +421,25 @@ function AgentsTab() {
       </Dialog>
 
       {/* Build Log Dialog */}
-      <Dialog open={buildLogDialogOpen} onOpenChange={setBuildLogDialogOpen}>
+      <Dialog
+        open={buildLogDialogOpen}
+        onOpenChange={(open) => {
+          setBuildLogDialogOpen(open);
+          if (!open) setBuildLogAgentId(null);
+        }}
+      >
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>{buildLogTitle}</DialogTitle>
-            <DialogDescription>Docker image build output.</DialogDescription>
+            <DialogDescription>
+              {buildLogAgentId &&
+              configs.find((c: AgentConfig) => c.id === buildLogAgentId)?.imageBuildStatus ===
+                "building"
+                ? "Build in progress — logs update automatically."
+                : "Docker image build output."}
+            </DialogDescription>
           </DialogHeader>
-          <div className="max-h-96 overflow-auto rounded border bg-muted p-3">
-            <pre className="whitespace-pre-wrap font-mono text-xs">{buildLogContent}</pre>
-          </div>
+          <BuildLogView content={buildLogContent} />
           <DialogFooter>
             <Button variant="outline" onClick={() => setBuildLogDialogOpen(false)}>
               Close
