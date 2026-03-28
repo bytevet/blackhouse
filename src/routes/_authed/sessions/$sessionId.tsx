@@ -170,18 +170,18 @@ function SessionViewPage() {
 
       {/* Main content */}
       {explorerOpen ? (
-        <ResizablePanelGroup direction="horizontal" className="flex-1">
-          <ResizablePanel defaultSize={60} minSize={20} order={1}>
+        <ResizablePanelGroup orientation="horizontal" className="flex-1">
+          <ResizablePanel defaultSize={60} minSize={20}>
             <TerminalPanel sessionId={session.id} status={session.status} />
           </ResizablePanel>
           <ResizableHandle withHandle />
-          <ResizablePanel defaultSize={40} minSize={15} maxSize={80} order={2}>
+          <ResizablePanel defaultSize={40} minSize={15}>
             <Tabs
               value={explorerTab}
               onValueChange={setExplorerTab}
               className="flex h-full flex-col"
             >
-              <TabsList className="w-full shrink-0 justify-start border-b bg-transparent px-2">
+              <TabsList variant="line" className="w-full">
                 <TabsTrigger value="files" className="text-xs">
                   File Explorer
                 </TabsTrigger>
@@ -191,9 +191,9 @@ function SessionViewPage() {
                 </TabsTrigger>
               </TabsList>
 
-              <TabsContent value="files" className="m-0 flex-1 overflow-hidden">
-                <ResizablePanelGroup direction="horizontal" className="h-full">
-                  <ResizablePanel defaultSize={35} minSize={20} maxSize={50} order={1}>
+              <TabsContent value="files" className="flex-1 overflow-hidden">
+                <ResizablePanelGroup orientation="horizontal" className="h-full">
+                  <ResizablePanel defaultSize={35} minSize={20}>
                     <div className="h-full overflow-auto">
                       <FileExplorer
                         sessionId={session.id}
@@ -203,7 +203,7 @@ function SessionViewPage() {
                     </div>
                   </ResizablePanel>
                   <ResizableHandle withHandle />
-                  <ResizablePanel defaultSize={65} minSize={30} order={2}>
+                  <ResizablePanel defaultSize={65} minSize={20}>
                     <div className="h-full overflow-auto">
                       {selectedFile ? (
                         <FileViewer sessionId={session.id} filePath={selectedFile} />
