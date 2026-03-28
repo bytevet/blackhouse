@@ -4,31 +4,59 @@ Coding agent management platform — spawn and manage Docker-containerized codin
 
 ## Tech Stack
 
-- **Framework**: TanStack Start (full-stack SSR with file-based routing)
+- **Framework**: TanStack Start (full-stack SSR, file-based routing, middleware, Zod validation)
+- **Forms**: TanStack Form + shadcn/ui Field components
 - **Database**: PostgreSQL + Drizzle ORM
 - **Auth**: Better Auth (admin plugin, username plugin, GitHub OAuth)
 - **UI**: shadcn/ui (base-mira style, mist color) + Tailwind CSS v4
-- **Docker**: dockerode for container lifecycle
-- **Terminal**: xterm.js + WebSocket via Nitro
+- **Docker**: dockerode for container lifecycle + per-agent preset Dockerfiles
+- **Terminal**: xterm.js + binary WebSocket protocol via Nitro
 - **Testing**: Vitest (unit) + Playwright (e2e)
 
 ## Project Structure
 
 ```
 src/
-├── components/     # React components (app-sidebar, terminal, file-explorer, etc.)
-│   └── ui/         # shadcn/ui components — DO NOT modify these
-├── db/             # Drizzle schema and connection
-├── lib/            # Shared utilities (auth, docker, utils, session-status)
-├── mcp/            # MCP result server (injected into containers)
-├── routes/         # TanStack file-based routes
-│   ├── _authed/    # Auth-protected routes (dashboard, templates, settings, sessions)
-│   └── api/        # API routes (auth, health, sessions)
-├── server/         # Server functions (sessions, templates, settings, files, terminal)
-server/             # Nitro server routes (WebSocket terminal handler)
-tests/
-├── e2e/            # Playwright e2e tests
-└── unit/           # Vitest unit tests
+├── components/        # React components
+│   ├── ui/            # shadcn/ui components — DO NOT modify
+│   ├── app-header.tsx # Header nav bar
+│   ├── terminal.tsx   # xterm.js terminal (dynamic import, binary protocol)
+│   ├── file-explorer.tsx
+│   ├── file-viewer.tsx
+│   └── result-viewer.tsx
+├── db/                # Drizzle schema (schema.ts) and connection (index.ts)
+├── lib/               # Shared utilities
+│   ├── agent-presets.ts  # Preset configs (Claude Code, Gemini, Codex, Custom)
+│   ├── auth-server.ts    # getServerSession (createServerFn for route guards)
+│   ├── auth-client.ts    # Client-side auth hooks
+│   ├── session-status.ts # Status badge colors
+│   ├── time.ts           # timeAgo() — NOT in utils.ts (shadcn overwrites it)
+│   └── docker.ts         # Docker client singleton
+├── mcp/               # MCP result server (injected into containers)
+├── routes/
+│   ├── __root.tsx     # Root route (auth context, error/notFound components)
+│   ├── _authed.tsx    # Auth guard layout (redirects to /login?redirect=)
+│   ├── _authed/
+│   │   ├── dashboard.tsx
+│   │   ├── sessions/$sessionId.tsx  # Terminal + resizable file explorer
+│   │   ├── settings.tsx             # Layout with sub-route nav
+│   │   ├── settings/{profile,agents,docker,users}.tsx
+│   │   ├── templates.tsx            # Layout with sub-route nav
+│   │   └── templates/{mine,public}.tsx
+│   ├── login.tsx
+│   └── api/           # API routes (auth, health, sessions/result)
+├── server/
+│   ├── middleware.ts   # authMiddleware + adminMiddleware (createMiddleware)
+│   ├── sessions.ts     # Session CRUD + Docker container lifecycle
+│   ├── templates.ts    # Template CRUD
+│   ├── settings.ts     # Agent configs, Docker config, user management
+│   └── files.ts        # File explorer via Docker exec
+server/
+└── routes/api/terminal/[sessionId].ts  # WebSocket terminal (binary protocol, multi-peer)
+dockerfiles/           # Per-agent preset Dockerfiles
+scripts/
+├── seed.ts            # DB seed (admin user + agent presets)
+└── session-entrypoint.sh  # Container entrypoint (git clone, agent start, bash fallback)
 ```
 
 ## Pre-Commit Requirements
@@ -36,7 +64,7 @@ tests/
 **Before every commit, you MUST run these two commands and ensure they pass:**
 
 1. `npm run format:check` — Prettier formatting check
-2. `npm test` — Vitest unit tests (66 tests)
+2. `npm test` — Vitest unit tests
 
 If formatting fails, run `npm run format` to auto-fix, then re-stage.
 
@@ -50,7 +78,7 @@ npm run format       # Format code (prettier)
 npm run format:check # Check formatting
 npx playwright test  # Run e2e tests (requires dev server)
 npm run db:push      # Push schema to database
-npm run db:seed      # Seed default data
+npm run db:seed      # Seed default data (admin user + agent presets)
 npm run db:studio    # Open Drizzle Studio
 ```
 
@@ -58,26 +86,35 @@ npm run db:studio    # Open Drizzle Studio
 
 - Use shadcn/ui components exclusively — never create custom UI primitives
 - Use `@/` path alias for all imports (maps to `src/`)
-- Server functions use `createServerFn` from `@tanstack/react-start`
-- Callers pass data as `{ data: { ... } }` to server functions with `inputValidator`
-- Auth helpers are centralized in `src/lib/auth-server.ts` (`requireSession`, `requireAdmin`, `requireSessionOwnership`)
-- Use types from `src/db/schema.ts` (`CodingSession`, `Template`, `AgentConfig`, `User`, `SessionStatus`)
-- Session status styles are in `src/lib/session-status.ts`
-- `timeAgo()` utility is in `src/lib/time.ts` (NOT in utils.ts — shadcn init overwrites utils.ts)
-- CSS variables for theming are in `src/index.css` — border overrides must be unlayered (not in `@layer base`) to beat Tailwind v4 preflight
-- All pages must be responsive — use `hidden sm:table-cell` for table columns, `md:flex-row` for layout switches
+- Server functions use `createServerFn` with `.middleware([authMiddleware])` and `.inputValidator(zodSchema)`
+- Auth middleware is in `src/server/middleware.ts` — use `authMiddleware` or `adminMiddleware`
+- Each server function handler receives `{ data, context }` where `context.session` comes from middleware
+- Forms use `useForm` from `@tanstack/react-form` with `Field`/`FieldLabel`/`FieldError` from shadcn
+- Use types from `src/db/schema.ts` (`CodingSession`, `Template`, `AgentConfig`, `User`)
+- Agent presets are in `src/lib/agent-presets.ts` (Claude Code, Gemini, Codex, Custom)
+- `timeAgo()` is in `src/lib/time.ts` (NOT in utils.ts — shadcn init overwrites utils.ts)
+- CSS variables for theming are in `src/index.css`
+- All pages must be responsive
+- Dangerous actions (stop, destroy, delete) must have confirmation dialogs
+
+## Terminal WebSocket Protocol
+
+Binary frame protocol — all messages have a type byte prefix:
+
+- `0x00` = terminal data (stdin/stdout)
+- `0x01` = resize command (client → server, payload: `cols:rows`)
+
+Server broadcasts to all connected peers (multi-tab support). 256KB scrollback buffer replayed on reconnect.
 
 ## Do Not Modify (shadcn/ui managed files)
 
-These files are generated and managed by shadcn/ui. Do not edit them manually — they will be overwritten by `npx shadcn init` or `npx shadcn add`.
-
-- `src/lib/utils.ts` — only contains `cn()`, managed by shadcn. Put custom utilities in separate files (e.g. `src/lib/time.ts`).
-- `src/components/ui/*` — all files in this directory are shadcn/ui components. Never modify them directly.
+- `src/lib/utils.ts` — only contains `cn()`, managed by shadcn
+- `src/components/ui/*` — all shadcn/ui components
 
 ## shadcn/ui Usage Rules
 
-- **Trust shadcn/ui components** — they work correctly. If something isn't working, the issue is in how you're using them, not in the components.
-- **Never modify `src/components/ui/*`** — these are managed by shadcn. Never add forwardRef wrappers, change props, or alter behavior.
-- **Never create custom alternatives** — don't build custom drag handles, custom selects, or any component that replaces a shadcn/ui component.
-- **Read the docs first** — before using or debugging a shadcn component, fetch the latest docs from https://ui.shadcn.com using Context7. Don't guess the API.
+- **Trust shadcn/ui components** — they work correctly. If something isn't working, the issue is in how you're using them.
+- **Never modify `src/components/ui/*`** — never add forwardRef wrappers, change props, or alter behavior.
+- **Never create custom alternatives** — don't build custom drag handles, selects, or components that replace shadcn/ui.
+- **Read the docs first** — fetch latest docs from https://ui.shadcn.com using Context7 before using or debugging.
 - **Ask the user if stuck** — don't attempt multiple workarounds. If two attempts fail, ask.
