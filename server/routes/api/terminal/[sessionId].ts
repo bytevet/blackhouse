@@ -114,11 +114,14 @@ export default defineWebSocketHandler({
         activeTerminals.set(sessionId, terminal);
       }
 
+      // Track if this is a fresh attach (not reuse) to filter init metadata
+      const isFreshAttach = !existing || existing.stream.destroyed;
+      let isFirstChunk = isFreshAttach;
+
       // Pipe container output → WebSocket (tagged with 0x00 prefix)
-      let isFirstChunk = true;
       terminal.stream.on("data", (chunk: Buffer) => {
         try {
-          // Filter Docker attach initialization metadata (first chunk may contain JSON options)
+          // Filter Docker attach initialization metadata (only on fresh attach, first chunk)
           if (isFirstChunk) {
             isFirstChunk = false;
             const str = chunk.toString("utf-8").trim();
@@ -155,6 +158,14 @@ export default defineWebSocketHandler({
           // already closed
         }
       });
+      // Send an empty line to trigger a fresh prompt (attach doesn't replay history)
+      setTimeout(() => {
+        try {
+          terminal.stream.write("\n");
+        } catch {
+          // ignore
+        }
+      }, 200);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to attach to container";
       peer.send(`[Error: ${msg}]`);
