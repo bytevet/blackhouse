@@ -16,7 +16,10 @@ function generateEntrypoint(opts: {
 
   if (opts.gitRepoUrl) {
     const branch = opts.gitBranch ?? "main";
-    lines.push(`git clone --branch "${branch}" "${opts.gitRepoUrl}" /workspace`);
+    // Skip clone if repo already exists (e.g. after container restart)
+    lines.push(`if [ ! -d "/workspace/.git" ]; then`);
+    lines.push(`  git clone --branch "${branch}" "${opts.gitRepoUrl}" /workspace`);
+    lines.push(`fi`);
     lines.push("cd /workspace");
   } else {
     lines.push("mkdir -p /workspace && cd /workspace");
@@ -384,8 +387,26 @@ export const restartSession = createServerFn({ method: "POST" })
 
       // Use restart() which works regardless of container state (exited, stopped, etc.)
       await container.restart({ t: 5 });
+
+      // Wait briefly then verify container is actually running
+      await new Promise((r) => setTimeout(r, 1000));
+      const postInfo = await container.inspect().catch(() => null);
+      if (!postInfo || !postInfo.State.Running) {
+        // Container exited immediately after restart (entrypoint failed)
+        await db
+          .update(schema.codingSessions)
+          .set({ status: "stopped", updatedAt: new Date() })
+          .where(eq(schema.codingSessions.id, data.id));
+        throw new Error(
+          "Container exited immediately after restart. The entrypoint script may have failed. Please destroy this session and create a new one.",
+        );
+      }
     } catch (err) {
-      if (err instanceof Error && err.message.includes("Container no longer exists")) {
+      if (
+        err instanceof Error &&
+        (err.message.includes("Container no longer exists") ||
+          err.message.includes("Container exited immediately"))
+      ) {
         throw err;
       }
       throw new Error(
