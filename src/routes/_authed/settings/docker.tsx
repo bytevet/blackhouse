@@ -177,8 +177,10 @@ function DockerTab() {
                 </TableRow>
               ) : (
                 containers.map((c) => (
-                  <TableRow key={c.id}>
-                    <TableCell className="font-mono text-xs">{c.id?.slice(0, 12)}</TableCell>
+                  <TableRow key={c.containerId}>
+                    <TableCell className="font-mono text-xs">
+                      {c.containerId?.slice(0, 12)}
+                    </TableCell>
                     <TableCell className="max-w-40 truncate text-muted-foreground">
                       {c.image}
                     </TableCell>
