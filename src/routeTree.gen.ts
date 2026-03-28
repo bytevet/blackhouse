@@ -16,9 +16,12 @@ import { Route as ApiHealthRouteImport } from './routes/api/health'
 import { Route as AuthedTemplatesRouteImport } from './routes/_authed/templates'
 import { Route as AuthedSettingsRouteImport } from './routes/_authed/settings'
 import { Route as AuthedDashboardRouteImport } from './routes/_authed/dashboard'
+import { Route as AuthedTemplatesIndexRouteImport } from './routes/_authed/templates/index'
 import { Route as AuthedSettingsIndexRouteImport } from './routes/_authed/settings/index'
 import { Route as ApiSessionsResultRouteImport } from './routes/api/sessions/result'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as AuthedTemplatesPublicRouteImport } from './routes/_authed/templates/public'
+import { Route as AuthedTemplatesMineRouteImport } from './routes/_authed/templates/mine'
 import { Route as AuthedSettingsUsersRouteImport } from './routes/_authed/settings/users'
 import { Route as AuthedSettingsProfileRouteImport } from './routes/_authed/settings/profile'
 import { Route as AuthedSettingsDockerRouteImport } from './routes/_authed/settings/docker'
@@ -59,6 +62,11 @@ const AuthedDashboardRoute = AuthedDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AuthedRoute,
 } as any)
+const AuthedTemplatesIndexRoute = AuthedTemplatesIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AuthedTemplatesRoute,
+} as any)
 const AuthedSettingsIndexRoute = AuthedSettingsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -73,6 +81,16 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AuthedTemplatesPublicRoute = AuthedTemplatesPublicRouteImport.update({
+  id: '/public',
+  path: '/public',
+  getParentRoute: () => AuthedTemplatesRoute,
+} as any)
+const AuthedTemplatesMineRoute = AuthedTemplatesMineRouteImport.update({
+  id: '/mine',
+  path: '/mine',
+  getParentRoute: () => AuthedTemplatesRoute,
 } as any)
 const AuthedSettingsUsersRoute = AuthedSettingsUsersRouteImport.update({
   id: '/users',
@@ -105,31 +123,36 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/dashboard': typeof AuthedDashboardRoute
   '/settings': typeof AuthedSettingsRouteWithChildren
-  '/templates': typeof AuthedTemplatesRoute
+  '/templates': typeof AuthedTemplatesRouteWithChildren
   '/api/health': typeof ApiHealthRoute
   '/sessions/$sessionId': typeof AuthedSessionsSessionIdRoute
   '/settings/agents': typeof AuthedSettingsAgentsRoute
   '/settings/docker': typeof AuthedSettingsDockerRoute
   '/settings/profile': typeof AuthedSettingsProfileRoute
   '/settings/users': typeof AuthedSettingsUsersRoute
+  '/templates/mine': typeof AuthedTemplatesMineRoute
+  '/templates/public': typeof AuthedTemplatesPublicRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/sessions/result': typeof ApiSessionsResultRoute
   '/settings/': typeof AuthedSettingsIndexRoute
+  '/templates/': typeof AuthedTemplatesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/dashboard': typeof AuthedDashboardRoute
-  '/templates': typeof AuthedTemplatesRoute
   '/api/health': typeof ApiHealthRoute
   '/sessions/$sessionId': typeof AuthedSessionsSessionIdRoute
   '/settings/agents': typeof AuthedSettingsAgentsRoute
   '/settings/docker': typeof AuthedSettingsDockerRoute
   '/settings/profile': typeof AuthedSettingsProfileRoute
   '/settings/users': typeof AuthedSettingsUsersRoute
+  '/templates/mine': typeof AuthedTemplatesMineRoute
+  '/templates/public': typeof AuthedTemplatesPublicRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/sessions/result': typeof ApiSessionsResultRoute
   '/settings': typeof AuthedSettingsIndexRoute
+  '/templates': typeof AuthedTemplatesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -138,16 +161,19 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/_authed/dashboard': typeof AuthedDashboardRoute
   '/_authed/settings': typeof AuthedSettingsRouteWithChildren
-  '/_authed/templates': typeof AuthedTemplatesRoute
+  '/_authed/templates': typeof AuthedTemplatesRouteWithChildren
   '/api/health': typeof ApiHealthRoute
   '/_authed/sessions/$sessionId': typeof AuthedSessionsSessionIdRoute
   '/_authed/settings/agents': typeof AuthedSettingsAgentsRoute
   '/_authed/settings/docker': typeof AuthedSettingsDockerRoute
   '/_authed/settings/profile': typeof AuthedSettingsProfileRoute
   '/_authed/settings/users': typeof AuthedSettingsUsersRoute
+  '/_authed/templates/mine': typeof AuthedTemplatesMineRoute
+  '/_authed/templates/public': typeof AuthedTemplatesPublicRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/sessions/result': typeof ApiSessionsResultRoute
   '/_authed/settings/': typeof AuthedSettingsIndexRoute
+  '/_authed/templates/': typeof AuthedTemplatesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -163,24 +189,29 @@ export interface FileRouteTypes {
     | '/settings/docker'
     | '/settings/profile'
     | '/settings/users'
+    | '/templates/mine'
+    | '/templates/public'
     | '/api/auth/$'
     | '/api/sessions/result'
     | '/settings/'
+    | '/templates/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/login'
     | '/dashboard'
-    | '/templates'
     | '/api/health'
     | '/sessions/$sessionId'
     | '/settings/agents'
     | '/settings/docker'
     | '/settings/profile'
     | '/settings/users'
+    | '/templates/mine'
+    | '/templates/public'
     | '/api/auth/$'
     | '/api/sessions/result'
     | '/settings'
+    | '/templates'
   id:
     | '__root__'
     | '/'
@@ -195,9 +226,12 @@ export interface FileRouteTypes {
     | '/_authed/settings/docker'
     | '/_authed/settings/profile'
     | '/_authed/settings/users'
+    | '/_authed/templates/mine'
+    | '/_authed/templates/public'
     | '/api/auth/$'
     | '/api/sessions/result'
     | '/_authed/settings/'
+    | '/_authed/templates/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -260,6 +294,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedDashboardRouteImport
       parentRoute: typeof AuthedRoute
     }
+    '/_authed/templates/': {
+      id: '/_authed/templates/'
+      path: '/'
+      fullPath: '/templates/'
+      preLoaderRoute: typeof AuthedTemplatesIndexRouteImport
+      parentRoute: typeof AuthedTemplatesRoute
+    }
     '/_authed/settings/': {
       id: '/_authed/settings/'
       path: '/'
@@ -280,6 +321,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/api/auth/$'
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_authed/templates/public': {
+      id: '/_authed/templates/public'
+      path: '/public'
+      fullPath: '/templates/public'
+      preLoaderRoute: typeof AuthedTemplatesPublicRouteImport
+      parentRoute: typeof AuthedTemplatesRoute
+    }
+    '/_authed/templates/mine': {
+      id: '/_authed/templates/mine'
+      path: '/mine'
+      fullPath: '/templates/mine'
+      preLoaderRoute: typeof AuthedTemplatesMineRouteImport
+      parentRoute: typeof AuthedTemplatesRoute
     }
     '/_authed/settings/users': {
       id: '/_authed/settings/users'
@@ -339,17 +394,33 @@ const AuthedSettingsRouteWithChildren = AuthedSettingsRoute._addFileChildren(
   AuthedSettingsRouteChildren,
 )
 
+interface AuthedTemplatesRouteChildren {
+  AuthedTemplatesMineRoute: typeof AuthedTemplatesMineRoute
+  AuthedTemplatesPublicRoute: typeof AuthedTemplatesPublicRoute
+  AuthedTemplatesIndexRoute: typeof AuthedTemplatesIndexRoute
+}
+
+const AuthedTemplatesRouteChildren: AuthedTemplatesRouteChildren = {
+  AuthedTemplatesMineRoute: AuthedTemplatesMineRoute,
+  AuthedTemplatesPublicRoute: AuthedTemplatesPublicRoute,
+  AuthedTemplatesIndexRoute: AuthedTemplatesIndexRoute,
+}
+
+const AuthedTemplatesRouteWithChildren = AuthedTemplatesRoute._addFileChildren(
+  AuthedTemplatesRouteChildren,
+)
+
 interface AuthedRouteChildren {
   AuthedDashboardRoute: typeof AuthedDashboardRoute
   AuthedSettingsRoute: typeof AuthedSettingsRouteWithChildren
-  AuthedTemplatesRoute: typeof AuthedTemplatesRoute
+  AuthedTemplatesRoute: typeof AuthedTemplatesRouteWithChildren
   AuthedSessionsSessionIdRoute: typeof AuthedSessionsSessionIdRoute
 }
 
 const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedDashboardRoute: AuthedDashboardRoute,
   AuthedSettingsRoute: AuthedSettingsRouteWithChildren,
-  AuthedTemplatesRoute: AuthedTemplatesRoute,
+  AuthedTemplatesRoute: AuthedTemplatesRouteWithChildren,
   AuthedSessionsSessionIdRoute: AuthedSessionsSessionIdRoute,
 }
 
