@@ -26,7 +26,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Plus, Edit, Trash2 } from "lucide-react";
-import { timeAgo } from "@/lib/utils";
+import { timeAgo } from "@/lib/time";
 import type { Template } from "@/db/schema";
 
 export const Route = createFileRoute("/_authed/templates")({

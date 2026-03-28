@@ -60,7 +60,7 @@ import {
   Hammer,
   FileText,
 } from "lucide-react";
-import { timeAgo } from "@/lib/utils";
+import { timeAgo } from "@/lib/time";
 import type { AgentConfig, User as DbUser } from "@/db/schema";
 
 export const Route = createFileRoute("/_authed/settings")({

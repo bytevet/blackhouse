@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { cn, timeAgo } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { timeAgo } from "@/lib/time";
 
 describe("cn()", () => {
   it("should merge class names", () => {

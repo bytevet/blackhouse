@@ -63,6 +63,6 @@ npm run db:studio    # Open Drizzle Studio
 - Auth helpers are centralized in `src/lib/auth-server.ts` (`requireSession`, `requireAdmin`, `requireSessionOwnership`)
 - Use types from `src/db/schema.ts` (`CodingSession`, `Template`, `AgentConfig`, `User`, `SessionStatus`)
 - Session status styles are in `src/lib/session-status.ts`
-- `timeAgo()` utility is in `src/lib/utils.ts`
+- `timeAgo()` utility is in `src/lib/time.ts` (NOT in utils.ts — shadcn init overwrites utils.ts)
 - CSS variables for theming are in `src/index.css` — border overrides must be unlayered (not in `@layer base`) to beat Tailwind v4 preflight
 - All pages must be responsive — use `hidden sm:table-cell` for table columns, `md:flex-row` for layout switches

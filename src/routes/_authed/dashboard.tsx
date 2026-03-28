@@ -40,7 +40,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Plus, Eye, Square, Trash2, RotateCcw, GitBranch, Bot, FileText } from "lucide-react";
-import { timeAgo } from "@/lib/utils";
+import { timeAgo } from "@/lib/time";
 import type { CodingSession, Template, AgentConfig, SessionStatus } from "@/db/schema";
 import { sessionStatusConfig } from "@/lib/session-status";
 
