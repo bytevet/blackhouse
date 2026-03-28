@@ -134,7 +134,6 @@ export const createSession = createServerFn({ method: "POST" })
       template = templates[0];
     }
 
-    // Create DB record first (status = pending)
     const inserted = await db
       .insert(schema.codingSessions)
       .values({
@@ -218,7 +217,6 @@ export const createSession = createServerFn({ method: "POST" })
 
       await container.start();
 
-      // Update record with container ID and running status
       const updated = await db
         .update(schema.codingSessions)
         .set({

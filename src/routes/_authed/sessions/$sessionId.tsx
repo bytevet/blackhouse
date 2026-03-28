@@ -20,6 +20,8 @@ import {
   destroySession,
   restartSession,
 } from "@/server/sessions";
+import type { SessionStatus } from "@/db/schema";
+import { sessionStatusConfig } from "@/lib/session-status";
 
 export const Route = createFileRoute("/_authed/sessions/$sessionId")({
   loader: async ({ params }) => {
@@ -28,13 +30,6 @@ export const Route = createFileRoute("/_authed/sessions/$sessionId")({
   },
   component: SessionViewPage,
 });
-
-const statusColors: Record<string, string> = {
-  running: "bg-green-500/10 text-green-600 border-green-500/20",
-  stopped: "bg-yellow-500/10 text-yellow-600 border-yellow-500/20",
-  pending: "bg-blue-500/10 text-blue-600 border-blue-500/20",
-  destroyed: "bg-red-500/10 text-red-600 border-red-500/20",
-};
 
 function SessionViewPage() {
   const { session: initialSession } = Route.useLoaderData();
@@ -109,7 +104,7 @@ function SessionViewPage() {
         </Badge>
         <Badge
           variant="outline"
-          className={statusColors[session.status] ?? ""}
+          className={sessionStatusConfig[session.status as SessionStatus]?.className ?? ""}
         >
           {session.status}
         </Badge>

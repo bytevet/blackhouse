@@ -32,6 +32,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Plus, Edit, Trash2 } from "lucide-react";
 import { timeAgo } from "@/lib/utils";
+import type { Template } from "@/db/schema";
 
 export const Route = createFileRoute("/_authed/templates")({
   loader: async () => {
@@ -54,8 +55,8 @@ function TemplatesPage() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [editingTemplate, setEditingTemplate] = useState<any>(null);
-  const [deletingTemplate, setDeletingTemplate] = useState<any>(null);
+  const [editingTemplate, setEditingTemplate] = useState<Template | null>(null);
+  const [deletingTemplate, setDeletingTemplate] = useState<Template | null>(null);
   const [saving, setSaving] = useState(false);
 
   // Form state
@@ -87,7 +88,7 @@ function TemplatesPage() {
     setDialogOpen(true);
   };
 
-  const openEdit = (template: any) => {
+  const openEdit = (template: Template) => {
     setEditingTemplate(template);
     setName(template.name);
     setDescription(template.description || "");
@@ -96,7 +97,7 @@ function TemplatesPage() {
     setDialogOpen(true);
   };
 
-  const openDelete = (template: any) => {
+  const openDelete = (template: Template) => {
     setDeletingTemplate(template);
     setDeleteDialogOpen(true);
   };
@@ -140,10 +141,10 @@ function TemplatesPage() {
     await refreshTemplates();
   };
 
-  const isOwner = (template: any) =>
+  const isOwner = (template: Template) =>
     template.userId === session?.user?.id;
 
-  const renderTemplateCard = (template: any) => (
+  const renderTemplateCard = (template: Template) => (
     <Card key={template.id} size="sm">
       <CardHeader>
         <CardTitle className="flex items-center justify-between gap-2">

@@ -50,6 +50,8 @@ import {
   FileText,
 } from "lucide-react";
 import { timeAgo } from "@/lib/utils";
+import type { CodingSession, Template, AgentConfig, SessionStatus } from "@/db/schema";
+import { sessionStatusConfig } from "@/lib/session-status";
 
 export const Route = createFileRoute("/_authed/dashboard")({
   loader: async () => {
@@ -62,30 +64,6 @@ export const Route = createFileRoute("/_authed/dashboard")({
   },
   component: DashboardPage,
 });
-
-type StatusType = "running" | "stopped" | "pending" | "destroyed";
-
-const statusConfig: Record<
-  StatusType,
-  { className: string; label: string }
-> = {
-  running: {
-    className: "border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-400",
-    label: "Running",
-  },
-  stopped: {
-    className: "border-yellow-500/30 bg-yellow-500/10 text-yellow-700 dark:text-yellow-400",
-    label: "Stopped",
-  },
-  pending: {
-    className: "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-400",
-    label: "Pending",
-  },
-  destroyed: {
-    className: "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400",
-    label: "Destroyed",
-  },
-};
 
 function DashboardPage() {
   const { sessions: initialSessions, templates, agentConfigs } =
@@ -139,18 +117,8 @@ function DashboardPage() {
     }
   };
 
-  const handleStop = async (id: string) => {
-    await stopSession({ data: { id } });
-    await refreshSessions();
-  };
-
-  const handleDestroy = async (id: string) => {
-    await destroySession({ data: { id } });
-    await refreshSessions();
-  };
-
-  const handleRestart = async (id: string) => {
-    await restartSession({ data: { id } });
+  const handleSessionAction = async (id: string, action: typeof stopSession | typeof destroySession | typeof restartSession) => {
+    await action({ data: { id } });
     await refreshSessions();
   };
 
@@ -158,7 +126,7 @@ function DashboardPage() {
     isAdmin && showAll
       ? sessions
       : sessions.filter(
-          (s: any) => s.userId === session?.user?.id
+          (s: CodingSession) => s.userId === session?.user?.id
         );
 
   return (
@@ -201,7 +169,7 @@ function DashboardPage() {
                     <SelectValue placeholder="Select an agent" />
                   </SelectTrigger>
                   <SelectContent>
-                    {agentConfigs.map((ac: any) => (
+                    {agentConfigs.map((ac: AgentConfig) => (
                       <SelectItem key={ac.id} value={ac.id}>
                         {ac.displayName || ac.agentType}
                       </SelectItem>
@@ -237,7 +205,7 @@ function DashboardPage() {
                     <SelectValue placeholder="None" />
                   </SelectTrigger>
                   <SelectContent>
-                    {templates.map((t: any) => (
+                    {templates.map((t: Template) => (
                       <SelectItem key={t.id} value={t.id}>
                         {t.name}
                       </SelectItem>
@@ -277,9 +245,9 @@ function DashboardPage() {
         </p>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {filteredSessions.map((s: any) => {
-            const status = (s.status as StatusType) || "pending";
-            const config = statusConfig[status] || statusConfig.pending;
+          {filteredSessions.map((s: CodingSession) => {
+            const status = (s.status as SessionStatus) || "pending";
+            const config = sessionStatusConfig[status] || sessionStatusConfig.pending;
             return (
               <Card key={s.id} size="sm">
                 <CardHeader>
@@ -323,7 +291,7 @@ function DashboardPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => handleStop(s.id)}
+                      onClick={() => handleSessionAction(s.id, stopSession)}
                     >
                       <Square className="size-3" />
                       Stop
@@ -333,7 +301,7 @@ function DashboardPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => handleRestart(s.id)}
+                      onClick={() => handleSessionAction(s.id, restartSession)}
                     >
                       <RotateCcw className="size-3" />
                       Restart
@@ -343,7 +311,7 @@ function DashboardPage() {
                     <Button
                       variant="destructive"
                       size="sm"
-                      onClick={() => handleDestroy(s.id)}
+                      onClick={() => handleSessionAction(s.id, destroySession)}
                     >
                       <Trash2 className="size-3" />
                     </Button>

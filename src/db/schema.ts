@@ -136,6 +136,23 @@ export const dockerConfigs = pgTable("docker_configs", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// --- Inferred types ---
+
+export type CodingSession = typeof codingSessions.$inferSelect;
+export type Template = typeof templates.$inferSelect;
+export type AgentConfig = typeof agentConfigs.$inferSelect;
+export type User = typeof user.$inferSelect;
+
+export const SESSION_STATUSES = [
+  "pending",
+  "running",
+  "stopped",
+  "destroyed",
+] as const;
+export type SessionStatus = (typeof SESSION_STATUSES)[number];
+
+export type UserRole = "admin" | "user";
+
 // --- Relations ---
 
 export const userRelations = relations(user, ({ many }) => ({

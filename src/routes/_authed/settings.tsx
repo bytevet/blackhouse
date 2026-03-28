@@ -56,6 +56,7 @@ import {
   User,
 } from "lucide-react";
 import { timeAgo } from "@/lib/utils";
+import type { AgentConfig, User as DbUser } from "@/db/schema";
 
 export const Route = createFileRoute("/_authed/settings")({
   loader: async () => {
@@ -238,7 +239,7 @@ function AgentsTab() {
   const { agentConfigs: initial } = Route.useLoaderData();
   const [configs, setConfigs] = useState(initial);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editing, setEditing] = useState<any>(null);
+  const [editing, setEditing] = useState<AgentConfig | null>(null);
   const [saving, setSaving] = useState(false);
 
   // Form
@@ -271,7 +272,7 @@ function AgentsTab() {
     setDialogOpen(true);
   };
 
-  const openEdit = (config: any) => {
+  const openEdit = (config: AgentConfig) => {
     setEditing(config);
     setAgentType(config.agentType || "");
     setDisplayName(config.displayName || "");
@@ -289,7 +290,7 @@ function AgentsTab() {
     if (!agentType.trim() || !displayName.trim()) return;
     setSaving(true);
     try {
-      let parsedExtraArgs: any = undefined;
+      let parsedExtraArgs: Record<string, unknown> | undefined = undefined;
       if (extraArgs.trim()) {
         try {
           parsedExtraArgs = JSON.parse(extraArgs.trim());
@@ -351,7 +352,7 @@ function AgentsTab() {
               </TableCell>
             </TableRow>
           ) : (
-            configs.map((c: any) => (
+            configs.map((c: AgentConfig) => (
               <TableRow key={c.id}>
                 <TableCell>{c.agentType}</TableCell>
                 <TableCell>{c.displayName}</TableCell>
@@ -480,9 +481,9 @@ function AgentsTab() {
 // ── Docker Tab ───────────────────────────────────────────────────────────────
 
 function DockerTab() {
-  const [dockerStatus, setDockerStatus] = useState<any>(null);
-  const [dockerConfig, setDockerConfig] = useState<any>(null);
-  const [containers, setContainers] = useState<any[]>([]);
+  const [dockerStatus, setDockerStatus] = useState<{ connected: boolean; version?: string } | null>(null);
+  const [dockerConfig, setDockerConfig] = useState<{ socketPath?: string; host?: string; port?: number } | null>(null);
+  const [containers, setContainers] = useState<{ id: string; image: string; status: string; sessionName?: string; createdAt?: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -627,7 +628,7 @@ function DockerTab() {
                 </TableCell>
               </TableRow>
             ) : (
-              containers.map((c: any) => (
+              containers.map((c) => (
                 <TableRow key={c.id}>
                   <TableCell className="font-mono text-xs">
                     {c.id?.slice(0, 12)}
@@ -657,11 +658,11 @@ function DockerTab() {
 // ── Users Tab ────────────────────────────────────────────────────────────────
 
 function UsersTab() {
-  const [users, setUsers] = useState<any[]>([]);
+  const [users, setUsers] = useState<DbUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [deletingUser, setDeletingUser] = useState<any>(null);
+  const [deletingUser, setDeletingUser] = useState<DbUser | null>(null);
   const [creating, setCreating] = useState(false);
 
   // Form
@@ -760,7 +761,7 @@ function UsersTab() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {users.map((u: any) => (
+          {users.map((u) => (
             <TableRow key={u.id}>
               <TableCell>{u.name}</TableCell>
               <TableCell className="text-muted-foreground">{u.email}</TableCell>
