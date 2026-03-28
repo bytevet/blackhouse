@@ -6,7 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Install base tools in a single layer
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl git wget unzip jq openssh-client ca-certificates dumb-init \
-    build-essential python3 python3-pip python3-venv \
+    locales build-essential python3 python3-pip python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
 ARG NODE_MAJOR_VER=22

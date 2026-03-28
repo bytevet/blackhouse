@@ -149,6 +149,9 @@ export const createSession = createServerFn({ method: "POST" })
 
     // Build environment variables for the container
     const env: string[] = [
+      "TERM=xterm-256color",
+      "LANG=C.UTF-8",
+      "LC_ALL=C.UTF-8",
       `SESSION_ID=${codingSession.id}`,
       `SESSION_NAME=${data.name}`,
       `BLACKHOUSE_URL=${process.env.BETTER_AUTH_URL || "http://host.docker.internal:3000"}`,

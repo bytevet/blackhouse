@@ -15,7 +15,6 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
     if (status !== "running") return;
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    // Extract auth token from cookies for WebSocket auth
     const tokenMatch = document.cookie.match(/better-auth\.session_token=([^;]+)/);
     const tokenParam = tokenMatch ? `?token=${encodeURIComponent(tokenMatch[1])}` : "";
     const ws = new WebSocket(
@@ -62,35 +61,61 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
     let terminal: InstanceType<typeof import("@xterm/xterm").Terminal> | null = null;
 
     (async () => {
-      // Dynamic import to avoid SSR issues (xterm is browser-only)
-      const [{ Terminal }, { FitAddon }, { WebLinksAddon }] = await Promise.all([
-        import("@xterm/xterm"),
-        import("@xterm/addon-fit"),
-        import("@xterm/addon-web-links"),
-      ]);
-      // Also load CSS
+      const [{ Terminal }, { FitAddon }, { WebLinksAddon }, { Unicode11Addon }] = await Promise.all(
+        [
+          import("@xterm/xterm"),
+          import("@xterm/addon-fit"),
+          import("@xterm/addon-web-links"),
+          import("@xterm/addon-unicode11"),
+        ],
+      );
       await import("@xterm/xterm/css/xterm.css");
 
       if (disposed || !containerRef.current) return;
 
       terminal = new Terminal({
-        fontFamily: "'JetBrains Mono Variable', monospace",
+        fontFamily: "'JetBrains Mono Variable', 'JetBrains Mono', monospace",
         fontSize: 13,
-        lineHeight: 1.4,
+        lineHeight: 1.0,
+        letterSpacing: 0,
         cursorBlink: true,
+        cursorStyle: "bar",
+        allowProposedApi: true,
+        scrollback: 10000,
         theme: {
           background: "#0a0a0a",
-          foreground: "#e4e4e7",
-          cursor: "#e4e4e7",
-          selectionBackground: "#27272a",
+          foreground: "#d4d4d8",
+          cursor: "#d4d4d8",
+          cursorAccent: "#0a0a0a",
+          selectionBackground: "#3f3f46",
+          selectionForeground: "#fafafa",
+          black: "#18181b",
+          red: "#ef4444",
+          green: "#22c55e",
+          yellow: "#eab308",
+          blue: "#3b82f6",
+          magenta: "#a855f7",
+          cyan: "#06b6d4",
+          white: "#d4d4d8",
+          brightBlack: "#52525b",
+          brightRed: "#f87171",
+          brightGreen: "#4ade80",
+          brightYellow: "#facc15",
+          brightBlue: "#60a5fa",
+          brightMagenta: "#c084fc",
+          brightCyan: "#22d3ee",
+          brightWhite: "#fafafa",
         },
       });
 
       const fitAddon = new FitAddon();
       const webLinksAddon = new WebLinksAddon();
+      const unicode11Addon = new Unicode11Addon();
 
       terminal.loadAddon(fitAddon);
       terminal.loadAddon(webLinksAddon);
+      terminal.loadAddon(unicode11Addon);
+      terminal.unicode.activeVersion = "11";
       terminal.open(containerRef.current);
 
       terminalRef.current = terminal;
@@ -119,7 +144,6 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
 
       connect();
 
-      // Store cleanup for the async context
       return () => {
         resizeObserver.disconnect();
         terminal?.dispose();
@@ -141,5 +165,5 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
     );
   }
 
-  return <div ref={containerRef} className="h-full w-full bg-[#0a0a0a] p-1" />;
+  return <div ref={containerRef} className="h-full w-full bg-[#0a0a0a]" />;
 }
