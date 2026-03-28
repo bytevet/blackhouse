@@ -153,36 +153,48 @@ export default defineWebSocketHandler({
 
     if (!terminal) return;
 
-    // Extract text from message (h3 WebSocket message can be string, Buffer, or Message object)
-    let text: string;
-    if (typeof message === "string") {
-      text = message;
-    } else if (Buffer.isBuffer(message)) {
-      text = message.toString("utf-8");
-    } else if (message && typeof message === "object" && "text" in message) {
-      text = (message as { text: () => string }).text();
+    // Convert message to raw bytes
+    let raw: Buffer;
+    if (Buffer.isBuffer(message)) {
+      raw = message;
+    } else if (typeof message === "string") {
+      raw = Buffer.from(message, "utf-8");
+    } else if (message instanceof ArrayBuffer || message instanceof Uint8Array) {
+      raw = Buffer.from(message);
+    } else if (message && typeof message === "object") {
+      // crossws Message object — try rawData first, then text()
+      const msg = message as { rawData?: ArrayBuffer | Uint8Array; text?: () => string };
+      if (msg.rawData) {
+        raw = Buffer.from(msg.rawData);
+      } else if (msg.text) {
+        raw = Buffer.from(msg.text(), "utf-8");
+      } else {
+        raw = Buffer.from(String(message), "utf-8");
+      }
     } else {
-      text = String(message);
+      raw = Buffer.from(String(message), "utf-8");
     }
 
-    // Check if it's a resize message (starts with '{' to avoid parsing non-JSON)
-    if (text.startsWith("{")) {
-      try {
-        const parsed = JSON.parse(text);
-        if (parsed.type === "resize" && parsed.cols && parsed.rows) {
-          await terminal.exec.resize({
-            w: parsed.cols,
-            h: parsed.rows,
-          });
+    // Resize messages: binary frame with prefix byte 0x01, payload "cols:rows"
+    if (raw.length > 1 && raw[0] === 0x01) {
+      const payload = raw.subarray(1).toString("utf-8");
+      const parts = payload.split(":");
+      if (parts.length === 2) {
+        const cols = parseInt(parts[0], 10);
+        const rows = parseInt(parts[1], 10);
+        if (cols > 0 && rows > 0) {
+          try {
+            await terminal.exec.resize({ w: cols, h: rows });
+          } catch {
+            // ignore resize errors
+          }
           return;
         }
-      } catch {
-        // Not valid JSON, fall through to terminal input
       }
     }
 
-    // Write raw input to the container's stdin
-    terminal.stream.write(text);
+    // Write terminal input to the container's stdin
+    terminal.stream.write(raw);
   },
 
   close(peer) {

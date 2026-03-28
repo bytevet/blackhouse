@@ -5,11 +5,34 @@ interface TerminalPanelProps {
   status: string;
 }
 
+// Resize message prefix byte (0x01) — distinguishes from terminal input
+const RESIZE_PREFIX = 0x01;
+
+function encodeResize(cols: number, rows: number): Uint8Array {
+  const payload = `${cols}:${rows}`;
+  const buf = new Uint8Array(1 + payload.length);
+  buf[0] = RESIZE_PREFIX;
+  for (let i = 0; i < payload.length; i++) buf[i + 1] = payload.charCodeAt(i);
+  return buf;
+}
+
 export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const sendResize = useCallback((cols: number, rows: number) => {
+    // Debounce: only send the last resize after 50ms of no changes
+    if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
+    resizeTimerRef.current = setTimeout(() => {
+      const ws = wsRef.current;
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(encodeResize(cols, rows));
+      }
+    }, 50);
+  }, []);
 
   const connect = useCallback(() => {
     if (status !== "running") return;
@@ -29,7 +52,7 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
       if (fitAddon) {
         const dims = fitAddon.proposeDimensions();
         if (dims) {
-          ws.send(JSON.stringify({ type: "resize", cols: dims.cols, rows: dims.rows }));
+          sendResize(dims.cols, dims.rows);
         }
       }
     };
@@ -52,7 +75,7 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
     ws.onerror = () => {
       terminalRef.current?.write("\r\n\x1b[31m[Connection error]\x1b[0m\r\n");
     };
-  }, [sessionId, status]);
+  }, [sessionId, status, sendResize]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -123,6 +146,7 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
 
       fitAddon.fit();
 
+      // Terminal input → WebSocket (text frames)
       terminal.onData((data) => {
         const ws = wsRef.current;
         if (ws?.readyState === WebSocket.OPEN) {
@@ -130,11 +154,9 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
         }
       });
 
+      // Terminal resize → WebSocket (binary frames with prefix byte)
       terminal.onResize(({ cols, rows }) => {
-        const ws = wsRef.current;
-        if (ws?.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: "resize", cols, rows }));
-        }
+        sendResize(cols, rows);
       });
 
       const resizeObserver = new ResizeObserver(() => {
@@ -152,10 +174,11 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
 
     return () => {
       disposed = true;
+      if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
       wsRef.current?.close();
       terminal?.dispose();
     };
-  }, [connect]);
+  }, [connect, sendResize]);
 
   if (status !== "running") {
     return (
