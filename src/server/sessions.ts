@@ -382,7 +382,8 @@ export const restartSession = createServerFn({ method: "POST" })
         )[0];
       }
 
-      await container.start();
+      // Use restart() which works regardless of container state (exited, stopped, etc.)
+      await container.restart({ t: 5 });
     } catch (err) {
       if (err instanceof Error && err.message.includes("Container no longer exists")) {
         throw err;

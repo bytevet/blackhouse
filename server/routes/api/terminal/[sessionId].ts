@@ -86,26 +86,40 @@ export default defineWebSocketHandler({
         existing.stream.removeAllListeners("data");
         existing.stream.removeAllListeners("end");
       } else {
-        // Create new exec session
+        // Create new exec session (retry up to 3 times for containers still starting)
         const docker = await getDockerClient();
         const container = docker.getContainer(result.containerId);
 
-        const exec = await container.exec({
-          Cmd: ["/bin/bash"],
-          AttachStdin: true,
-          AttachStdout: true,
-          AttachStderr: true,
-          Tty: true,
-        });
+        let lastErr: unknown;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            const exec = await container.exec({
+              Cmd: ["/bin/bash"],
+              AttachStdin: true,
+              AttachStdout: true,
+              AttachStderr: true,
+              Tty: true,
+            });
 
-        const stream = await exec.start({
-          hijack: true,
-          stdin: true,
-          Tty: true,
-        } as import("dockerode").ExecStartOptions);
+            const stream = await exec.start({
+              hijack: true,
+              stdin: true,
+              Tty: true,
+            } as import("dockerode").ExecStartOptions);
 
-        terminal = { stream, exec };
-        activeTerminals.set(sessionId, terminal);
+            terminal = { stream, exec };
+            activeTerminals.set(sessionId, terminal);
+            lastErr = null;
+            break;
+          } catch (err) {
+            lastErr = err;
+            // Wait 2s before retry (container may still be starting)
+            if (attempt < 2) {
+              await new Promise((r) => setTimeout(r, 2000));
+            }
+          }
+        }
+        if (lastErr) throw lastErr;
       }
 
       // Pipe container output → WebSocket
