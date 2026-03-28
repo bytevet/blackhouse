@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import type { ImperativePanelHandle } from "react-resizable-panels";
 import { Square, Play, Trash2, PanelRightOpen, PanelRightClose, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -38,6 +39,17 @@ function SessionViewPage() {
   const [explorerTab, setExplorerTab] = useState<string>("files");
   const [actionLoading, setActionLoading] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ type: "stop" | "destroy" } | null>(null);
+  const explorerPanelRef = useRef<ImperativePanelHandle>(null);
+
+  const toggleExplorer = useCallback(() => {
+    const panel = explorerPanelRef.current;
+    if (!panel) return;
+    if (explorerOpen) {
+      panel.collapse();
+    } else {
+      panel.expand();
+    }
+  }, [explorerOpen]);
 
   useEffect(() => {
     if (!session || session.status !== "running") return;
@@ -158,7 +170,7 @@ function SessionViewPage() {
               <span className="hidden sm:inline">Destroy</span>
             </Button>
           )}
-          <Button variant="ghost" size="icon-xs" onClick={() => setExplorerOpen(!explorerOpen)}>
+          <Button variant="ghost" size="icon-xs" onClick={toggleExplorer}>
             {explorerOpen ? (
               <PanelRightClose className="size-3.5" />
             ) : (
@@ -168,70 +180,76 @@ function SessionViewPage() {
         </div>
       </div>
 
-      {/* Main content */}
-      <div className="flex flex-1 overflow-hidden">
+      {/* Main content — both panels always mounted, explorer is collapsible */}
+      <ResizablePanelGroup direction="horizontal" className="flex-1">
         {/* Terminal */}
-        <div className={explorerOpen ? "flex-1 border-r" : "flex-1"}>
+        <ResizablePanel defaultSize={100} minSize={30} order={1}>
           <TerminalPanel sessionId={session.id} status={session.status} />
-        </div>
+        </ResizablePanel>
 
-        {/* Explorer panel */}
-        {explorerOpen && (
-          <div className="flex w-[480px] shrink-0 flex-col">
-            <Tabs
-              value={explorerTab}
-              onValueChange={setExplorerTab}
-              className="flex h-full flex-col"
-            >
-              <TabsList className="w-full shrink-0 justify-start border-b bg-transparent px-2">
-                <TabsTrigger value="files" className="text-xs">
-                  File Explorer
-                </TabsTrigger>
-                <TabsTrigger value="result" className="text-xs">
-                  Result
-                  {session.resultHtml && <span className="ml-1 size-1.5 rounded-full bg-primary" />}
-                </TabsTrigger>
-              </TabsList>
+        <ResizableHandle withHandle />
 
-              <TabsContent value="files" className="m-0 flex-1 overflow-hidden">
-                <ResizablePanelGroup direction="horizontal" className="h-full">
-                  <ResizablePanel defaultSize={35} minSize={20} maxSize={50}>
-                    <div className="h-full overflow-auto">
-                      <FileExplorer
-                        sessionId={session.id}
-                        onFileSelect={setSelectedFile}
-                        selectedFile={selectedFile}
-                      />
-                    </div>
-                  </ResizablePanel>
-                  <ResizableHandle withHandle />
-                  <ResizablePanel defaultSize={65} minSize={30}>
-                    <div className="h-full overflow-auto">
-                      {selectedFile ? (
-                        <FileViewer sessionId={session.id} filePath={selectedFile} />
-                      ) : (
-                        <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                          Select a file to view
-                        </div>
-                      )}
-                    </div>
-                  </ResizablePanel>
-                </ResizablePanelGroup>
-              </TabsContent>
+        {/* Explorer panel — starts collapsed, toggle via button */}
+        <ResizablePanel
+          ref={explorerPanelRef}
+          defaultSize={0}
+          minSize={20}
+          maxSize={60}
+          collapsible
+          collapsedSize={0}
+          order={2}
+          onCollapse={() => setExplorerOpen(false)}
+          onExpand={() => setExplorerOpen(true)}
+        >
+          <Tabs value={explorerTab} onValueChange={setExplorerTab} className="flex h-full flex-col">
+            <TabsList className="w-full shrink-0 justify-start border-b bg-transparent px-2">
+              <TabsTrigger value="files" className="text-xs">
+                File Explorer
+              </TabsTrigger>
+              <TabsTrigger value="result" className="text-xs">
+                Result
+                {session.resultHtml && <span className="ml-1 size-1.5 rounded-full bg-primary" />}
+              </TabsTrigger>
+            </TabsList>
 
-              <TabsContent value="result" className="m-0 flex-1 overflow-hidden">
-                {session.resultHtml ? (
-                  <ResultViewer html={session.resultHtml} />
-                ) : (
-                  <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                    No result yet. The coding agent can submit results via MCP.
+            <TabsContent value="files" className="m-0 flex-1 overflow-hidden">
+              <ResizablePanelGroup direction="horizontal" className="h-full">
+                <ResizablePanel defaultSize={35} minSize={20} maxSize={50} order={1}>
+                  <div className="h-full overflow-auto">
+                    <FileExplorer
+                      sessionId={session.id}
+                      onFileSelect={setSelectedFile}
+                      selectedFile={selectedFile}
+                    />
                   </div>
-                )}
-              </TabsContent>
-            </Tabs>
-          </div>
-        )}
-      </div>
+                </ResizablePanel>
+                <ResizableHandle withHandle />
+                <ResizablePanel defaultSize={65} minSize={30} order={2}>
+                  <div className="h-full overflow-auto">
+                    {selectedFile ? (
+                      <FileViewer sessionId={session.id} filePath={selectedFile} />
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+                        Select a file to view
+                      </div>
+                    )}
+                  </div>
+                </ResizablePanel>
+              </ResizablePanelGroup>
+            </TabsContent>
+
+            <TabsContent value="result" className="m-0 flex-1 overflow-hidden">
+              {session.resultHtml ? (
+                <ResultViewer html={session.resultHtml} />
+              ) : (
+                <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+                  No result yet. The coding agent can submit results via MCP.
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
+        </ResizablePanel>
+      </ResizablePanelGroup>
 
       {/* Confirm Stop / Destroy Dialog */}
       <Dialog open={!!confirmAction} onOpenChange={(open) => !open && setConfirmAction(null)}>
