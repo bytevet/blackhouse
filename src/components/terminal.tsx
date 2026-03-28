@@ -62,8 +62,18 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
       if (!terminal) return;
 
       if (event.data instanceof ArrayBuffer) {
-        terminal.write(new Uint8Array(event.data));
+        const bytes = new Uint8Array(event.data);
+        if (bytes.length === 0) return;
+        const type = bytes[0];
+        const payload = bytes.subarray(1);
+        if (type === 0x00) {
+          // Terminal data
+          terminal.write(payload);
+        }
+        // 0x02 = system info — ignore
+        // Other types — ignore
       } else {
+        // Plain text fallback
         terminal.write(event.data);
       }
     };
@@ -146,11 +156,15 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
 
       fitAddon.fit();
 
-      // Terminal input → WebSocket (text frames)
+      // Terminal input → WebSocket (binary frame with 0x00 prefix)
       terminal.onData((data) => {
         const ws = wsRef.current;
         if (ws?.readyState === WebSocket.OPEN) {
-          ws.send(data);
+          const encoded = new TextEncoder().encode(data);
+          const frame = new Uint8Array(1 + encoded.length);
+          frame[0] = 0x00;
+          frame.set(encoded, 1);
+          ws.send(frame);
         }
       });
 

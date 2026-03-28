@@ -114,10 +114,23 @@ export default defineWebSocketHandler({
         activeTerminals.set(sessionId, terminal);
       }
 
-      // Pipe container output → WebSocket
+      // Pipe container output → WebSocket (tagged with 0x00 prefix)
+      let isFirstChunk = true;
       terminal.stream.on("data", (chunk: Buffer) => {
         try {
-          peer.send(new Uint8Array(chunk));
+          // Filter Docker attach initialization metadata (first chunk may contain JSON options)
+          if (isFirstChunk) {
+            isFirstChunk = false;
+            const str = chunk.toString("utf-8").trim();
+            if (str.startsWith("{") && str.includes('"stream"')) {
+              return; // Skip Docker attach metadata
+            }
+          }
+          // Tag with 0x00 = terminal data
+          const tagged = Buffer.allocUnsafe(1 + chunk.length);
+          tagged[0] = 0x00;
+          chunk.copy(tagged, 1);
+          peer.send(new Uint8Array(tagged));
         } catch {
           // peer may have disconnected
         }
@@ -177,29 +190,40 @@ export default defineWebSocketHandler({
       raw = Buffer.from(String(message), "utf-8");
     }
 
-    // Resize messages: binary frame with prefix byte 0x01, payload "cols:rows"
-    if (raw.length > 1 && raw[0] === 0x01) {
-      const payload = raw.subarray(1).toString("utf-8");
-      const parts = payload.split(":");
-      if (parts.length === 2) {
-        const cols = parseInt(parts[0], 10);
-        const rows = parseInt(parts[1], 10);
-        if (cols > 0 && rows > 0) {
-          try {
-            // Use container.resize() instead of exec.resize()
-            const docker = await getDockerClient();
-            const container = docker.getContainer(terminal.containerId);
-            await container.resize({ h: rows, w: cols });
-          } catch {
-            // ignore resize errors
-          }
-          return;
-        }
-      }
-    }
+    if (raw.length === 0) return;
 
-    // Write terminal input to the container's stdin
-    terminal.stream.write(raw);
+    const type = raw[0];
+    const payload = raw.subarray(1);
+
+    switch (type) {
+      case 0x00: {
+        // Terminal input → write to container stdin
+        terminal.stream.write(payload);
+        break;
+      }
+      case 0x01: {
+        // Resize command → payload is "cols:rows"
+        const parts = payload.toString("utf-8").split(":");
+        if (parts.length === 2) {
+          const cols = parseInt(parts[0], 10);
+          const rows = parseInt(parts[1], 10);
+          if (cols > 0 && rows > 0) {
+            try {
+              const docker = await getDockerClient();
+              const container = docker.getContainer(terminal.containerId);
+              await container.resize({ h: rows, w: cols });
+            } catch {
+              // ignore resize errors
+            }
+          }
+        }
+        break;
+      }
+      default:
+        // Unknown type — write raw to stdin as fallback for plain text clients
+        terminal.stream.write(raw);
+        break;
+    }
   },
 
   close(peer) {
