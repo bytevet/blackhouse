@@ -4,9 +4,13 @@ import { db } from "../../../../src/db";
 import { codingSessions, session as authSession, user } from "../../../../src/db/schema";
 import { eq } from "drizzle-orm";
 
+const SCROLLBACK_LIMIT = 256 * 1024; // 256KB of recent output
+
 interface TerminalState {
   stream: NodeJS.ReadWriteStream;
   containerId: string;
+  scrollback: Buffer[];
+  scrollbackSize: number;
 }
 
 const activeTerminals = new Map<string, TerminalState>();
@@ -81,6 +85,18 @@ export default defineWebSocketHandler({
         // Detach old WebSocket listeners before attaching new ones
         existing.stream.removeAllListeners("data");
         existing.stream.removeAllListeners("end");
+
+        // Replay cached scrollback so the user sees previous output
+        for (const chunk of existing.scrollback) {
+          try {
+            const tagged = Buffer.allocUnsafe(1 + chunk.length);
+            tagged[0] = 0x00;
+            chunk.copy(tagged, 1);
+            peer.send(new Uint8Array(tagged));
+          } catch {
+            break;
+          }
+        }
       } else {
         // Attach to the container's main process (the entrypoint shell)
         // This connects to the SAME process every time — no new bash spawned
@@ -110,7 +126,7 @@ export default defineWebSocketHandler({
         }
         if (lastErr || !stream) throw lastErr || new Error("Failed to attach");
 
-        terminal = { stream, containerId: result.containerId };
+        terminal = { stream, containerId: result.containerId, scrollback: [], scrollbackSize: 0 };
         activeTerminals.set(sessionId, terminal);
       }
 
@@ -129,6 +145,14 @@ export default defineWebSocketHandler({
               return; // Skip Docker attach metadata
             }
           }
+          // Cache in scrollback ring buffer
+          terminal.scrollback.push(Buffer.from(chunk));
+          terminal.scrollbackSize += chunk.length;
+          while (terminal.scrollbackSize > SCROLLBACK_LIMIT && terminal.scrollback.length > 1) {
+            const removed = terminal.scrollback.shift()!;
+            terminal.scrollbackSize -= removed.length;
+          }
+
           // Tag with 0x00 = terminal data
           const tagged = Buffer.allocUnsafe(1 + chunk.length);
           tagged[0] = 0x00;
