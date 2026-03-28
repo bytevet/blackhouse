@@ -304,17 +304,9 @@ export const destroySession = createServerFn({ method: "POST" })
       }
     }
 
-    const updated = await db
-      .update(schema.codingSessions)
-      .set({
-        status: "destroyed",
-        containerId: null,
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.codingSessions.id, data.id))
-      .returning();
+    await db.delete(schema.codingSessions).where(eq(schema.codingSessions.id, data.id));
 
-    return updated[0];
+    return { success: true };
   });
 
 // ---------------------------------------------------------------------------
