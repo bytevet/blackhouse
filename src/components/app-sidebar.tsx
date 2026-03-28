@@ -1,5 +1,14 @@
 import { Link, useLocation } from "@tanstack/react-router";
-import { LayoutDashboard, FileText, Settings, LogOut, ChevronsUpDown } from "lucide-react";
+import {
+  LayoutDashboard,
+  FileText,
+  Settings,
+  LogOut,
+  ChevronsUpDown,
+  Sun,
+  Moon,
+  Monitor,
+} from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -18,8 +27,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { signOut, useSession } from "@/lib/auth-client";
+import { useTheme } from "@/hooks/use-theme";
 
 const navItems = [
   { title: "Dashboard", to: "/dashboard" as const, icon: LayoutDashboard },
@@ -27,9 +38,16 @@ const navItems = [
   { title: "Settings", to: "/settings" as const, icon: Settings },
 ];
 
+const themeOptions = [
+  { value: "light" as const, label: "Light", icon: Sun },
+  { value: "dark" as const, label: "Dark", icon: Moon },
+  { value: "system" as const, label: "System", icon: Monitor },
+];
+
 export function AppSidebar() {
   const { data: session } = useSession();
   const location = useLocation();
+  const { theme, setTheme } = useTheme();
   const user = session?.user;
 
   const initials = user?.name
@@ -84,6 +102,27 @@ export function AppSidebar() {
             <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
           </DropdownMenuTrigger>
           <DropdownMenuContent side="top" align="start" className="w-56">
+            <div className="px-2 py-1.5">
+              <p className="text-[10px] font-medium text-muted-foreground">Theme</p>
+              <div className="mt-1 flex gap-1">
+                {themeOptions.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setTheme(opt.value)}
+                    className={`flex flex-1 items-center justify-center gap-1 rounded-sm px-2 py-1 text-[10px] transition-colors ${
+                      theme === opt.value
+                        ? "bg-accent text-accent-foreground"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    }`}
+                  >
+                    <opt.icon className="size-3" />
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <Separator />
             <DropdownMenuItem
               onClick={() =>
                 signOut({ fetchOptions: { onSuccess: () => (window.location.href = "/login") } })
