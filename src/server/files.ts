@@ -1,6 +1,31 @@
 import { createServerFn } from "@tanstack/react-start";
+import { getRequest } from "@tanstack/react-start/server";
+import { auth } from "@/lib/auth";
+import { db } from "@/db";
+import * as schema from "@/db/schema";
+import { eq } from "drizzle-orm";
 import { getDockerClient } from "@/lib/docker";
-import { requireSessionOwnership } from "@/lib/auth-server";
+
+async function requireSession() {
+  const request = getRequest();
+  const session = await auth.api.getSession({ headers: request.headers });
+  if (!session) throw new Error("Unauthorized");
+  return session;
+}
+
+async function requireSessionOwnership(sessionId: string) {
+  const session = await requireSession();
+  const [codingSession] = await db
+    .select()
+    .from(schema.codingSessions)
+    .where(eq(schema.codingSessions.id, sessionId))
+    .limit(1);
+  if (!codingSession) throw new Error("Session not found");
+  if (codingSession.userId !== session.user.id && session.user.role !== "admin") {
+    throw new Error("Forbidden");
+  }
+  return { session, codingSession };
+}
 
 async function execInContainer(containerId: string, cmd: string[]): Promise<string> {
   const docker = await getDockerClient();
@@ -28,9 +53,7 @@ async function execInContainer(containerId: string, cmd: string[]): Promise<stri
 export const listFiles = createServerFn({ method: "GET" })
   .inputValidator((input: { sessionId: string; path: string }) => input)
   .handler(async ({ data }) => {
-    const { codingSession } = await requireSessionOwnership({
-      data: { sessionId: data.sessionId },
-    });
+    const { codingSession } = await requireSessionOwnership(data.sessionId);
     const output = await execInContainer(codingSession.containerId!, [
       "ls",
       "-la",
@@ -87,9 +110,7 @@ export const listFiles = createServerFn({ method: "GET" })
 export const readFile = createServerFn({ method: "GET" })
   .inputValidator((input: { sessionId: string; path: string }) => input)
   .handler(async ({ data }) => {
-    const { codingSession } = await requireSessionOwnership({
-      data: { sessionId: data.sessionId },
-    });
+    const { codingSession } = await requireSessionOwnership(data.sessionId);
     const content = await execInContainer(codingSession.containerId!, ["cat", data.path]);
     return content;
   });
@@ -97,9 +118,7 @@ export const readFile = createServerFn({ method: "GET" })
 export const getGitStatus = createServerFn({ method: "GET" })
   .inputValidator((input: { sessionId: string }) => input)
   .handler(async ({ data }) => {
-    const { codingSession } = await requireSessionOwnership({
-      data: { sessionId: data.sessionId },
-    });
+    const { codingSession } = await requireSessionOwnership(data.sessionId);
     const output = await execInContainer(codingSession.containerId!, [
       "git",
       "-C",
@@ -113,9 +132,7 @@ export const getGitStatus = createServerFn({ method: "GET" })
 export const getFileDiff = createServerFn({ method: "GET" })
   .inputValidator((input: { sessionId: string; path: string }) => input)
   .handler(async ({ data }) => {
-    const { codingSession } = await requireSessionOwnership({
-      data: { sessionId: data.sessionId },
-    });
+    const { codingSession } = await requireSessionOwnership(data.sessionId);
     const output = await execInContainer(codingSession.containerId!, [
       "git",
       "diff",

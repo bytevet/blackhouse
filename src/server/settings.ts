@@ -5,10 +5,22 @@ import { db } from "@/db";
 import * as schema from "@/db/schema";
 import { eq, desc, inArray } from "drizzle-orm";
 import { getDockerClient, resetDockerClient } from "@/lib/docker";
-import { requireSession, requireAdmin } from "@/lib/auth-server";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as tar from "tar-stream";
+
+async function requireSession() {
+  const request = getRequest();
+  const session = await auth.api.getSession({ headers: request.headers });
+  if (!session) throw new Error("Unauthorized");
+  return session;
+}
+
+function requireAdmin(session: { user: { role?: string | null } }) {
+  if (session.user.role !== "admin") {
+    throw new Error("Forbidden: admin access required");
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Profile
