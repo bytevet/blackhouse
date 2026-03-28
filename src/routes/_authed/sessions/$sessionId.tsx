@@ -174,14 +174,14 @@ function SessionViewPage() {
         direction="horizontal"
         className="flex-1"
       >
-        <ResizablePanel defaultSize={explorerOpen ? 60 : 100} minSize={30} order={1}>
+        <ResizablePanel defaultSize={explorerOpen ? 60 : 100} minSize={20} order={1}>
           <TerminalPanel sessionId={session.id} status={session.status} />
         </ResizablePanel>
 
         {explorerOpen && (
           <>
             <ResizableHandle withHandle />
-            <ResizablePanel defaultSize={40} minSize={20} maxSize={70} order={2}>
+            <ResizablePanel defaultSize={40} minSize={15} maxSize={80} order={2}>
               <Tabs
                 value={explorerTab}
                 onValueChange={setExplorerTab}
