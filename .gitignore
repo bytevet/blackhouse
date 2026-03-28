@@ -11,6 +11,10 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
+.output
+.vinxi
+drizzle/*.sql
 
 # Editor directories and files
 .vscode/*

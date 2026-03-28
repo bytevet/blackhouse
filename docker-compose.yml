@@ -1,0 +1,45 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgresql://blackhouse:blackhouse@db:5432/blackhouse
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-dev-secret-key-not-for-production}
+      - BETTER_AUTH_URL=${BETTER_AUTH_URL:-http://localhost:3000}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - blackhouse
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      - POSTGRES_USER=blackhouse
+      - POSTGRES_PASSWORD=blackhouse
+      - POSTGRES_DB=blackhouse
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U blackhouse"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - blackhouse
+
+volumes:
+  postgres_data:
+
+networks:
+  blackhouse:
+    driver: bridge
