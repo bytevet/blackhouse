@@ -3,6 +3,7 @@ import { useState, useCallback, useEffect } from "react";
 import { Square, Play, Trash2, PanelRightOpen, PanelRightClose, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import {
   Dialog,
   DialogContent,
@@ -167,69 +168,75 @@ function SessionViewPage() {
         </div>
       </div>
 
-      {/* Main content — stack on mobile, side-by-side on desktop */}
-      <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
+      {/* Main content — resizable panels */}
+      <ResizablePanelGroup direction="horizontal" className="flex-1">
         {/* Terminal */}
-        <div
-          className={
-            explorerOpen ? "min-h-[200px] flex-1 border-b md:border-b-0 md:border-r" : "flex-1"
-          }
-        >
+        <ResizablePanel defaultSize={explorerOpen ? 60 : 100} minSize={30}>
           <TerminalPanel sessionId={session.id} status={session.status} />
-        </div>
+        </ResizablePanel>
 
-        {/* Explorer panel — full width on mobile, fixed on desktop */}
+        {/* Explorer panel */}
         {explorerOpen && (
-          <div className="flex w-full flex-col md:w-[480px]">
-            <Tabs
-              value={explorerTab}
-              onValueChange={setExplorerTab}
-              className="flex h-full flex-col"
-            >
-              <TabsList className="w-full shrink-0 justify-start border-b bg-transparent px-2">
-                <TabsTrigger value="files" className="text-xs">
-                  File Explorer
-                </TabsTrigger>
-                <TabsTrigger value="result" className="text-xs">
-                  Result
-                  {session.resultHtml && <span className="ml-1 size-1.5 rounded-full bg-primary" />}
-                </TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="files" className="m-0 flex-1 overflow-hidden">
-                <div className="flex h-full flex-col sm:flex-row">
-                  <div className="w-full shrink-0 border-b sm:w-40 sm:border-b-0 sm:border-r md:w-48 overflow-auto max-h-[200px] sm:max-h-none">
-                    <FileExplorer
-                      sessionId={session.id}
-                      onFileSelect={setSelectedFile}
-                      selectedFile={selectedFile}
-                    />
-                  </div>
-                  <div className="flex-1 overflow-auto">
-                    {selectedFile ? (
-                      <FileViewer sessionId={session.id} filePath={selectedFile} />
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                        Select a file to view
-                      </div>
+          <>
+            <ResizableHandle withHandle />
+            <ResizablePanel defaultSize={40} minSize={20} maxSize={60}>
+              <Tabs
+                value={explorerTab}
+                onValueChange={setExplorerTab}
+                className="flex h-full flex-col"
+              >
+                <TabsList className="w-full shrink-0 justify-start border-b bg-transparent px-2">
+                  <TabsTrigger value="files" className="text-xs">
+                    File Explorer
+                  </TabsTrigger>
+                  <TabsTrigger value="result" className="text-xs">
+                    Result
+                    {session.resultHtml && (
+                      <span className="ml-1 size-1.5 rounded-full bg-primary" />
                     )}
-                  </div>
-                </div>
-              </TabsContent>
+                  </TabsTrigger>
+                </TabsList>
 
-              <TabsContent value="result" className="m-0 flex-1 overflow-hidden">
-                {session.resultHtml ? (
-                  <ResultViewer html={session.resultHtml} />
-                ) : (
-                  <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                    No result yet. The coding agent can submit results via MCP.
-                  </div>
-                )}
-              </TabsContent>
-            </Tabs>
-          </div>
+                <TabsContent value="files" className="m-0 flex-1 overflow-hidden">
+                  <ResizablePanelGroup direction="horizontal">
+                    <ResizablePanel defaultSize={35} minSize={20} maxSize={50}>
+                      <div className="h-full overflow-auto">
+                        <FileExplorer
+                          sessionId={session.id}
+                          onFileSelect={setSelectedFile}
+                          selectedFile={selectedFile}
+                        />
+                      </div>
+                    </ResizablePanel>
+                    <ResizableHandle withHandle />
+                    <ResizablePanel defaultSize={65} minSize={30}>
+                      <div className="h-full overflow-auto">
+                        {selectedFile ? (
+                          <FileViewer sessionId={session.id} filePath={selectedFile} />
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+                            Select a file to view
+                          </div>
+                        )}
+                      </div>
+                    </ResizablePanel>
+                  </ResizablePanelGroup>
+                </TabsContent>
+
+                <TabsContent value="result" className="m-0 flex-1 overflow-hidden">
+                  {session.resultHtml ? (
+                    <ResultViewer html={session.resultHtml} />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+                      No result yet. The coding agent can submit results via MCP.
+                    </div>
+                  )}
+                </TabsContent>
+              </Tabs>
+            </ResizablePanel>
+          </>
         )}
-      </div>
+      </ResizablePanelGroup>
 
       {/* Confirm Stop / Destroy Dialog */}
       <Dialog open={!!confirmAction} onOpenChange={(open) => !open && setConfirmAction(null)}>
