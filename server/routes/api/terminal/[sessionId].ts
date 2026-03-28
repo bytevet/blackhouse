@@ -11,6 +11,7 @@ interface TerminalState {
   containerId: string;
   scrollback: Buffer[];
   scrollbackSize: number;
+  peers: Set<{ send: (data: Uint8Array | string) => void }>;
 }
 
 const activeTerminals = new Map<string, TerminalState>();
@@ -82,11 +83,8 @@ export default defineWebSocketHandler({
 
       if (existing && !existing.stream.destroyed) {
         terminal = existing;
-        // Detach old WebSocket listeners before attaching new ones
-        existing.stream.removeAllListeners("data");
-        existing.stream.removeAllListeners("end");
 
-        // Replay cached scrollback so the user sees previous output
+        // Replay cached scrollback so the new peer sees previous output
         for (const chunk of existing.scrollback) {
           try {
             const tagged = Buffer.allocUnsafe(1 + chunk.length);
@@ -98,8 +96,7 @@ export default defineWebSocketHandler({
           }
         }
       } else {
-        // Attach to the container's main process (the entrypoint shell)
-        // This connects to the SAME process every time — no new bash spawned
+        // Attach to the container's main process
         const docker = await getDockerClient();
         const container = docker.getContainer(result.containerId);
 
@@ -126,25 +123,28 @@ export default defineWebSocketHandler({
         }
         if (lastErr || !stream) throw lastErr || new Error("Failed to attach");
 
-        terminal = { stream, containerId: result.containerId, scrollback: [], scrollbackSize: 0 };
+        terminal = {
+          stream,
+          containerId: result.containerId,
+          scrollback: [],
+          scrollbackSize: 0,
+          peers: new Set(),
+        };
         activeTerminals.set(sessionId, terminal);
-      }
 
-      // Track if this is a fresh attach (not reuse) to filter init metadata
-      const isFreshAttach = !existing || existing.stream.destroyed;
-      let isFirstChunk = isFreshAttach;
+        // Set up stream listeners ONCE (shared across all peers)
+        let isFirstChunk = true;
 
-      // Pipe container output → WebSocket (tagged with 0x00 prefix)
-      terminal.stream.on("data", (chunk: Buffer) => {
-        try {
-          // Filter Docker attach initialization metadata (only on fresh attach, first chunk)
+        terminal.stream.on("data", (chunk: Buffer) => {
+          // Filter Docker attach initialization metadata
           if (isFirstChunk) {
             isFirstChunk = false;
             const str = chunk.toString("utf-8").trim();
             if (str.startsWith("{") && str.includes('"stream"')) {
-              return; // Skip Docker attach metadata
+              return;
             }
           }
+
           // Cache in scrollback ring buffer
           terminal.scrollback.push(Buffer.from(chunk));
           terminal.scrollbackSize += chunk.length;
@@ -153,35 +153,45 @@ export default defineWebSocketHandler({
             terminal.scrollbackSize -= removed.length;
           }
 
-          // Tag with 0x00 = terminal data
+          // Broadcast to ALL connected peers
           const tagged = Buffer.allocUnsafe(1 + chunk.length);
           tagged[0] = 0x00;
           chunk.copy(tagged, 1);
-          peer.send(new Uint8Array(tagged));
-        } catch {
-          // peer may have disconnected
-        }
-      });
+          const data = new Uint8Array(tagged);
+          for (const p of terminal.peers) {
+            try {
+              p.send(data);
+            } catch {
+              // peer may have disconnected
+            }
+          }
+        });
 
-      terminal.stream.on("end", async () => {
-        activeTerminals.delete(sessionId);
+        terminal.stream.on("end", async () => {
+          activeTerminals.delete(sessionId);
 
-        // Update session status to "stopped" when container process exits
-        try {
-          await db
-            .update(codingSessions)
-            .set({ status: "stopped", updatedAt: new Date() })
-            .where(eq(codingSessions.id, sessionId));
-        } catch {
-          // ignore DB errors during cleanup
-        }
+          try {
+            await db
+              .update(codingSessions)
+              .set({ status: "stopped", updatedAt: new Date() })
+              .where(eq(codingSessions.id, sessionId));
+          } catch {
+            // ignore
+          }
 
-        try {
-          peer.close(1000, "Stream ended");
-        } catch {
-          // already closed
-        }
-      });
+          for (const p of terminal.peers) {
+            try {
+              p.close(1000, "Stream ended");
+            } catch {
+              // already closed
+            }
+          }
+          terminal.peers.clear();
+        });
+      }
+
+      // Add this peer to the set
+      terminal.peers.add(peer);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to attach to container";
       peer.send(`[Error: ${msg}]`);
@@ -254,16 +264,13 @@ export default defineWebSocketHandler({
   },
 
   close(peer) {
-    // Don't destroy the stream on WebSocket close — keep the container process alive
-    // so the user can reconnect and see the same session
+    // Remove this peer from the set — stream stays alive for other peers / reconnection
     const url = new URL(peer.request?.url ?? "", "http://localhost");
     const sessionId = url.pathname.split("/").pop() ?? "";
     const terminal = activeTerminals.get(sessionId);
 
     if (terminal) {
-      // Only remove listeners, keep the stream alive for reconnection
-      terminal.stream.removeAllListeners("data");
-      terminal.stream.removeAllListeners("end");
+      terminal.peers.delete(peer);
     }
   },
 });
