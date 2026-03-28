@@ -3,20 +3,19 @@ FROM ubuntu:${UBUNTU_IMAGE_VER}
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install base tools
+# Install base tools in a single layer
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl git wget unzip jq openssh-client ca-certificates dumb-init \
+    build-essential python3 python3-pip python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
 ARG NODE_MAJOR_VER=22
-# Install Node.js
 RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR_VER:-22}.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Gemini CLI
+# Install Gemini CLI globally
 RUN npm install -g @google/gemini-cli
-
 
 # Create non-root workspace user
 RUN groupadd --gid 1001 workspace \

@@ -3,24 +3,26 @@ FROM ubuntu:${UBUNTU_IMAGE_VER}
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install base tools
+# Install base tools in a single layer
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl git wget unzip jq openssh-client ca-certificates dumb-init \
+    build-essential python3 python3-pip python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
 ARG NODE_MAJOR_VER=22
-# Install Node.js
 RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR_VER:-22}.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Claude Code via official installer
-RUN curl -fsSL https://claude.ai/install.sh | bash
-
-
-# Create non-root workspace user
+# Create non-root workspace user (before installing agent so it goes to user home)
 RUN groupadd --gid 1001 workspace \
     && useradd --uid 1001 --gid 1001 --shell /bin/bash --create-home workspace
+
+# Install Claude Code as workspace user via official installer
+USER workspace
+RUN curl -fsSL https://claude.ai/install.sh | bash
+ENV PATH="/home/workspace/.local/bin:${PATH}"
+USER root
 
 # Create workspace directory
 RUN mkdir -p /workspace && chown workspace:workspace /workspace
@@ -31,6 +33,7 @@ COPY scripts/session-entrypoint.sh /opt/blackhouse/entrypoint.sh
 RUN chmod +x /opt/blackhouse/entrypoint.sh
 
 USER workspace
+ENV PATH="/home/workspace/.local/bin:${PATH}"
 
 ENTRYPOINT ["dumb-init", "--", "/opt/blackhouse/entrypoint.sh"]
 CMD ["sleep", "infinity"]
