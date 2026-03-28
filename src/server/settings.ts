@@ -6,6 +6,9 @@ import * as schema from "@/db/schema";
 import { eq, desc, inArray } from "drizzle-orm";
 import { getDockerClient, resetDockerClient } from "@/lib/docker";
 import { requireSession, requireAdmin } from "@/lib/auth-server";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import * as tar from "tar-stream";
 
 // ---------------------------------------------------------------------------
 // Profile
@@ -61,29 +64,40 @@ export const upsertAgentConfig = createServerFn({ method: "POST" })
       displayName: string;
       apiKeyEncrypted?: string;
       apiKey?: string;
-      yoloMode?: boolean;
       defaultModel?: string;
       extraArgs?: unknown;
-      dockerImage?: string;
+      dockerfileContent?: string | null;
     }) => input,
   )
   .handler(async ({ data }) => {
     const session = await requireSession();
     requireAdmin(session);
 
-    const values = {
+    const values: Record<string, unknown> = {
       agentType: data.agentType,
       displayName: data.displayName,
       apiKeyEncrypted: data.apiKeyEncrypted ?? data.apiKey ?? null,
-      yoloMode: data.yoloMode ?? true,
       defaultModel: data.defaultModel ?? null,
       extraArgs: data.extraArgs ?? null,
-      dockerImage: data.dockerImage,
+      dockerfileContent: data.dockerfileContent ?? null,
       updatedAt: new Date(),
     };
 
     if (data.id) {
-      // Update existing
+      // Check if dockerfileContent changed – if so, reset build status
+      const existing = await db
+        .select()
+        .from(schema.agentConfigs)
+        .where(eq(schema.agentConfigs.id, data.id))
+        .limit(1);
+
+      if (
+        existing.length > 0 &&
+        existing[0].dockerfileContent !== (data.dockerfileContent ?? null)
+      ) {
+        values.imageBuildStatus = "none";
+      }
+
       const updated = await db
         .update(schema.agentConfigs)
         .set(values)
@@ -110,6 +124,152 @@ export const deleteAgentConfig = createServerFn({ method: "POST" })
 
     return { success: true };
   });
+
+// ---------------------------------------------------------------------------
+// Build Agent Image (admin only)
+// ---------------------------------------------------------------------------
+
+export const buildAgentImage = createServerFn({ method: "POST" })
+  .inputValidator((input: { agentConfigId: string }) => input)
+  .handler(async ({ data }) => {
+    const session = await requireSession();
+    requireAdmin(session);
+
+    const rows = await db
+      .select()
+      .from(schema.agentConfigs)
+      .where(eq(schema.agentConfigs.id, data.agentConfigId))
+      .limit(1);
+
+    if (rows.length === 0) throw new Error("Agent config not found");
+    const agentConfig = rows[0];
+
+    if (agentConfig.imageBuildStatus === "building") {
+      throw new Error("Build already in progress");
+    }
+
+    // Mark as building
+    await db
+      .update(schema.agentConfigs)
+      .set({ imageBuildStatus: "building", imageBuildLog: null, updatedAt: new Date() })
+      .where(eq(schema.agentConfigs.id, data.agentConfigId));
+
+    // Start async build (don't await)
+    const configId = data.agentConfigId;
+    const agentType = agentConfig.agentType;
+    const dockerfileContent = agentConfig.dockerfileContent;
+
+    (async () => {
+      try {
+        // Get dockerfile content
+        let dockerfile: string;
+        if (dockerfileContent) {
+          dockerfile = dockerfileContent;
+        } else {
+          dockerfile = fs.readFileSync(path.resolve(process.cwd(), "Dockerfile.session"), "utf-8");
+        }
+
+        // Read supporting files
+        const entrypointScript = fs.readFileSync(
+          path.resolve(process.cwd(), "scripts/session-entrypoint.sh"),
+          "utf-8",
+        );
+        const resultServer = fs.readFileSync(
+          path.resolve(process.cwd(), "src/mcp/result-server.ts"),
+          "utf-8",
+        );
+
+        // Create tar stream with build context
+        const pack = tar.pack();
+        pack.entry({ name: "Dockerfile" }, dockerfile);
+        pack.entry({ name: "scripts/session-entrypoint.sh" }, entrypointScript);
+        pack.entry({ name: "src/mcp/result-server.ts" }, resultServer);
+        pack.finalize();
+
+        const docker = await getDockerClient();
+        const tag = `blackhouse-agent-${agentType}:latest`;
+
+        const stream = await docker.buildImage(pack as unknown as NodeJS.ReadableStream, {
+          t: tag,
+        });
+
+        // Collect build output
+        const output = await new Promise<string>((resolve, reject) => {
+          const lines: string[] = [];
+          stream.on("data", (chunk: Buffer) => {
+            try {
+              const json = JSON.parse(chunk.toString());
+              if (json.stream) lines.push(json.stream);
+              if (json.error) reject(new Error(json.error));
+            } catch {
+              lines.push(chunk.toString());
+            }
+          });
+          stream.on("end", () => resolve(lines.join("")));
+          stream.on("error", reject);
+        });
+
+        await db
+          .update(schema.agentConfigs)
+          .set({
+            imageBuildStatus: "built",
+            lastBuiltAt: new Date(),
+            imageBuildLog: output,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.agentConfigs.id, configId));
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        await db
+          .update(schema.agentConfigs)
+          .set({
+            imageBuildStatus: "failed",
+            imageBuildLog: errorMessage,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.agentConfigs.id, configId));
+      }
+    })();
+
+    return { status: "building" };
+  });
+
+// ---------------------------------------------------------------------------
+// Get Agent Build Status
+// ---------------------------------------------------------------------------
+
+export const getAgentBuildStatus = createServerFn({ method: "GET" })
+  .inputValidator((input: { agentConfigId: string }) => input)
+  .handler(async ({ data }) => {
+    await requireSession();
+
+    const rows = await db
+      .select({
+        imageBuildStatus: schema.agentConfigs.imageBuildStatus,
+        imageBuildLog: schema.agentConfigs.imageBuildLog,
+        lastBuiltAt: schema.agentConfigs.lastBuiltAt,
+      })
+      .from(schema.agentConfigs)
+      .where(eq(schema.agentConfigs.id, data.agentConfigId))
+      .limit(1);
+
+    if (rows.length === 0) throw new Error("Agent config not found");
+
+    return rows[0];
+  });
+
+// ---------------------------------------------------------------------------
+// Get Default Dockerfile
+// ---------------------------------------------------------------------------
+
+export const getDefaultDockerfile = createServerFn({ method: "GET" }).handler(async () => {
+  const session = await requireSession();
+  requireAdmin(session);
+
+  const content = fs.readFileSync(path.resolve(process.cwd(), "Dockerfile.session"), "utf-8");
+
+  return content;
+});
 
 // ---------------------------------------------------------------------------
 // Docker Config (admin only)

@@ -115,10 +115,12 @@ describe("Database Schema", () => {
       expect(columns).toContain("agentType");
       expect(columns).toContain("displayName");
       expect(columns).toContain("apiKeyEncrypted");
-      expect(columns).toContain("yoloMode");
       expect(columns).toContain("defaultModel");
       expect(columns).toContain("extraArgs");
-      expect(columns).toContain("dockerImage");
+      expect(columns).toContain("dockerfileContent");
+      expect(columns).toContain("imageBuildStatus");
+      expect(columns).toContain("imageBuildLog");
+      expect(columns).toContain("lastBuiltAt");
       expect(columns).toContain("createdAt");
       expect(columns).toContain("updatedAt");
     });
@@ -180,6 +182,7 @@ describe("Database Schema", () => {
         skills: null,
         mcpConfig: null,
         isPublic: false,
+        yoloMode: true,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -192,10 +195,12 @@ describe("Database Schema", () => {
         agentType: "claude",
         displayName: "Claude Code",
         apiKeyEncrypted: null,
-        yoloMode: true,
         defaultModel: null,
         extraArgs: null,
-        dockerImage: "ubuntu:latest",
+        dockerfileContent: null,
+        imageBuildStatus: "none",
+        imageBuildLog: null,
+        lastBuiltAt: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       };

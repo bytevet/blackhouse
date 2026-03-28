@@ -108,6 +108,7 @@ export const templates = pgTable("templates", {
   skills: jsonb("skills"),
   mcpConfig: jsonb("mcp_config"),
   isPublic: boolean("is_public").notNull().default(false),
+  yoloMode: boolean("yolo_mode").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -117,10 +118,12 @@ export const agentConfigs = pgTable("agent_configs", {
   agentType: text("agent_type").notNull().unique(),
   displayName: text("display_name").notNull(),
   apiKeyEncrypted: text("api_key_encrypted"),
-  yoloMode: boolean("yolo_mode").notNull().default(true),
   defaultModel: text("default_model"),
   extraArgs: jsonb("extra_args"),
-  dockerImage: text("docker_image").notNull(),
+  dockerfileContent: text("dockerfile_content"),
+  imageBuildStatus: text("image_build_status").notNull().default("none"),
+  imageBuildLog: text("image_build_log"),
+  lastBuiltAt: timestamp("last_built_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

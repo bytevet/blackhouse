@@ -58,6 +58,7 @@ function TemplatesPage() {
   const [description, setDescription] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [isPublic, setIsPublic] = useState(false);
+  const [yoloMode, setYoloMode] = useState(true);
 
   useEffect(() => {
     setMyTemplates(initialMine);
@@ -79,6 +80,7 @@ function TemplatesPage() {
     setDescription("");
     setSystemPrompt("");
     setIsPublic(false);
+    setYoloMode(true);
     setDialogOpen(true);
   };
 
@@ -88,6 +90,7 @@ function TemplatesPage() {
     setDescription(template.description || "");
     setSystemPrompt(template.systemPrompt || "");
     setIsPublic(template.isPublic ?? false);
+    setYoloMode(template.yoloMode ?? true);
     setDialogOpen(true);
   };
 
@@ -108,6 +111,7 @@ function TemplatesPage() {
             description: description.trim(),
             systemPrompt: systemPrompt.trim(),
             isPublic,
+            yoloMode,
           },
         });
       } else {
@@ -117,6 +121,7 @@ function TemplatesPage() {
             description: description.trim(),
             systemPrompt: systemPrompt.trim(),
             isPublic,
+            yoloMode,
           },
         });
       }
@@ -142,9 +147,12 @@ function TemplatesPage() {
       <CardHeader>
         <CardTitle className="flex items-center justify-between gap-2">
           <span className="truncate">{template.name}</span>
-          <Badge variant="outline" className="shrink-0">
-            {template.isPublic ? "Public" : "Private"}
-          </Badge>
+          <span className="flex shrink-0 gap-1">
+            {template.yoloMode && <Badge className="shrink-0">Yolo</Badge>}
+            <Badge variant="outline" className="shrink-0">
+              {template.isPublic ? "Public" : "Private"}
+            </Badge>
+          </span>
         </CardTitle>
         {template.description && (
           <CardDescription className="line-clamp-2">{template.description}</CardDescription>
@@ -246,6 +254,12 @@ function TemplatesPage() {
             <div className="flex items-center gap-2">
               <Switch checked={isPublic} onCheckedChange={setIsPublic} size="sm" />
               <Label className="text-xs">Public template</Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch id="yolo-mode" checked={yoloMode} onCheckedChange={setYoloMode} size="sm" />
+              <Label htmlFor="yolo-mode" className="text-xs">
+                Yolo mode (auto-approve agent actions)
+              </Label>
             </div>
           </div>
           <DialogFooter>

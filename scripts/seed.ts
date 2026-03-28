@@ -92,21 +92,15 @@ async function seed() {
     {
       agentType: "claude-code",
       displayName: "Claude Code",
-      dockerImage: "blackhouse-session:latest",
-      yoloMode: true,
       defaultModel: "claude-sonnet-4-20250514",
     },
     {
       agentType: "codex",
       displayName: "OpenAI Codex CLI",
-      dockerImage: "blackhouse-session:latest",
-      yoloMode: true,
     },
     {
       agentType: "gemini",
       displayName: "Gemini CLI",
-      dockerImage: "blackhouse-session:latest",
-      yoloMode: true,
     },
   ];
 

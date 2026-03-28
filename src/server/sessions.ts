@@ -120,6 +120,12 @@ export const createSession = createServerFn({ method: "POST" })
 
     const agentConfig = agentConfigRows[0];
 
+    if (agentConfig.imageBuildStatus !== "built") {
+      throw new Error(`Agent "${agentConfig.displayName}" does not have a built Docker image`);
+    }
+
+    const imageName = `blackhouse-agent-${agentConfig.agentType}:latest`;
+
     // If template requested, load it
     let template: typeof schema.templates.$inferSelect | null = null;
     if (data.templateId) {
@@ -145,7 +151,7 @@ export const createSession = createServerFn({ method: "POST" })
         gitBranch: data.gitBranch ?? "main",
         templateId: data.templateId ?? null,
         agentType: agentConfig.agentType,
-        containerImage: agentConfig.dockerImage,
+        containerImage: imageName,
         status: "pending",
       })
       .returning();
@@ -165,7 +171,8 @@ export const createSession = createServerFn({ method: "POST" })
     if (agentConfig.defaultModel) {
       env.push(`AGENT_MODEL=${agentConfig.defaultModel}`);
     }
-    if (agentConfig.yoloMode) {
+    const yoloMode = template?.yoloMode ?? true;
+    if (yoloMode) {
       env.push("AGENT_YOLO=1");
     }
     if (agentConfig.extraArgs) {
@@ -183,28 +190,8 @@ export const createSession = createServerFn({ method: "POST" })
     try {
       const docker = await getDockerClient();
 
-      // Pull image if missing (best-effort, may already exist locally)
-      try {
-        await new Promise<void>((resolve, reject) => {
-          docker.pull(agentConfig.dockerImage, {}, (err, stream) => {
-            if (err) {
-              // Image may already exist locally
-              resolve();
-              return;
-            }
-            docker.modem.followProgress(
-              stream!,
-              () => resolve(),
-              () => {},
-            );
-          });
-        });
-      } catch {
-        // Ignore pull errors — image may already be available
-      }
-
       const container = await docker.createContainer({
-        Image: agentConfig.dockerImage,
+        Image: imageName,
         Env: env,
         Cmd: ["/bin/sh", "-c", entrypoint],
         Labels: {

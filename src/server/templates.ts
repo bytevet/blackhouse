@@ -68,6 +68,7 @@ export const createTemplate = createServerFn({ method: "POST" })
       skills?: unknown;
       mcpConfig?: unknown;
       isPublic?: boolean;
+      yoloMode?: boolean;
     }) => input,
   )
   .handler(async ({ data }) => {
@@ -83,6 +84,7 @@ export const createTemplate = createServerFn({ method: "POST" })
         skills: data.skills ?? null,
         mcpConfig: data.mcpConfig ?? null,
         isPublic: data.isPublic ?? false,
+        yoloMode: data.yoloMode ?? true,
       })
       .returning();
 
@@ -103,6 +105,7 @@ export const updateTemplate = createServerFn({ method: "POST" })
       skills?: unknown;
       mcpConfig?: unknown;
       isPublic?: boolean;
+      yoloMode?: boolean;
     }) => input,
   )
   .handler(async ({ data }) => {
@@ -130,6 +133,7 @@ export const updateTemplate = createServerFn({ method: "POST" })
     if (fields.skills !== undefined) updateData.skills = fields.skills;
     if (fields.mcpConfig !== undefined) updateData.mcpConfig = fields.mcpConfig;
     if (fields.isPublic !== undefined) updateData.isPublic = fields.isPublic;
+    if (fields.yoloMode !== undefined) updateData.yoloMode = fields.yoloMode;
 
     const updated = await db
       .update(schema.templates)

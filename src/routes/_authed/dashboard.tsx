@@ -161,8 +161,15 @@ function DashboardPage() {
                   </SelectTrigger>
                   <SelectContent>
                     {agentConfigs.map((ac: AgentConfig) => (
-                      <SelectItem key={ac.id} value={ac.id}>
+                      <SelectItem
+                        key={ac.id}
+                        value={ac.id}
+                        disabled={ac.imageBuildStatus !== "built"}
+                      >
                         {ac.displayName || ac.agentType}
+                        {ac.imageBuildStatus !== "built" && (
+                          <span className="ml-1 text-muted-foreground">(not built)</span>
+                        )}
                       </SelectItem>
                     ))}
                   </SelectContent>
