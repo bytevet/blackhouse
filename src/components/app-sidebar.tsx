@@ -62,7 +62,6 @@ export function AppSidebar() {
                   <SidebarMenuButton
                     isActive={location.pathname.startsWith(item.to)}
                     render={<Link to={item.to} />}
-                    nativeButton={false}
                   >
                     <item.icon className="shrink-0" />
                     <span className="truncate">{item.title}</span>
