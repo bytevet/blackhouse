@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthedRouteImport } from './routes/_authed'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiHealthRouteImport } from './routes/api/health'
 import { Route as AuthedTemplatesRouteImport } from './routes/_authed/templates'
 import { Route as AuthedSettingsRouteImport } from './routes/_authed/settings'
 import { Route as AuthedDashboardRouteImport } from './routes/_authed/dashboard'
@@ -31,6 +32,11 @@ const AuthedRoute = AuthedRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiHealthRoute = ApiHealthRouteImport.update({
+  id: '/api/health',
+  path: '/api/health',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthedTemplatesRoute = AuthedTemplatesRouteImport.update({
@@ -70,6 +76,7 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof AuthedDashboardRoute
   '/settings': typeof AuthedSettingsRoute
   '/templates': typeof AuthedTemplatesRoute
+  '/api/health': typeof ApiHealthRoute
   '/sessions/$sessionId': typeof AuthedSessionsSessionIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/sessions/result': typeof ApiSessionsResultRoute
@@ -80,6 +87,7 @@ export interface FileRoutesByTo {
   '/dashboard': typeof AuthedDashboardRoute
   '/settings': typeof AuthedSettingsRoute
   '/templates': typeof AuthedTemplatesRoute
+  '/api/health': typeof ApiHealthRoute
   '/sessions/$sessionId': typeof AuthedSessionsSessionIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/sessions/result': typeof ApiSessionsResultRoute
@@ -92,6 +100,7 @@ export interface FileRoutesById {
   '/_authed/dashboard': typeof AuthedDashboardRoute
   '/_authed/settings': typeof AuthedSettingsRoute
   '/_authed/templates': typeof AuthedTemplatesRoute
+  '/api/health': typeof ApiHealthRoute
   '/_authed/sessions/$sessionId': typeof AuthedSessionsSessionIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/sessions/result': typeof ApiSessionsResultRoute
@@ -104,6 +113,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/settings'
     | '/templates'
+    | '/api/health'
     | '/sessions/$sessionId'
     | '/api/auth/$'
     | '/api/sessions/result'
@@ -114,6 +124,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/settings'
     | '/templates'
+    | '/api/health'
     | '/sessions/$sessionId'
     | '/api/auth/$'
     | '/api/sessions/result'
@@ -125,6 +136,7 @@ export interface FileRouteTypes {
     | '/_authed/dashboard'
     | '/_authed/settings'
     | '/_authed/templates'
+    | '/api/health'
     | '/_authed/sessions/$sessionId'
     | '/api/auth/$'
     | '/api/sessions/result'
@@ -134,6 +146,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthedRoute: typeof AuthedRouteWithChildren
   LoginRoute: typeof LoginRoute
+  ApiHealthRoute: typeof ApiHealthRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiSessionsResultRoute: typeof ApiSessionsResultRoute
 }
@@ -159,6 +172,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/health': {
+      id: '/api/health'
+      path: '/api/health'
+      fullPath: '/api/health'
+      preLoaderRoute: typeof ApiHealthRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authed/templates': {
@@ -227,6 +247,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthedRoute: AuthedRouteWithChildren,
   LoginRoute: LoginRoute,
+  ApiHealthRoute: ApiHealthRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiSessionsResultRoute: ApiSessionsResultRoute,
 }

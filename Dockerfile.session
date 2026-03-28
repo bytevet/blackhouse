@@ -4,8 +4,8 @@ ARG AGENT_TYPE=claude-code
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install base tools
-RUN apt-get update && apt-get install -y \
+# Install base tools in a single layer
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
     wget \
@@ -13,15 +13,16 @@ RUN apt-get update && apt-get install -y \
     jq \
     openssh-client \
     ca-certificates \
+    dumb-init \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 22
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y nodejs \
+    && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python 3
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     python3-venv \
@@ -32,19 +33,25 @@ RUN if [ "$AGENT_TYPE" = "claude-code" ]; then \
         npm install -g @anthropic-ai/claude-code; \
     fi
 
-# Create workspace directory
-RUN mkdir -p /workspace
-WORKDIR /workspace
-
-# Copy MCP result server
+# Copy and build MCP result server (before workspace setup for better caching)
 COPY src/mcp/result-server.ts /opt/blackhouse/result-server.ts
 RUN cd /opt/blackhouse && npm init -y && npm install typescript @types/node \
     && npx tsc --target ES2022 --module nodenext --moduleResolution nodenext result-server.ts \
     || true
 
+# Create non-root workspace user
+RUN groupadd --gid 1001 workspace \
+    && useradd --uid 1001 --gid 1001 --shell /bin/bash --create-home workspace
+
+# Create workspace directory with correct ownership
+RUN mkdir -p /workspace && chown workspace:workspace /workspace
+WORKDIR /workspace
+
 # Entrypoint script
 COPY scripts/session-entrypoint.sh /opt/blackhouse/entrypoint.sh
 RUN chmod +x /opt/blackhouse/entrypoint.sh
 
-ENTRYPOINT ["/opt/blackhouse/entrypoint.sh"]
+USER workspace
+
+ENTRYPOINT ["dumb-init", "--", "/opt/blackhouse/entrypoint.sh"]
 CMD ["sleep", "infinity"]

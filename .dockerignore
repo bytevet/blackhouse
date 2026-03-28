@@ -1,0 +1,52 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+.output
+
+# Version control
+.git
+.gitignore
+
+# Environment files
+.env
+.env.*
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Test artifacts
+test-results
+playwright-report
+coverage
+
+# Tests (not needed in production image)
+tests
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
+vitest.config.*
+playwright.config.*
+
+# Documentation
+*.md
+LICENSE
+
+# Docker files (avoid recursive context)
+Dockerfile
+Dockerfile.*
+docker-compose*.yml
+.dockerignore
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Misc
+scripts
+*.log

@@ -16,10 +16,10 @@ fi
 
 # Configure MCP result server for the coding agent
 if [ -n "$SESSION_ID" ] && [ -n "$BLACKHOUSE_URL" ]; then
-  mkdir -p /root/.claude
+  mkdir -p "$HOME/.claude"
 
   # Create Claude Code MCP config
-  cat > /root/.claude/settings.json << EOF
+  cat > "$HOME/.claude/settings.json" << EOF
 {
   "mcpServers": {
     "blackhouse-result": {
