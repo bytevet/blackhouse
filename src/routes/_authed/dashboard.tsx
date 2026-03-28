@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
+import { useForm } from "@tanstack/react-form";
 import { useSession } from "@/lib/auth-client";
 import {
   listSessions,
@@ -39,6 +40,7 @@ import {
   SelectItem,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Field, FieldLabel, FieldError, FieldGroup } from "@/components/ui/field";
 import { Plus, Eye, Square, Trash2, RotateCcw, GitBranch, Bot, FileText } from "lucide-react";
 import { timeAgo } from "@/lib/time";
 import type { CodingSession, Template, AgentConfig, SessionStatus } from "@/db/schema";
@@ -75,12 +77,41 @@ function DashboardPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [creating, setCreating] = useState(false);
 
-  // Form state
-  const [name, setName] = useState("");
-  const [agentConfigId, setAgentConfigId] = useState<string>("");
-  const [gitRepoUrl, setGitRepoUrl] = useState("");
-  const [gitBranch, setGitBranch] = useState("main");
-  const [templateId, setTemplateId] = useState<string>("");
+  const form = useForm({
+    defaultValues: {
+      name: "",
+      agentConfigId: "",
+      gitRepoUrl: "",
+      gitBranch: "main",
+      templateId: "",
+    },
+    onSubmit: async ({ value }) => {
+      if (!value.name.trim() || !value.agentConfigId) return;
+      const selectedTemplate = templates.find((t: Template) => t.id === value.templateId);
+      if (selectedTemplate?.gitRequired && !value.gitRepoUrl.trim()) return;
+      setCreating(true);
+      try {
+        const newSession = await createSession({
+          data: {
+            name: value.name.trim(),
+            agentConfigId: value.agentConfigId,
+            gitRepoUrl: value.gitRepoUrl.trim() || undefined,
+            gitBranch: value.gitBranch.trim() || undefined,
+            templateId: value.templateId || undefined,
+          },
+        });
+        setDialogOpen(false);
+        form.reset();
+        if (newSession?.id) {
+          navigate({ to: "/sessions/$sessionId", params: { sessionId: newSession.id } });
+        } else {
+          await refreshSessions();
+        }
+      } finally {
+        setCreating(false);
+      }
+    },
+  });
 
   useEffect(() => {
     setSessions(initialSessions);
@@ -89,35 +120,6 @@ function DashboardPage() {
   const refreshSessions = async () => {
     const updated = await listSessions();
     setSessions(updated);
-  };
-
-  const handleCreate = async () => {
-    if (!name.trim() || !agentConfigId) return;
-    setCreating(true);
-    try {
-      const newSession = await createSession({
-        data: {
-          name: name.trim(),
-          agentConfigId,
-          gitRepoUrl: gitRepoUrl.trim() || undefined,
-          gitBranch: gitBranch.trim() || undefined,
-          templateId: templateId || undefined,
-        },
-      });
-      setDialogOpen(false);
-      setName("");
-      setAgentConfigId("");
-      setGitRepoUrl("");
-      setGitBranch("main");
-      setTemplateId("");
-      if (newSession?.id) {
-        navigate({ to: "/sessions/$sessionId", params: { sessionId: newSession.id } });
-      } else {
-        await refreshSessions();
-      }
-    } finally {
-      setCreating(false);
-    }
   };
 
   const handleSessionAction = async (
@@ -151,99 +153,171 @@ function DashboardPage() {
               <DialogTitle>Create New Session</DialogTitle>
               <DialogDescription>Start a new coding agent session.</DialogDescription>
             </DialogHeader>
-            <div className="grid gap-3">
-              <div className="grid gap-1.5">
-                <Label htmlFor="session-name">Name</Label>
-                <Input
-                  id="session-name"
-                  placeholder="My session"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label>Coding Agent</Label>
-                <Select value={agentConfigId} onValueChange={setAgentConfigId}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select an agent" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {agentConfigs.map((ac: AgentConfig) => (
-                      <SelectItem
-                        key={ac.id}
-                        value={ac.id}
-                        disabled={ac.imageBuildStatus !== "built"}
-                      >
-                        <span className="flex items-center gap-1.5">
-                          {ac.displayName}
-                          <Badge variant="outline" className="text-[10px] px-1 py-0">
-                            {ac.preset}
-                          </Badge>
-                        </span>
-                        {ac.imageBuildStatus !== "built" && (
-                          <span className="ml-1 text-muted-foreground">(not built)</span>
-                        )}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="git-repo">
-                  Git Repo URL{" "}
-                  {templates.find((t: Template) => t.id === templateId)?.gitRequired && (
-                    <span className="text-destructive">*</span>
-                  )}
-                </Label>
-                <Input
-                  id="git-repo"
-                  placeholder="https://github.com/user/repo"
-                  value={gitRepoUrl}
-                  onChange={(e) => setGitRepoUrl(e.target.value)}
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="git-branch">Git Branch</Label>
-                <Input
-                  id="git-branch"
-                  placeholder="main"
-                  value={gitBranch}
-                  onChange={(e) => setGitBranch(e.target.value)}
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label>Template</Label>
-                <Select
-                  value={templateId || "__none__"}
-                  onValueChange={(v) => setTemplateId(v === "__none__" ? "" : v)}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="None" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">None</SelectItem>
-                    {templates.map((t: Template) => (
-                      <SelectItem key={t.id} value={t.id}>
-                        {t.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+            <FieldGroup>
+              <form.Field
+                name="name"
+                validators={{
+                  onBlur: ({ value }) => (!value.trim() ? "Name is required" : undefined),
+                }}
+                children={(field) => {
+                  const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                  return (
+                    <Field data-invalid={isInvalid || undefined}>
+                      <FieldLabel>Name</FieldLabel>
+                      <Input
+                        placeholder="My session"
+                        value={field.state.value}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                        onBlur={field.handleBlur}
+                      />
+                      {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                    </Field>
+                  );
+                }}
+              />
+              <form.Field
+                name="agentConfigId"
+                validators={{
+                  onBlur: ({ value }) => (!value ? "Agent is required" : undefined),
+                }}
+                children={(field) => {
+                  const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                  return (
+                    <Field data-invalid={isInvalid || undefined}>
+                      <FieldLabel>Coding Agent</FieldLabel>
+                      <Select value={field.state.value} onValueChange={field.handleChange}>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Select an agent" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {agentConfigs.map((ac: AgentConfig) => (
+                            <SelectItem
+                              key={ac.id}
+                              value={ac.id}
+                              disabled={ac.imageBuildStatus !== "built"}
+                            >
+                              <span className="flex items-center gap-1.5">
+                                {ac.displayName}
+                                <Badge variant="outline" className="text-[10px] px-1 py-0">
+                                  {ac.preset}
+                                </Badge>
+                              </span>
+                              {ac.imageBuildStatus !== "built" && (
+                                <span className="ml-1 text-muted-foreground">(not built)</span>
+                              )}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                    </Field>
+                  );
+                }}
+              />
+              <form.Field
+                name="templateId"
+                children={(field) => (
+                  <Field>
+                    <FieldLabel>Template</FieldLabel>
+                    <Select
+                      value={field.state.value || "__none__"}
+                      onValueChange={(v) => field.handleChange(v === "__none__" ? "" : v)}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="None" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">None</SelectItem>
+                        {templates.map((t: Template) => (
+                          <SelectItem key={t.id} value={t.id}>
+                            {t.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                )}
+              />
+              <form.Subscribe
+                selector={(state) => state.values.templateId}
+                children={(templateId) => {
+                  const selectedTemplate = templates.find((t: Template) => t.id === templateId);
+                  const gitRequired = selectedTemplate?.gitRequired ?? false;
+                  return (
+                    <>
+                      <form.Field
+                        name="gitRepoUrl"
+                        validators={{
+                          onBlur: ({ value }) =>
+                            gitRequired && !value.trim()
+                              ? "Git URL is required for this template"
+                              : undefined,
+                        }}
+                        children={(field) => {
+                          const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                          return (
+                            <Field data-invalid={isInvalid || undefined}>
+                              <FieldLabel>
+                                Git Repo URL{" "}
+                                {gitRequired && <span className="text-destructive">*</span>}
+                              </FieldLabel>
+                              <Input
+                                placeholder="https://github.com/user/repo"
+                                value={field.state.value}
+                                onChange={(e) => field.handleChange(e.target.value)}
+                                onBlur={field.handleBlur}
+                              />
+                              {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                            </Field>
+                          );
+                        }}
+                      />
+                    </>
+                  );
+                }}
+              />
+              <form.Field
+                name="gitBranch"
+                children={(field) => (
+                  <Field>
+                    <FieldLabel>Git Branch</FieldLabel>
+                    <Input
+                      placeholder="main"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                    />
+                  </Field>
+                )}
+              />
+            </FieldGroup>
             <DialogFooter>
-              <Button
-                onClick={handleCreate}
-                disabled={
-                  !name.trim() ||
-                  !agentConfigId ||
-                  creating ||
-                  (!!templates.find((t: Template) => t.id === templateId)?.gitRequired &&
-                    !gitRepoUrl.trim())
-                }
-              >
-                {creating ? "Creating..." : "Create Session"}
-              </Button>
+              <form.Subscribe
+                selector={(state) => [state.canSubmit, state.isSubmitting, state.values]}
+                children={([canSubmit, isSubmitting, values]) => {
+                  const v = values as {
+                    name: string;
+                    agentConfigId: string;
+                    templateId: string;
+                    gitRepoUrl: string;
+                  };
+                  const selectedTemplate = templates.find((t: Template) => t.id === v.templateId);
+                  const gitMissing = selectedTemplate?.gitRequired && !v.gitRepoUrl.trim();
+                  return (
+                    <Button
+                      onClick={() => form.handleSubmit()}
+                      disabled={
+                        !v.name.trim() ||
+                        !v.agentConfigId ||
+                        !!gitMissing ||
+                        (isSubmitting as boolean) ||
+                        creating
+                      }
+                    >
+                      {creating ? "Creating..." : "Create Session"}
+                    </Button>
+                  );
+                }}
+              />
             </DialogFooter>
           </DialogContent>
         </Dialog>

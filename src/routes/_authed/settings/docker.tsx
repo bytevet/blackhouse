@@ -1,5 +1,7 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
+import { useForm } from "@tanstack/react-form";
+import { z } from "zod";
 import {
   getDockerConfig,
   updateDockerConfig,
@@ -9,8 +11,8 @@ import {
 import { getServerSession } from "@/lib/auth-server";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import {
   Table,
   TableHeader,
@@ -21,6 +23,12 @@ import {
 } from "@/components/ui/table";
 import { Save } from "lucide-react";
 import { timeAgo } from "@/lib/time";
+
+const dockerConfigSchema = z.object({
+  socketPath: z.string(),
+  host: z.string(),
+  port: z.string(),
+});
 
 export const Route = createFileRoute("/_authed/settings/docker")({
   beforeLoad: async () => {
@@ -36,21 +44,26 @@ function DockerTab() {
   const [dockerStatus, setDockerStatus] = useState<{ connected: boolean; version?: string } | null>(
     null,
   );
-  const [dockerConfig, setDockerConfig] = useState<{
-    socketPath?: string;
-    host?: string;
-    port?: number;
-  } | null>(null);
   const [containers, setContainers] = useState<
     { id: string; image: string; status: string; sessionName?: string; createdAt?: string }[]
   >([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
 
-  // Form
-  const [socketPath, setSocketPath] = useState("");
-  const [host, setHost] = useState("");
-  const [port, setPort] = useState("");
+  const form = useForm({
+    defaultValues: { socketPath: "", host: "", port: "" },
+    validators: { onSubmit: dockerConfigSchema },
+    onSubmit: async ({ value }) => {
+      await updateDockerConfig({
+        data: {
+          socketPath: value.socketPath.trim() || undefined,
+          host: value.host.trim() || undefined,
+          port: value.port ? parseInt(value.port, 10) : undefined,
+        },
+      });
+      const status = await getDockerStatus();
+      setDockerStatus(status);
+    },
+  });
 
   useEffect(() => {
     const load = async () => {
@@ -61,34 +74,16 @@ function DockerTab() {
           listContainers(),
         ]);
         setDockerStatus(status);
-        setDockerConfig(config);
         setContainers(containerList);
-        setSocketPath(config?.socketPath || "");
-        setHost(config?.host || "");
-        setPort(config?.port?.toString() || "");
+        form.setFieldValue("socketPath", config?.socketPath || "");
+        form.setFieldValue("host", config?.host || "");
+        form.setFieldValue("port", config?.port?.toString() || "");
       } finally {
         setLoading(false);
       }
     };
     load();
   }, []);
-
-  const handleSaveConfig = async () => {
-    setSaving(true);
-    try {
-      await updateDockerConfig({
-        data: {
-          socketPath: socketPath.trim() || undefined,
-          host: host.trim() || undefined,
-          port: port ? parseInt(port, 10) : undefined,
-        },
-      });
-      const status = await getDockerStatus();
-      setDockerStatus(status);
-    } finally {
-      setSaving(false);
-    }
-  };
 
   if (loading) {
     return (
@@ -119,40 +114,65 @@ function DockerTab() {
 
       <div className="max-w-md space-y-3">
         <h3 className="text-sm font-medium text-foreground">Configuration</h3>
-        <div className="grid gap-2">
-          <div className="grid gap-1.5">
-            <Label htmlFor="docker-socket">Socket Path</Label>
-            <Input
-              id="docker-socket"
-              placeholder="/var/run/docker.sock"
-              value={socketPath}
-              onChange={(e) => setSocketPath(e.target.value)}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            form.handleSubmit();
+          }}
+        >
+          <FieldGroup>
+            <form.Field
+              name="socketPath"
+              children={(field) => (
+                <Field>
+                  <FieldLabel>Socket Path</FieldLabel>
+                  <Input
+                    placeholder="/var/run/docker.sock"
+                    value={field.state.value}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    onBlur={field.handleBlur}
+                  />
+                </Field>
+              )}
             />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="docker-host">Host</Label>
-            <Input
-              id="docker-host"
-              placeholder="localhost"
-              value={host}
-              onChange={(e) => setHost(e.target.value)}
+
+            <form.Field
+              name="host"
+              children={(field) => (
+                <Field>
+                  <FieldLabel>Host</FieldLabel>
+                  <Input
+                    placeholder="localhost"
+                    value={field.state.value}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    onBlur={field.handleBlur}
+                  />
+                </Field>
+              )}
             />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="docker-port">Port</Label>
-            <Input
-              id="docker-port"
-              type="number"
-              placeholder="2375"
-              value={port}
-              onChange={(e) => setPort(e.target.value)}
+
+            <form.Field
+              name="port"
+              children={(field) => (
+                <Field>
+                  <FieldLabel>Port</FieldLabel>
+                  <Input
+                    type="number"
+                    placeholder="2375"
+                    value={field.state.value}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    onBlur={field.handleBlur}
+                  />
+                </Field>
+              )}
             />
-          </div>
-          <Button onClick={handleSaveConfig} disabled={saving} className="w-fit">
-            <Save className="size-3" />
-            {saving ? "Saving..." : "Save Config"}
-          </Button>
-        </div>
+
+            <Button type="submit" disabled={form.state.isSubmitting} className="w-fit">
+              <Save className="size-3" />
+              {form.state.isSubmitting ? "Saving..." : "Save Config"}
+            </Button>
+          </FieldGroup>
+        </form>
       </div>
 
       <div className="space-y-3">

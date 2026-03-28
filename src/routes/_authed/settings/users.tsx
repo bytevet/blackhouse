@@ -1,10 +1,11 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
+import { useForm } from "@tanstack/react-form";
+import { z } from "zod";
 import { listUsers, createUser, deleteUser, updateUserRole } from "@/server/settings";
 import { getServerSession } from "@/lib/auth-server";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -29,8 +30,17 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
+import { Field, FieldLabel, FieldError, FieldGroup } from "@/components/ui/field";
 import { Plus, Trash2 } from "lucide-react";
 import type { User as DbUser } from "@/db/schema";
+
+const createUserSchema = z.object({
+  name: z.string().min(1, "Name is required"),
+  email: z.string().min(1, "Email is required").email("Invalid email address"),
+  username: z.string().min(1, "Username is required"),
+  password: z.string().min(1, "Password is required"),
+  role: z.string(),
+});
 
 export const Route = createFileRoute("/_authed/settings/users")({
   beforeLoad: async () => {
@@ -50,12 +60,35 @@ function UsersTab() {
   const [deletingUser, setDeletingUser] = useState<DbUser | null>(null);
   const [creating, setCreating] = useState(false);
 
-  // Form
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [role, setRole] = useState("user");
+  const form = useForm({
+    defaultValues: {
+      name: "",
+      email: "",
+      username: "",
+      password: "",
+      role: "user",
+    },
+    onSubmit: async ({ value }) => {
+      const result = createUserSchema.safeParse(value);
+      if (!result.success) return;
+      setCreating(true);
+      try {
+        await createUser({
+          data: {
+            name: result.data.name.trim(),
+            email: result.data.email.trim(),
+            username: result.data.username.trim(),
+            password: result.data.password,
+            role: result.data.role,
+          },
+        });
+        setDialogOpen(false);
+        await refresh();
+      } finally {
+        setCreating(false);
+      }
+    },
+  });
 
   useEffect(() => {
     const load = async () => {
@@ -75,32 +108,8 @@ function UsersTab() {
   };
 
   const openCreate = () => {
-    setName("");
-    setEmail("");
-    setUsername("");
-    setPassword("");
-    setRole("user");
+    form.reset();
     setDialogOpen(true);
-  };
-
-  const handleCreate = async () => {
-    if (!name.trim() || !email.trim() || !username.trim() || !password) return;
-    setCreating(true);
-    try {
-      await createUser({
-        data: {
-          name: name.trim(),
-          email: email.trim(),
-          username: username.trim(),
-          password,
-          role,
-        },
-      });
-      setDialogOpen(false);
-      await refresh();
-    } finally {
-      setCreating(false);
-    }
   };
 
   const handleRoleChange = async (userId: string, newRole: string) => {
@@ -190,57 +199,123 @@ function UsersTab() {
             <DialogTitle>Add User</DialogTitle>
             <DialogDescription>Create a new platform user.</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-3">
-            <div className="grid gap-1.5">
-              <Label htmlFor="user-name">Name</Label>
-              <Input id="user-name" value={name} onChange={(e) => setName(e.target.value)} />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="user-email">Email</Label>
-              <Input
-                id="user-email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="user-username">Username</Label>
-              <Input
-                id="user-username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="user-pw">Password</Label>
-              <Input
-                id="user-pw"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label>Role</Label>
-              <Select value={role} onValueChange={setRole}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="user">User</SelectItem>
-                  <SelectItem value="admin">Admin</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+          <FieldGroup>
+            <form.Field
+              name="name"
+              validators={{
+                onBlur: ({ value }) => (!value.trim() ? "Name is required" : undefined),
+              }}
+              children={(field) => {
+                const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                return (
+                  <Field data-invalid={isInvalid || undefined}>
+                    <FieldLabel>Name</FieldLabel>
+                    <Input
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                    />
+                    {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                  </Field>
+                );
+              }}
+            />
+            <form.Field
+              name="email"
+              validators={{
+                onBlur: ({ value }) => {
+                  if (!value.trim()) return "Email is required";
+                  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return "Invalid email address";
+                  return undefined;
+                },
+              }}
+              children={(field) => {
+                const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                return (
+                  <Field data-invalid={isInvalid || undefined}>
+                    <FieldLabel>Email</FieldLabel>
+                    <Input
+                      type="email"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                    />
+                    {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                  </Field>
+                );
+              }}
+            />
+            <form.Field
+              name="username"
+              validators={{
+                onBlur: ({ value }) => (!value.trim() ? "Username is required" : undefined),
+              }}
+              children={(field) => {
+                const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                return (
+                  <Field data-invalid={isInvalid || undefined}>
+                    <FieldLabel>Username</FieldLabel>
+                    <Input
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                    />
+                    {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                  </Field>
+                );
+              }}
+            />
+            <form.Field
+              name="password"
+              validators={{
+                onBlur: ({ value }) => (!value ? "Password is required" : undefined),
+              }}
+              children={(field) => {
+                const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                return (
+                  <Field data-invalid={isInvalid || undefined}>
+                    <FieldLabel>Password</FieldLabel>
+                    <Input
+                      type="password"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                    />
+                    {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                  </Field>
+                );
+              }}
+            />
+            <form.Field
+              name="role"
+              children={(field) => (
+                <Field>
+                  <FieldLabel>Role</FieldLabel>
+                  <Select value={field.state.value} onValueChange={field.handleChange}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="user">User</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+              )}
+            />
+          </FieldGroup>
           <DialogFooter>
-            <Button
-              onClick={handleCreate}
-              disabled={!name.trim() || !email.trim() || !username.trim() || !password || creating}
-            >
-              {creating ? "Creating..." : "Create User"}
-            </Button>
+            <form.Subscribe
+              selector={(state) => [state.canSubmit, state.isSubmitting]}
+              children={([canSubmit, isSubmitting]) => (
+                <Button
+                  onClick={() => form.handleSubmit()}
+                  disabled={!canSubmit || isSubmitting || creating}
+                >
+                  {creating ? "Creating..." : "Create User"}
+                </Button>
+              )}
+            />
           </DialogFooter>
         </DialogContent>
       </Dialog>

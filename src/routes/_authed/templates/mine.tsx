@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
+import { useForm } from "@tanstack/react-form";
 import { useSession } from "@/lib/auth-client";
 import { listTemplates, createTemplate, updateTemplate, deleteTemplate } from "@/server/templates";
 import { Button } from "@/components/ui/button";
@@ -21,9 +22,9 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
+import { Field, FieldLabel, FieldError, FieldGroup } from "@/components/ui/field";
 import { Plus, Edit, Trash2 } from "lucide-react";
 import { timeAgo } from "@/lib/time";
 import type { Template } from "@/db/schema";
@@ -45,12 +46,47 @@ function MyTemplatesPage() {
   const [deletingTemplate, setDeletingTemplate] = useState<Template | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // Form state
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [systemPrompt, setSystemPrompt] = useState("");
-  const [isPublic, setIsPublic] = useState(false);
-  const [gitRequired, setGitRequired] = useState(false);
+  const form = useForm({
+    defaultValues: {
+      name: "",
+      description: "",
+      systemPrompt: "",
+      isPublic: false,
+      gitRequired: false,
+    },
+    onSubmit: async ({ value }) => {
+      if (!value.name.trim()) return;
+      setSaving(true);
+      try {
+        if (editingTemplate) {
+          await updateTemplate({
+            data: {
+              id: editingTemplate.id,
+              name: value.name.trim(),
+              description: value.description.trim(),
+              systemPrompt: value.systemPrompt.trim(),
+              isPublic: value.isPublic,
+              gitRequired: value.gitRequired,
+            },
+          });
+        } else {
+          await createTemplate({
+            data: {
+              name: value.name.trim(),
+              description: value.description.trim(),
+              systemPrompt: value.systemPrompt.trim(),
+              isPublic: value.isPublic,
+              gitRequired: value.gitRequired,
+            },
+          });
+        }
+        setDialogOpen(false);
+        await refreshTemplates();
+      } finally {
+        setSaving(false);
+      }
+    },
+  });
 
   useEffect(() => {
     setTemplates(initialTemplates);
@@ -63,60 +99,24 @@ function MyTemplatesPage() {
 
   const openCreate = () => {
     setEditingTemplate(null);
-    setName("");
-    setDescription("");
-    setSystemPrompt("");
-    setIsPublic(false);
-    setGitRequired(false);
+    form.reset();
     setDialogOpen(true);
   };
 
   const openEdit = (template: Template) => {
     setEditingTemplate(template);
-    setName(template.name);
-    setDescription(template.description || "");
-    setSystemPrompt(template.systemPrompt || "");
-    setIsPublic(template.isPublic ?? false);
-    setGitRequired(template.gitRequired ?? false);
+    form.reset();
+    form.setFieldValue("name", template.name);
+    form.setFieldValue("description", template.description || "");
+    form.setFieldValue("systemPrompt", template.systemPrompt || "");
+    form.setFieldValue("isPublic", template.isPublic ?? false);
+    form.setFieldValue("gitRequired", template.gitRequired ?? false);
     setDialogOpen(true);
   };
 
   const openDelete = (template: Template) => {
     setDeletingTemplate(template);
     setDeleteDialogOpen(true);
-  };
-
-  const handleSave = async () => {
-    if (!name.trim()) return;
-    setSaving(true);
-    try {
-      if (editingTemplate) {
-        await updateTemplate({
-          data: {
-            id: editingTemplate.id,
-            name: name.trim(),
-            description: description.trim(),
-            systemPrompt: systemPrompt.trim(),
-            isPublic,
-            gitRequired,
-          },
-        });
-      } else {
-        await createTemplate({
-          data: {
-            name: name.trim(),
-            description: description.trim(),
-            systemPrompt: systemPrompt.trim(),
-            isPublic,
-            gitRequired,
-          },
-        });
-      }
-      setDialogOpen(false);
-      await refreshTemplates();
-    } finally {
-      setSaving(false);
-    }
   };
 
   const handleDelete = async () => {
@@ -189,55 +189,98 @@ function MyTemplatesPage() {
               {editingTemplate ? "Update your template details." : "Create a new prompt template."}
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-3">
-            <div className="grid gap-1.5">
-              <Label htmlFor="tpl-name">Name</Label>
-              <Input
-                id="tpl-name"
-                placeholder="Template name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="tpl-desc">Description</Label>
-              <Textarea
-                id="tpl-desc"
-                placeholder="Brief description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="tpl-prompt">System Prompt</Label>
-              <Textarea
-                id="tpl-prompt"
-                placeholder="System prompt for the coding agent..."
-                className="min-h-32"
-                value={systemPrompt}
-                onChange={(e) => setSystemPrompt(e.target.value)}
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <Switch checked={isPublic} onCheckedChange={setIsPublic} size="sm" />
-              <Label className="text-xs">Public template</Label>
-            </div>
-            <div className="flex items-center gap-2">
-              <Switch
-                id="git-required"
-                checked={gitRequired}
-                onCheckedChange={setGitRequired}
-                size="sm"
-              />
-              <Label htmlFor="git-required" className="text-xs">
-                Require Git repository
-              </Label>
-            </div>
-          </div>
+          <FieldGroup>
+            <form.Field
+              name="name"
+              validators={{
+                onBlur: ({ value }) => (!value.trim() ? "Name is required" : undefined),
+              }}
+              children={(field) => {
+                const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                return (
+                  <Field data-invalid={isInvalid || undefined}>
+                    <FieldLabel>Name</FieldLabel>
+                    <Input
+                      placeholder="Template name"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                    />
+                    {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                  </Field>
+                );
+              }}
+            />
+            <form.Field
+              name="description"
+              children={(field) => (
+                <Field>
+                  <FieldLabel>Description</FieldLabel>
+                  <Textarea
+                    placeholder="Brief description"
+                    value={field.state.value}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                  />
+                </Field>
+              )}
+            />
+            <form.Field
+              name="systemPrompt"
+              children={(field) => (
+                <Field>
+                  <FieldLabel>System Prompt</FieldLabel>
+                  <Textarea
+                    placeholder="System prompt for the coding agent..."
+                    className="min-h-32"
+                    value={field.state.value}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                  />
+                </Field>
+              )}
+            />
+            <form.Field
+              name="isPublic"
+              children={(field) => (
+                <Field>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      checked={field.state.value}
+                      onCheckedChange={field.handleChange}
+                      size="sm"
+                    />
+                    <FieldLabel className="text-xs">Public template</FieldLabel>
+                  </div>
+                </Field>
+              )}
+            />
+            <form.Field
+              name="gitRequired"
+              children={(field) => (
+                <Field>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      checked={field.state.value}
+                      onCheckedChange={field.handleChange}
+                      size="sm"
+                    />
+                    <FieldLabel className="text-xs">Require Git repository</FieldLabel>
+                  </div>
+                </Field>
+              )}
+            />
+          </FieldGroup>
           <DialogFooter>
-            <Button onClick={handleSave} disabled={!name.trim() || saving}>
-              {saving ? "Saving..." : editingTemplate ? "Update Template" : "Create Template"}
-            </Button>
+            <form.Subscribe
+              selector={(state) => [state.canSubmit, state.isSubmitting]}
+              children={([canSubmit, isSubmitting]) => (
+                <Button
+                  onClick={() => form.handleSubmit()}
+                  disabled={!canSubmit || isSubmitting || saving}
+                >
+                  {saving ? "Saving..." : editingTemplate ? "Update Template" : "Create Template"}
+                </Button>
+              )}
+            />
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -1,5 +1,6 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useState, useEffect, useRef } from "react";
+import { useForm } from "@tanstack/react-form";
 import {
   listAgentConfigs,
   upsertAgentConfig,
@@ -37,6 +38,7 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
+import { Field, FieldLabel, FieldError, FieldGroup } from "@/components/ui/field";
 import { Plus, Trash2, Edit, Hammer, FileText } from "lucide-react";
 import { timeAgo } from "@/lib/time";
 import { AGENT_PRESETS, PRESET_OPTIONS, type PresetId } from "@/lib/agent-presets";
@@ -134,13 +136,39 @@ function AgentsTab() {
   const [buildLogTitle, setBuildLogTitle] = useState("");
   const [buildLogAgentId, setBuildLogAgentId] = useState<string | null>(null);
 
-  // Form
-  const [preset, setPreset] = useState<string>("claude-code");
-  const [displayName, setDisplayName] = useState("");
-  const [agentCommand, setAgentCommand] = useState("");
+  // Dynamic arrays (kept as useState per pattern guidance)
   const [envVars, setEnvVars] = useState<{ key: string; value: string }[]>([]);
   const [volumeMounts, setVolumeMounts] = useState<{ name: string; mountPath: string }[]>([]);
-  const [dockerfileContent, setDockerfileContent] = useState("");
+
+  const form = useForm({
+    defaultValues: {
+      preset: "claude-code" as string,
+      displayName: "",
+      agentCommand: "",
+      dockerfileContent: "",
+    },
+    onSubmit: async ({ value }) => {
+      if (!value.displayName.trim()) return;
+      setSaving(true);
+      try {
+        await upsertAgentConfig({
+          data: {
+            id: editing?.id,
+            preset: value.preset,
+            displayName: value.displayName.trim(),
+            agentCommand: value.agentCommand.trim() || undefined,
+            envVars: envVars.filter((e) => e.key.trim()),
+            volumeMounts: volumeMounts.filter((v) => v.name.trim() && v.mountPath.trim()),
+            dockerfileContent: value.dockerfileContent.trim() || null,
+          },
+        });
+        setDialogOpen(false);
+        await refresh();
+      } finally {
+        setSaving(false);
+      }
+    },
+  });
 
   useEffect(() => {
     setConfigs(initial);
@@ -196,15 +224,15 @@ function AgentsTab() {
   };
 
   const handlePresetChange = async (value: string) => {
-    setPreset(value);
+    form.setFieldValue("preset", value);
     const p = AGENT_PRESETS[value as PresetId];
     if (p) {
-      setDisplayName(p.displayName);
-      setAgentCommand(p.agentCommand);
+      form.setFieldValue("displayName", p.displayName);
+      form.setFieldValue("agentCommand", p.agentCommand);
       setVolumeMounts(p.volumeMounts.map((v) => ({ ...v })));
       try {
         const content = await getDefaultDockerfile({ data: { preset: value } });
-        setDockerfileContent(content);
+        form.setFieldValue("dockerfileContent", content);
       } catch {
         /* ignore */
       }
@@ -214,16 +242,19 @@ function AgentsTab() {
   const openCreate = async () => {
     setEditing(null);
     setEnvVars([]);
-    setDockerfileContent("Loading...");
+    form.reset();
+    form.setFieldValue("dockerfileContent", "Loading...");
     setDialogOpen(true);
     await handlePresetChange("claude-code");
   };
 
   const openEdit = (config: AgentConfig) => {
     setEditing(config);
-    setPreset(config.preset || "custom");
-    setDisplayName(config.displayName);
-    setAgentCommand(config.agentCommand || "");
+    form.reset();
+    form.setFieldValue("preset", config.preset || "custom");
+    form.setFieldValue("displayName", config.displayName);
+    form.setFieldValue("agentCommand", config.agentCommand || "");
+    form.setFieldValue("dockerfileContent", config.dockerfileContent || "");
     setEnvVars(
       Array.isArray(config.envVars) ? (config.envVars as { key: string; value: string }[]) : [],
     );
@@ -232,30 +263,7 @@ function AgentsTab() {
         ? (config.volumeMounts as { name: string; mountPath: string }[])
         : [],
     );
-    setDockerfileContent(config.dockerfileContent || "");
     setDialogOpen(true);
-  };
-
-  const handleSave = async () => {
-    if (!displayName.trim()) return;
-    setSaving(true);
-    try {
-      await upsertAgentConfig({
-        data: {
-          id: editing?.id,
-          preset,
-          displayName: displayName.trim(),
-          agentCommand: agentCommand.trim() || undefined,
-          envVars: envVars.filter((e) => e.key.trim()),
-          volumeMounts: volumeMounts.filter((v) => v.name.trim() && v.mountPath.trim()),
-          dockerfileContent: dockerfileContent.trim() || null,
-        },
-      });
-      setDialogOpen(false);
-      await refresh();
-    } finally {
-      setSaving(false);
-    }
   };
 
   const handleDelete = async (id: string) => {
@@ -281,8 +289,9 @@ function AgentsTab() {
 
   const handleResetDockerfile = async () => {
     try {
-      const content = await getDefaultDockerfile({ data: { preset } });
-      setDockerfileContent(content);
+      const presetValue = form.getFieldValue("preset");
+      const content = await getDefaultDockerfile({ data: { preset: presetValue } });
+      form.setFieldValue("dockerfileContent", content);
     } catch {
       /* ignore */
     }
@@ -369,40 +378,61 @@ function AgentsTab() {
             <DialogTitle>{editing ? "Edit Agent Config" : "Add Agent Config"}</DialogTitle>
             <DialogDescription>Configure a coding agent for sessions.</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-3">
-            <div className="grid gap-1.5">
-              <Label>Preset</Label>
-              <Select value={preset} onValueChange={handlePresetChange}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PRESET_OPTIONS.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.displayName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="ac-name">Display Name</Label>
-              <Input
-                id="ac-name"
-                placeholder="Claude Code"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="ac-command">Agent Command</Label>
-              <Input
-                id="ac-command"
-                placeholder="e.g. claude --dangerously-skip-permissions"
-                value={agentCommand}
-                onChange={(e) => setAgentCommand(e.target.value)}
-              />
-            </div>
+          <FieldGroup>
+            <form.Field
+              name="preset"
+              children={(field) => (
+                <Field>
+                  <FieldLabel>Preset</FieldLabel>
+                  <Select value={field.state.value} onValueChange={handlePresetChange}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PRESET_OPTIONS.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.displayName}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              )}
+            />
+            <form.Field
+              name="displayName"
+              validators={{
+                onBlur: ({ value }) => (!value.trim() ? "Display name is required" : undefined),
+              }}
+              children={(field) => {
+                const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                return (
+                  <Field data-invalid={isInvalid || undefined}>
+                    <FieldLabel>Display Name</FieldLabel>
+                    <Input
+                      placeholder="Claude Code"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                    />
+                    {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                  </Field>
+                );
+              }}
+            />
+            <form.Field
+              name="agentCommand"
+              children={(field) => (
+                <Field>
+                  <FieldLabel>Agent Command</FieldLabel>
+                  <Input
+                    placeholder="e.g. claude --dangerously-skip-permissions"
+                    value={field.state.value}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                  />
+                </Field>
+              )}
+            />
             <div className="space-y-2">
               <Label>Environment Variables</Label>
               {envVars.map((ev, i) => (
@@ -485,27 +515,49 @@ function AgentsTab() {
                 <Plus className="size-3" /> Add Mount
               </Button>
             </div>
-            <div className="grid gap-1.5">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="ac-dockerfile">Dockerfile Content</Label>
-                <Button variant="outline" size="sm" type="button" onClick={handleResetDockerfile}>
-                  <FileText className="size-3" />
-                  Reset to Default
-                </Button>
-              </div>
-              <Textarea
-                id="ac-dockerfile"
-                placeholder="Leave empty to use default Dockerfile"
-                value={dockerfileContent}
-                onChange={(e) => setDockerfileContent(e.target.value)}
-                className="font-mono text-xs max-h-64 overflow-auto"
-              />
-            </div>
-          </div>
+            <form.Field
+              name="dockerfileContent"
+              children={(field) => (
+                <Field>
+                  <div className="flex items-center justify-between">
+                    <FieldLabel>Dockerfile Content</FieldLabel>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      type="button"
+                      onClick={handleResetDockerfile}
+                    >
+                      <FileText className="size-3" />
+                      Reset to Default
+                    </Button>
+                  </div>
+                  <Textarea
+                    placeholder="Leave empty to use default Dockerfile"
+                    value={field.state.value}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    className="font-mono text-xs max-h-64 overflow-auto"
+                  />
+                </Field>
+              )}
+            />
+          </FieldGroup>
           <DialogFooter>
-            <Button onClick={handleSave} disabled={!displayName.trim() || saving}>
-              {saving ? "Saving..." : editing ? "Update" : "Create"}
-            </Button>
+            <form.Subscribe
+              selector={(state) => [state.canSubmit, state.isSubmitting, state.values.displayName]}
+              children={([canSubmit, isSubmitting, displayName]) => (
+                <Button
+                  onClick={() => form.handleSubmit()}
+                  disabled={
+                    !(displayName as string).trim() ||
+                    !canSubmit ||
+                    (isSubmitting as boolean) ||
+                    saving
+                  }
+                >
+                  {saving ? "Saving..." : editing ? "Update" : "Create"}
+                </Button>
+              )}
+            />
           </DialogFooter>
         </DialogContent>
       </Dialog>

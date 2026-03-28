@@ -1,113 +1,171 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useForm } from "@tanstack/react-form";
+import { z } from "zod";
 import { useSession } from "@/lib/auth-client";
 import { updateProfile } from "@/server/settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Save } from "lucide-react";
 
 export const Route = createFileRoute("/_authed/settings/profile")({
   component: ProfileTab,
 });
 
+const displayNameSchema = z.object({
+  displayName: z
+    .string()
+    .min(1, "Display name is required")
+    .transform((v) => v.trim()),
+});
+
+const passwordSchema = z
+  .object({
+    currentPassword: z.string().min(1, "Current password is required"),
+    newPassword: z.string().min(1, "New password is required"),
+    confirmPassword: z.string().min(1, "Please confirm your password"),
+  })
+  .refine((data) => data.newPassword === data.confirmPassword, {
+    message: "Passwords do not match",
+    path: ["confirmPassword"],
+  });
+
 function ProfileTab() {
   const { data: session } = useSession();
-  const [displayName, setDisplayName] = useState(session?.user?.name || "");
-  const [savingName, setSavingName] = useState(false);
 
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [savingPassword, setSavingPassword] = useState(false);
+  const nameForm = useForm({
+    defaultValues: { displayName: session?.user?.name || "" },
+    validators: { onSubmit: displayNameSchema },
+    onSubmit: async ({ value }) => {
+      await updateProfile({ data: { name: value.displayName } });
+    },
+  });
 
-  const handleSaveName = async () => {
-    setSavingName(true);
-    try {
-      await updateProfile({ data: { name: displayName.trim() } });
-    } finally {
-      setSavingName(false);
-    }
-  };
-
-  const handleChangePassword = async () => {
-    if (!currentPassword || !newPassword || newPassword !== confirmPassword) return;
-    setSavingPassword(true);
-    try {
+  const passwordForm = useForm({
+    defaultValues: { currentPassword: "", newPassword: "", confirmPassword: "" },
+    validators: { onSubmit: passwordSchema },
+    onSubmit: async ({ value }) => {
       await updateProfile({
         data: {
-          currentPassword,
-          newPassword,
+          currentPassword: value.currentPassword,
+          newPassword: value.newPassword,
         },
       });
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-    } finally {
-      setSavingPassword(false);
-    }
-  };
+      passwordForm.reset();
+    },
+  });
 
   return (
     <div className="max-w-md space-y-6 pt-4">
       <div className="space-y-3">
         <h3 className="text-sm font-medium text-foreground">Display Name</h3>
-        <div className="flex gap-2">
-          <Input
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="Your name"
-          />
-          <Button onClick={handleSaveName} disabled={!displayName.trim() || savingName}>
-            <Save className="size-3" />
-            {savingName ? "Saving..." : "Save"}
-          </Button>
-        </div>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            nameForm.handleSubmit();
+          }}
+        >
+          <div className="flex gap-2">
+            <nameForm.Field
+              name="displayName"
+              children={(field) => {
+                const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                return (
+                  <Field data-invalid={isInvalid} className="flex-1">
+                    <Input
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      aria-invalid={isInvalid}
+                      placeholder="Your name"
+                    />
+                    {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                  </Field>
+                );
+              }}
+            />
+            <Button type="submit" disabled={nameForm.state.isSubmitting}>
+              <Save className="size-3" />
+              {nameForm.state.isSubmitting ? "Saving..." : "Save"}
+            </Button>
+          </div>
+        </form>
       </div>
 
       <div className="space-y-3">
         <h3 className="text-sm font-medium text-foreground">Change Password</h3>
-        <div className="grid gap-2">
-          <div className="grid gap-1.5">
-            <Label htmlFor="current-pw">Current Password</Label>
-            <Input
-              id="current-pw"
-              type="password"
-              value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            passwordForm.handleSubmit();
+          }}
+        >
+          <FieldGroup>
+            <passwordForm.Field
+              name="currentPassword"
+              children={(field) => {
+                const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                return (
+                  <Field data-invalid={isInvalid}>
+                    <FieldLabel>Current Password</FieldLabel>
+                    <Input
+                      type="password"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      aria-invalid={isInvalid}
+                    />
+                    {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                  </Field>
+                );
+              }}
             />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="new-pw">New Password</Label>
-            <Input
-              id="new-pw"
-              type="password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
+
+            <passwordForm.Field
+              name="newPassword"
+              children={(field) => {
+                const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                return (
+                  <Field data-invalid={isInvalid}>
+                    <FieldLabel>New Password</FieldLabel>
+                    <Input
+                      type="password"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      aria-invalid={isInvalid}
+                    />
+                    {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                  </Field>
+                );
+              }}
             />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="confirm-pw">Confirm Password</Label>
-            <Input
-              id="confirm-pw"
-              type="password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
+
+            <passwordForm.Field
+              name="confirmPassword"
+              children={(field) => {
+                const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                return (
+                  <Field data-invalid={isInvalid}>
+                    <FieldLabel>Confirm Password</FieldLabel>
+                    <Input
+                      type="password"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      aria-invalid={isInvalid}
+                    />
+                    {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                  </Field>
+                );
+              }}
             />
-          </div>
-          {newPassword && confirmPassword && newPassword !== confirmPassword && (
-            <p className="text-xs text-destructive">Passwords do not match.</p>
-          )}
-          <Button
-            onClick={handleChangePassword}
-            disabled={
-              !currentPassword || !newPassword || newPassword !== confirmPassword || savingPassword
-            }
-            className="w-fit"
-          >
-            {savingPassword ? "Updating..." : "Update Password"}
-          </Button>
-        </div>
+
+            <Button type="submit" disabled={passwordForm.state.isSubmitting} className="w-fit">
+              {passwordForm.state.isSubmitting ? "Updating..." : "Update Password"}
+            </Button>
+          </FieldGroup>
+        </form>
       </div>
     </div>
   );

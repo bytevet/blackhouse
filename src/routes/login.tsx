@@ -1,11 +1,19 @@
 import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router";
 import { useState } from "react";
+import { useForm } from "@tanstack/react-form";
 import { z } from "zod";
 import { signIn, useSession } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 
 const loginSearchSchema = z.object({
   redirect: z.string().optional(),
+});
+
+const loginSchema = z.object({
+  username: z.string().min(1, "Username is required"),
+  password: z.string().min(1, "Password is required"),
 });
 
 export const Route = createFileRoute("/login")({
@@ -17,38 +25,33 @@ function LoginPage() {
   const { data: session } = useSession();
   const navigate = useNavigate();
   const { redirect: redirectTo } = useSearch({ from: "/login" });
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-
   const destination = redirectTo || "/dashboard";
+
+  const form = useForm({
+    defaultValues: { username: "", password: "" },
+    validators: { onSubmit: loginSchema },
+    onSubmit: async ({ value }) => {
+      setError("");
+      try {
+        const result = await signIn.username({
+          username: value.username,
+          password: value.password,
+        });
+        if (result.error) {
+          setError(result.error.message ?? "Sign in failed");
+          return;
+        }
+        navigate({ to: destination });
+      } catch {
+        setError("An unexpected error occurred");
+      }
+    },
+  });
 
   if (session) {
     navigate({ to: destination });
     return null;
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-    setLoading(true);
-
-    try {
-      const result = await signIn.username({
-        username,
-        password,
-      });
-      if (result.error) {
-        setError(result.error.message ?? "Sign in failed");
-        return;
-      }
-      navigate({ to: destination });
-    } catch {
-      setError("An unexpected error occurred");
-    } finally {
-      setLoading(false);
-    }
   }
 
   async function handleGitHubLogin() {
@@ -63,42 +66,60 @@ function LoginPage() {
           <p className="text-sm text-muted-foreground">Sign in to your account</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-1">
-            <label htmlFor="username" className="text-xs font-medium text-foreground">
-              Username
-            </label>
-            <input
-              id="username"
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-              className="flex h-8 w-full border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/30"
-              placeholder="username"
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            form.handleSubmit();
+          }}
+        >
+          <FieldGroup>
+            <form.Field
+              name="username"
+              children={(field) => {
+                const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                return (
+                  <Field data-invalid={isInvalid}>
+                    <FieldLabel>Username</FieldLabel>
+                    <Input
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      aria-invalid={isInvalid}
+                      placeholder="username"
+                    />
+                    {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                  </Field>
+                );
+              }}
             />
-          </div>
 
-          <div className="space-y-1">
-            <label htmlFor="password" className="text-xs font-medium text-foreground">
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              className="flex h-8 w-full border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/30"
-              placeholder="********"
+            <form.Field
+              name="password"
+              children={(field) => {
+                const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                return (
+                  <Field data-invalid={isInvalid}>
+                    <FieldLabel>Password</FieldLabel>
+                    <Input
+                      type="password"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      aria-invalid={isInvalid}
+                      placeholder="********"
+                    />
+                    {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                  </Field>
+                );
+              }}
             />
-          </div>
 
-          {error && <p className="text-xs text-destructive">{error}</p>}
+            {error && <p className="text-xs text-destructive">{error}</p>}
 
-          <Button type="submit" size="lg" className="w-full" disabled={loading}>
-            {loading ? "Loading..." : "Sign In"}
-          </Button>
+            <Button type="submit" size="lg" className="w-full" disabled={form.state.isSubmitting}>
+              {form.state.isSubmitting ? "Loading..." : "Sign In"}
+            </Button>
+          </FieldGroup>
         </form>
 
         <div className="relative">
