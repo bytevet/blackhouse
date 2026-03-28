@@ -54,7 +54,7 @@ export const Route = createFileRoute("/_authed/dashboard")({
   loader: async () => {
     const [sessions, templates, agentConfigs] = await Promise.all([
       listSessions(),
-      listTemplates({ mine: false }),
+      listTemplates({ data: { mine: false } }),
       listAgentConfigs(),
     ]);
     return { sessions, templates, agentConfigs };
@@ -133,11 +133,13 @@ function DashboardPage() {
     setCreating(true);
     try {
       await createSession({
-        name: name.trim(),
-        agentConfigId,
-        gitRepoUrl: gitRepoUrl.trim() || undefined,
-        gitBranch: gitBranch.trim() || undefined,
-        templateId: templateId || undefined,
+        data: {
+          name: name.trim(),
+          agentConfigId,
+          gitRepoUrl: gitRepoUrl.trim() || undefined,
+          gitBranch: gitBranch.trim() || undefined,
+          templateId: templateId || undefined,
+        },
       });
       setDialogOpen(false);
       setName("");
@@ -152,17 +154,17 @@ function DashboardPage() {
   };
 
   const handleStop = async (id: string) => {
-    await stopSession({ id });
+    await stopSession({ data: { id } });
     await refreshSessions();
   };
 
   const handleDestroy = async (id: string) => {
-    await destroySession({ id });
+    await destroySession({ data: { id } });
     await refreshSessions();
   };
 
   const handleRestart = async (id: string) => {
-    await restartSession({ id });
+    await restartSession({ data: { id } });
     await refreshSessions();
   };
 

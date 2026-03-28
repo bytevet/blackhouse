@@ -72,16 +72,14 @@ export const getTemplate = createServerFn({ method: "GET" })
 // ---------------------------------------------------------------------------
 
 export const createTemplate = createServerFn({ method: "POST" })
-  .inputValidator(
-    (input: {
+  .inputValidator((input: {
       name: string;
       description?: string;
       systemPrompt?: string;
       skills?: unknown;
       mcpConfig?: unknown;
       isPublic?: boolean;
-    }) => input,
-  )
+    }) => input)
   .handler(async ({ data }) => {
     const session = await requireSession();
 
@@ -106,8 +104,7 @@ export const createTemplate = createServerFn({ method: "POST" })
 // ---------------------------------------------------------------------------
 
 export const updateTemplate = createServerFn({ method: "POST" })
-  .inputValidator(
-    (input: {
+  .inputValidator((input: {
       id: string;
       name?: string;
       description?: string;
@@ -115,8 +112,7 @@ export const updateTemplate = createServerFn({ method: "POST" })
       skills?: unknown;
       mcpConfig?: unknown;
       isPublic?: boolean;
-    }) => input,
-  )
+    }) => input)
   .handler(async ({ data }) => {
     const session = await requireSession();
 

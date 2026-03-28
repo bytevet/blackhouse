@@ -35,8 +35,8 @@ import { Plus, Edit, Trash2 } from "lucide-react";
 export const Route = createFileRoute("/_authed/templates")({
   loader: async () => {
     const [myTemplates, publicTemplates] = await Promise.all([
-      listTemplates({ mine: true }),
-      listTemplates({ mine: false }),
+      listTemplates({ data: { mine: true } }),
+      listTemplates({ data: { mine: false } }),
     ]);
     return { myTemplates, publicTemplates };
   },
@@ -85,8 +85,8 @@ function TemplatesPage() {
 
   const refreshTemplates = async () => {
     const [mine, pub] = await Promise.all([
-      listTemplates({ mine: true }),
-      listTemplates({ mine: false }),
+      listTemplates({ data: { mine: true } }),
+      listTemplates({ data: { mine: false } }),
     ]);
     setMyTemplates(mine);
     setPublicTemplates(pub);
@@ -121,18 +121,22 @@ function TemplatesPage() {
     try {
       if (editingTemplate) {
         await updateTemplate({
-          id: editingTemplate.id,
-          name: name.trim(),
-          description: description.trim(),
-          systemPrompt: systemPrompt.trim(),
-          isPublic,
+          data: {
+            id: editingTemplate.id,
+            name: name.trim(),
+            description: description.trim(),
+            systemPrompt: systemPrompt.trim(),
+            isPublic,
+          },
         });
       } else {
         await createTemplate({
-          name: name.trim(),
-          description: description.trim(),
-          systemPrompt: systemPrompt.trim(),
-          isPublic,
+          data: {
+            name: name.trim(),
+            description: description.trim(),
+            systemPrompt: systemPrompt.trim(),
+            isPublic,
+          },
         });
       }
       setDialogOpen(false);
@@ -144,7 +148,7 @@ function TemplatesPage() {
 
   const handleDelete = async () => {
     if (!deletingTemplate) return;
-    await deleteTemplate({ id: deletingTemplate.id });
+    await deleteTemplate({ data: { id: deletingTemplate.id } });
     setDeleteDialogOpen(false);
     setDeletingTemplate(null);
     await refreshTemplates();

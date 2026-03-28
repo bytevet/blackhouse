@@ -13,6 +13,9 @@ export default defineConfig({
   },
   plugins: [tailwindcss(), tanstackStart(), react(), nitro()],
   ssr: {
-    external: ["better-auth"],
+    external: ["better-auth", "dockerode", "ssh2", "cpu-features"],
+  },
+  optimizeDeps: {
+    exclude: ["ssh2", "cpu-features"],
   },
 });

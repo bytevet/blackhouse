@@ -150,7 +150,7 @@ function ProfileTab() {
   const handleSaveName = async () => {
     setSavingName(true);
     try {
-      await updateProfile({ name: displayName.trim() });
+      await updateProfile({ data: { name: displayName.trim() } });
     } finally {
       setSavingName(false);
     }
@@ -162,8 +162,10 @@ function ProfileTab() {
     setSavingPassword(true);
     try {
       await updateProfile({
-        currentPassword,
-        newPassword,
+        data: {
+          currentPassword,
+          newPassword,
+        },
       });
       setCurrentPassword("");
       setNewPassword("");
@@ -310,14 +312,16 @@ function AgentsTab() {
         }
       }
       await upsertAgentConfig({
-        id: editing?.id,
-        agentType: agentType.trim(),
-        displayName: displayName.trim(),
-        apiKey: apiKey.trim() || undefined,
-        dockerImage: dockerImage.trim() || undefined,
-        yoloMode,
-        defaultModel: defaultModel.trim() || undefined,
-        extraArgs: parsedExtraArgs,
+        data: {
+          id: editing?.id,
+          agentType: agentType.trim(),
+          displayName: displayName.trim(),
+          apiKey: apiKey.trim() || undefined,
+          dockerImage: dockerImage.trim() || undefined,
+          yoloMode,
+          defaultModel: defaultModel.trim() || undefined,
+          extraArgs: parsedExtraArgs,
+        },
       });
       setDialogOpen(false);
       await refresh();
@@ -327,7 +331,7 @@ function AgentsTab() {
   };
 
   const handleDelete = async (id: string) => {
-    await deleteAgentConfig({ id });
+    await deleteAgentConfig({ data: { id } });
     await refresh();
   };
 
@@ -526,9 +530,11 @@ function DockerTab() {
     setSaving(true);
     try {
       await updateDockerConfig({
-        socketPath: socketPath.trim() || undefined,
-        host: host.trim() || undefined,
-        port: port ? parseInt(port, 10) : undefined,
+        data: {
+          socketPath: socketPath.trim() || undefined,
+          host: host.trim() || undefined,
+          port: port ? parseInt(port, 10) : undefined,
+        },
       });
       const status = await getDockerStatus();
       setDockerStatus(status);
@@ -711,11 +717,13 @@ function UsersTab() {
     setCreating(true);
     try {
       await createUser({
-        name: name.trim(),
-        email: email.trim(),
-        username: username.trim(),
-        password,
-        role,
+        data: {
+          name: name.trim(),
+          email: email.trim(),
+          username: username.trim(),
+          password,
+          role,
+        },
       });
       setDialogOpen(false);
       await refresh();
@@ -725,13 +733,13 @@ function UsersTab() {
   };
 
   const handleRoleChange = async (userId: string, newRole: string) => {
-    await updateUserRole({ userId, role: newRole });
+    await updateUserRole({ data: { userId, role: newRole } });
     await refresh();
   };
 
   const handleDelete = async () => {
     if (!deletingUser) return;
-    await deleteUser({ userId: deletingUser.id });
+    await deleteUser({ data: { userId: deletingUser.id } });
     setDeleteDialogOpen(false);
     setDeletingUser(null);
     await refresh();

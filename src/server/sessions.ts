@@ -57,7 +57,7 @@ function generateEntrypoint(opts: {
 // ---------------------------------------------------------------------------
 
 export const listSessions = createServerFn({ method: "GET" })
-  .inputValidator((input: { all?: boolean }) => input)
+  .inputValidator((input: { all?: boolean } | undefined) => input ?? {})
   .handler(async ({ data }) => {
     const session = await requireSession();
 
@@ -119,30 +119,40 @@ export const getSession = createServerFn({ method: "GET" })
 // ---------------------------------------------------------------------------
 
 export const createSession = createServerFn({ method: "POST" })
-  .inputValidator(
-    (input: {
+  .inputValidator((input: {
       name: string;
       gitRepoUrl?: string;
       gitBranch?: string;
       templateId?: string;
-      agentType: string;
-    }) => input,
-  )
+      agentType?: string;
+      agentConfigId?: string;
+    }) => input)
   .handler(async ({ data }) => {
     const session = await requireSession();
 
     // Look up agent config for docker image & keys
-    const agentConfigs = await db
-      .select()
-      .from(schema.agentConfigs)
-      .where(eq(schema.agentConfigs.agentType, data.agentType))
-      .limit(1);
-
-    if (agentConfigs.length === 0) {
-      throw new Error(`Unknown agent type: ${data.agentType}`);
+    let agentConfigRows;
+    if (data.agentConfigId) {
+      agentConfigRows = await db
+        .select()
+        .from(schema.agentConfigs)
+        .where(eq(schema.agentConfigs.id, data.agentConfigId))
+        .limit(1);
+    } else if (data.agentType) {
+      agentConfigRows = await db
+        .select()
+        .from(schema.agentConfigs)
+        .where(eq(schema.agentConfigs.agentType, data.agentType))
+        .limit(1);
+    } else {
+      throw new Error("Either agentType or agentConfigId is required");
     }
 
-    const agentConfig = agentConfigs[0];
+    if (agentConfigRows.length === 0) {
+      throw new Error(`Unknown agent: ${data.agentConfigId ?? data.agentType}`);
+    }
+
+    const agentConfig = agentConfigRows[0];
 
     // If template requested, load it
     let template: typeof schema.templates.$inferSelect | null = null;
@@ -169,7 +179,7 @@ export const createSession = createServerFn({ method: "POST" })
         gitRepoUrl: data.gitRepoUrl ?? null,
         gitBranch: data.gitBranch ?? "main",
         templateId: data.templateId ?? null,
-        agentType: data.agentType,
+        agentType: agentConfig.agentType,
         containerImage: agentConfig.dockerImage,
         status: "pending",
       })
@@ -180,7 +190,7 @@ export const createSession = createServerFn({ method: "POST" })
     // Build environment variables for the container
     const env: string[] = [
       `SESSION_ID=${codingSession.id}`,
-      `AGENT_TYPE=${data.agentType}`,
+      `AGENT_TYPE=${agentConfig.agentType}`,
       `SESSION_NAME=${data.name}`,
     ];
 
@@ -204,7 +214,7 @@ export const createSession = createServerFn({ method: "POST" })
       gitRepoUrl: data.gitRepoUrl,
       gitBranch: data.gitBranch,
       systemPrompt: template?.systemPrompt,
-      agentType: data.agentType,
+      agentType: agentConfig.agentType,
     });
 
     try {

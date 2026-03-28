@@ -28,9 +28,7 @@ function requireAdmin(session: { user: { role?: string | null } }) {
 // ---------------------------------------------------------------------------
 
 export const updateProfile = createServerFn({ method: "POST" })
-  .inputValidator(
-    (input: { name?: string; password?: string }) => input,
-  )
+  .inputValidator((input: { name?: string; password?: string; currentPassword?: string; newPassword?: string }) => input)
   .handler(async ({ data }) => {
     const session = await requireSession();
 
@@ -45,13 +43,14 @@ export const updateProfile = createServerFn({ method: "POST" })
     }
 
     // Password change via Better Auth API
-    if (data.password) {
+    const newPw = data.password ?? data.newPassword;
+    if (newPw) {
       const request = getRequest();
       await auth.api.changePassword({
         headers: request.headers,
         body: {
-          newPassword: data.password,
-          currentPassword: "", // Better Auth handles session-based password change
+          newPassword: newPw,
+          currentPassword: data.currentPassword ?? "",
           revokeOtherSessions: false,
         },
       });
@@ -66,8 +65,7 @@ export const updateProfile = createServerFn({ method: "POST" })
 
 export const listAgentConfigs = createServerFn({ method: "GET" }).handler(
   async () => {
-    const session = await requireSession();
-    requireAdmin(session);
+    await requireSession();
 
     return db
       .select()
@@ -77,18 +75,17 @@ export const listAgentConfigs = createServerFn({ method: "GET" }).handler(
 );
 
 export const upsertAgentConfig = createServerFn({ method: "POST" })
-  .inputValidator(
-    (input: {
+  .inputValidator((input: {
       id?: string;
       agentType: string;
       displayName: string;
       apiKeyEncrypted?: string;
+      apiKey?: string;
       yoloMode?: boolean;
       defaultModel?: string;
       extraArgs?: unknown;
-      dockerImage: string;
-    }) => input,
-  )
+      dockerImage?: string;
+    }) => input)
   .handler(async ({ data }) => {
     const session = await requireSession();
     requireAdmin(session);
@@ -96,7 +93,7 @@ export const upsertAgentConfig = createServerFn({ method: "POST" })
     const values = {
       agentType: data.agentType,
       displayName: data.displayName,
-      apiKeyEncrypted: data.apiKeyEncrypted ?? null,
+      apiKeyEncrypted: data.apiKeyEncrypted ?? data.apiKey ?? null,
       yoloMode: data.yoloMode ?? true,
       defaultModel: data.defaultModel ?? null,
       extraArgs: data.extraArgs ?? null,
@@ -157,16 +154,14 @@ export const getDockerConfig = createServerFn({ method: "GET" }).handler(
 );
 
 export const updateDockerConfig = createServerFn({ method: "POST" })
-  .inputValidator(
-    (input: {
+  .inputValidator((input: {
       socketPath?: string;
       host?: string;
       port?: number;
       tlsCa?: string;
       tlsCert?: string;
       tlsKey?: string;
-    }) => input,
-  )
+    }) => input)
   .handler(async ({ data }) => {
     const session = await requireSession();
     requireAdmin(session);
@@ -318,14 +313,13 @@ export const listUsers = createServerFn({ method: "GET" }).handler(
 );
 
 export const createUser = createServerFn({ method: "POST" })
-  .inputValidator(
-    (input: {
+  .inputValidator((input: {
       name: string;
       email: string;
+      username?: string;
       password: string;
       role?: string;
-    }) => input,
-  )
+    }) => input)
   .handler(async ({ data }) => {
     const session = await requireSession();
     requireAdmin(session);
@@ -350,34 +344,40 @@ export const createUser = createServerFn({ method: "POST" })
   });
 
 export const deleteUser = createServerFn({ method: "POST" })
-  .inputValidator((input: { id: string }) => input)
+  .inputValidator((input: { id?: string; userId?: string }) => input)
   .handler(async ({ data }) => {
     const session = await requireSession();
     requireAdmin(session);
 
-    if (data.id === session.user.id) {
+    const targetId = data.id ?? data.userId;
+    if (!targetId) throw new Error("Missing user id");
+
+    if (targetId === session.user.id) {
       throw new Error("Cannot delete your own account");
     }
 
-    await db.delete(schema.user).where(eq(schema.user.id, data.id));
+    await db.delete(schema.user).where(eq(schema.user.id, targetId));
 
     return { success: true };
   });
 
 export const updateUserRole = createServerFn({ method: "POST" })
-  .inputValidator((input: { id: string; role: string }) => input)
+  .inputValidator((input: { id?: string; userId?: string; role: string }) => input)
   .handler(async ({ data }) => {
     const session = await requireSession();
     requireAdmin(session);
 
-    if (data.id === session.user.id) {
+    const targetId = data.id ?? data.userId;
+    if (!targetId) throw new Error("Missing user id");
+
+    if (targetId === session.user.id) {
       throw new Error("Cannot change your own role");
     }
 
     const updated = await db
       .update(schema.user)
       .set({ role: data.role, updatedAt: new Date() })
-      .where(eq(schema.user.id, data.id))
+      .where(eq(schema.user.id, targetId))
       .returning();
 
     if (updated.length === 0) throw new Error("User not found");
