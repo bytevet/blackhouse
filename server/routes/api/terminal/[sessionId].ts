@@ -76,27 +76,40 @@ export default defineWebSocketHandler({
     }
 
     try {
-      const docker = await getDockerClient();
-      const container = docker.getContainer(result.containerId);
+      // Reuse existing terminal session if stream is still alive
+      const existing = activeTerminals.get(sessionId);
+      let terminal: TerminalState;
 
-      const exec = await container.exec({
-        Cmd: ["/bin/bash"],
-        AttachStdin: true,
-        AttachStdout: true,
-        AttachStderr: true,
-        Tty: true,
-      });
+      if (existing && !existing.stream.destroyed) {
+        terminal = existing;
+        // Remove old listeners (from previous WebSocket connection)
+        existing.stream.removeAllListeners("data");
+        existing.stream.removeAllListeners("end");
+      } else {
+        // Create new exec session
+        const docker = await getDockerClient();
+        const container = docker.getContainer(result.containerId);
 
-      const stream = await exec.start({
-        hijack: true,
-        stdin: true,
-        Tty: true,
-      } as import("dockerode").ExecStartOptions);
+        const exec = await container.exec({
+          Cmd: ["/bin/bash"],
+          AttachStdin: true,
+          AttachStdout: true,
+          AttachStderr: true,
+          Tty: true,
+        });
 
-      activeTerminals.set(sessionId, { stream, exec });
+        const stream = await exec.start({
+          hijack: true,
+          stdin: true,
+          Tty: true,
+        } as import("dockerode").ExecStartOptions);
+
+        terminal = { stream, exec };
+        activeTerminals.set(sessionId, terminal);
+      }
 
       // Pipe container output → WebSocket
-      stream.on("data", (chunk: Buffer) => {
+      terminal.stream.on("data", (chunk: Buffer) => {
         try {
           peer.send(chunk.toString("binary"));
         } catch {
@@ -104,7 +117,7 @@ export default defineWebSocketHandler({
         }
       });
 
-      stream.on("end", () => {
+      terminal.stream.on("end", () => {
         activeTerminals.delete(sessionId);
         try {
           peer.close(1000, "Stream ended");

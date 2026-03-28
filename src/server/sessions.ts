@@ -359,8 +359,34 @@ export const restartSession = createServerFn({ method: "POST" })
     try {
       const docker = await getDockerClient();
       const container = docker.getContainer(codingSession.containerId);
+
+      // Check if container still exists and is in a restartable state
+      const info = await container.inspect().catch(() => null);
+      if (!info) {
+        throw new Error(
+          "Container no longer exists. Please destroy this session and create a new one.",
+        );
+      }
+      if (info.State.Running) {
+        // Already running — just update status
+        await db
+          .update(schema.codingSessions)
+          .set({ status: "running", updatedAt: new Date() })
+          .where(eq(schema.codingSessions.id, data.id));
+        return (
+          await db
+            .select()
+            .from(schema.codingSessions)
+            .where(eq(schema.codingSessions.id, data.id))
+            .limit(1)
+        )[0];
+      }
+
       await container.start();
     } catch (err) {
+      if (err instanceof Error && err.message.includes("Container no longer exists")) {
+        throw err;
+      }
       throw new Error(
         `Failed to restart container: ${err instanceof Error ? err.message : String(err)}`,
       );

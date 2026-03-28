@@ -1,8 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
-import { Terminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
-import { WebLinksAddon } from "@xterm/addon-web-links";
-import "@xterm/xterm/css/xterm.css";
+import { useEffect, useRef, useCallback, useState } from "react";
 
 interface TerminalPanelProps {
   sessionId: string;
@@ -62,56 +58,78 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const terminal = new Terminal({
-      fontFamily: "'JetBrains Mono Variable', monospace",
-      fontSize: 13,
-      lineHeight: 1.4,
-      cursorBlink: true,
-      theme: {
-        background: "#0a0a0a",
-        foreground: "#e4e4e7",
-        cursor: "#e4e4e7",
-        selectionBackground: "#27272a",
-      },
-    });
+    let disposed = false;
+    let terminal: InstanceType<typeof import("@xterm/xterm").Terminal> | null = null;
 
-    const fitAddon = new FitAddon();
-    const webLinksAddon = new WebLinksAddon();
+    (async () => {
+      // Dynamic import to avoid SSR issues (xterm is browser-only)
+      const [{ Terminal }, { FitAddon }, { WebLinksAddon }] = await Promise.all([
+        import("@xterm/xterm"),
+        import("@xterm/addon-fit"),
+        import("@xterm/addon-web-links"),
+      ]);
+      // Also load CSS
+      await import("@xterm/xterm/css/xterm.css");
 
-    terminal.loadAddon(fitAddon);
-    terminal.loadAddon(webLinksAddon);
-    terminal.open(containerRef.current);
+      if (disposed || !containerRef.current) return;
 
-    terminalRef.current = terminal;
-    fitAddonRef.current = fitAddon;
+      terminal = new Terminal({
+        fontFamily: "'JetBrains Mono Variable', monospace",
+        fontSize: 13,
+        lineHeight: 1.4,
+        cursorBlink: true,
+        theme: {
+          background: "#0a0a0a",
+          foreground: "#e4e4e7",
+          cursor: "#e4e4e7",
+          selectionBackground: "#27272a",
+        },
+      });
 
-    fitAddon.fit();
+      const fitAddon = new FitAddon();
+      const webLinksAddon = new WebLinksAddon();
 
-    terminal.onData((data) => {
-      const ws = wsRef.current;
-      if (ws?.readyState === WebSocket.OPEN) {
-        ws.send(data);
-      }
-    });
+      terminal.loadAddon(fitAddon);
+      terminal.loadAddon(webLinksAddon);
+      terminal.open(containerRef.current);
 
-    terminal.onResize(({ cols, rows }) => {
-      const ws = wsRef.current;
-      if (ws?.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "resize", cols, rows }));
-      }
-    });
+      terminalRef.current = terminal;
+      fitAddonRef.current = fitAddon;
 
-    const resizeObserver = new ResizeObserver(() => {
       fitAddon.fit();
-    });
-    resizeObserver.observe(containerRef.current);
 
-    connect();
+      terminal.onData((data) => {
+        const ws = wsRef.current;
+        if (ws?.readyState === WebSocket.OPEN) {
+          ws.send(data);
+        }
+      });
+
+      terminal.onResize(({ cols, rows }) => {
+        const ws = wsRef.current;
+        if (ws?.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "resize", cols, rows }));
+        }
+      });
+
+      const resizeObserver = new ResizeObserver(() => {
+        fitAddon.fit();
+      });
+      resizeObserver.observe(containerRef.current!);
+
+      connect();
+
+      // Store cleanup for the async context
+      return () => {
+        resizeObserver.disconnect();
+        terminal?.dispose();
+      };
+    })();
 
     return () => {
-      resizeObserver.disconnect();
+      disposed = true;
       wsRef.current?.close();
-      terminal.dispose();
+      terminal?.dispose();
     };
   }, [connect]);
 

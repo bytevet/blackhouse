@@ -120,7 +120,7 @@ function SessionViewPage() {
               <span className="hidden sm:inline">Restart</span>
             </Button>
           )}
-          {session.status !== "destroyed" && (
+          {session.status === "stopped" && (
             <Button
               variant="destructive"
               size="xs"
