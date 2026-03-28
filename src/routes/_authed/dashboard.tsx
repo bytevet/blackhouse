@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { useSession } from "@/lib/auth-client";
 import {
@@ -59,6 +59,7 @@ export const Route = createFileRoute("/_authed/dashboard")({
 function DashboardPage() {
   const { sessions: initialSessions, templates, agentConfigs } = Route.useLoaderData();
   const { data: session } = useSession();
+  const navigate = useNavigate();
   const isAdmin = session?.user?.role === "admin";
 
   const [sessions, setSessions] = useState(initialSessions);
@@ -86,7 +87,7 @@ function DashboardPage() {
     if (!name.trim() || !agentConfigId) return;
     setCreating(true);
     try {
-      await createSession({
+      const newSession = await createSession({
         data: {
           name: name.trim(),
           agentConfigId,
@@ -101,7 +102,11 @@ function DashboardPage() {
       setGitRepoUrl("");
       setGitBranch("main");
       setTemplateId("");
-      await refreshSessions();
+      if (newSession?.id) {
+        navigate({ to: "/sessions/$sessionId", params: { sessionId: newSession.id } });
+      } else {
+        await refreshSessions();
+      }
     } finally {
       setCreating(false);
     }
