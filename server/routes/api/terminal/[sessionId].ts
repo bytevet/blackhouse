@@ -153,20 +153,32 @@ export default defineWebSocketHandler({
 
     if (!terminal) return;
 
-    const text = typeof message === "string" ? message : message.text();
+    // Extract text from message (h3 WebSocket message can be string, Buffer, or Message object)
+    let text: string;
+    if (typeof message === "string") {
+      text = message;
+    } else if (Buffer.isBuffer(message)) {
+      text = message.toString("utf-8");
+    } else if (message && typeof message === "object" && "text" in message) {
+      text = (message as { text: () => string }).text();
+    } else {
+      text = String(message);
+    }
 
-    // Check if it's a resize message
-    try {
-      const parsed = JSON.parse(text);
-      if (parsed.type === "resize" && parsed.cols && parsed.rows) {
-        await terminal.exec.resize({
-          w: parsed.cols,
-          h: parsed.rows,
-        });
-        return;
+    // Check if it's a resize message (starts with '{' to avoid parsing non-JSON)
+    if (text.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(text);
+        if (parsed.type === "resize" && parsed.cols && parsed.rows) {
+          await terminal.exec.resize({
+            w: parsed.cols,
+            h: parsed.rows,
+          });
+          return;
+        }
+      } catch {
+        // Not valid JSON, fall through to terminal input
       }
-    } catch {
-      // Not JSON, treat as terminal input
     }
 
     // Write raw input to the container's stdin
