@@ -67,15 +67,14 @@ export function AppSidebar() {
             <SidebarMenu>
               {navItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={location.pathname.startsWith(item.to)}
-                  >
-                    <Link to={item.to}>
-                      <item.icon />
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
+                  <Link to={item.to} className="block">
+                    <SidebarMenuButton
+                      isActive={location.pathname.startsWith(item.to)}
+                    >
+                      <item.icon className="shrink-0" />
+                      <span className="truncate">{item.title}</span>
+                    </SidebarMenuButton>
+                  </Link>
                 </SidebarMenuItem>
               ))}
             </SidebarMenu>
@@ -85,9 +84,8 @@ export function AppSidebar() {
 
       <SidebarFooter className="border-t border-sidebar-border">
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <SidebarMenuButton className="w-full">
-              <Avatar className="size-6">
+          <DropdownMenuTrigger className="flex w-full items-center gap-2 rounded-[calc(var(--radius-sm)+2px)] p-2 text-left text-xs hover:bg-sidebar-accent hover:text-sidebar-accent-foreground outline-hidden focus-visible:ring-2 ring-sidebar-ring">
+              <Avatar className="size-6 shrink-0">
                 <AvatarImage src={user?.image ?? undefined} />
                 <AvatarFallback className="text-[10px]">
                   {initials}
@@ -96,8 +94,7 @@ export function AppSidebar() {
               <span className="flex-1 truncate text-left text-sm">
                 {user?.name ?? "User"}
               </span>
-              <ChevronsUpDown className="size-4 text-muted-foreground" />
-            </SidebarMenuButton>
+              <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
           </DropdownMenuTrigger>
           <DropdownMenuContent side="top" align="start" className="w-56">
             <DropdownMenuItem

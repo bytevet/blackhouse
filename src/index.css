@@ -40,9 +40,13 @@
 
   --destructive: oklch(0.577 0.245 27.325);
 
+  --border: oklch(0.925 0.005 214.3);
+
   --input: oklch(0.925 0.005 214.3);
 
   --ring: oklch(0.723 0.014 214.4);
+
+  --accent: oklch(0.963 0.002 197.1);
 
   --chart-1: oklch(0.865 0.127 207.078);
 
@@ -154,10 +158,18 @@ body {
   --sidebar-ring: oklch(0.56 0.021 213.5);
 }
 
-@layer base {
-  * {
-    @apply border-border outline-ring/50;}
-  body {
-    @apply bg-background text-foreground;}
-  html {
-    @apply font-mono;}}
+*,
+::after,
+::before {
+  border-color: var(--color-border);
+  outline-color: color-mix(in oklch, var(--color-ring) 50%, transparent);
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+}
+
+html {
+  font-family: var(--font-mono);
+}

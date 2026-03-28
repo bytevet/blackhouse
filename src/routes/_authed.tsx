@@ -18,10 +18,10 @@ export const Route = createFileRoute("/_authed")({
 function AuthedLayout() {
   return (
     <TooltipProvider>
-      <SidebarProvider>
+      <SidebarProvider className="h-dvh">
         <AppSidebar />
-        <main className="flex flex-1 flex-col">
-          <header className="flex h-10 items-center border-b border-border px-4">
+        <main className="flex flex-1 flex-col overflow-hidden">
+          <header className="flex h-10 shrink-0 items-center border-b px-4">
             <SidebarTrigger />
           </header>
           <div className="flex-1 overflow-auto p-4">
