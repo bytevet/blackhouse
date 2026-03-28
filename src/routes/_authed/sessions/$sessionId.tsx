@@ -82,7 +82,7 @@ function SessionViewPage() {
   }
 
   return (
-    <div className="flex h-[calc(100dvh-6.5rem)] flex-col">
+    <div className="flex h-[calc(100dvh-5rem)] flex-col -m-4 md:-m-6">
       {/* Meta section */}
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2 md:gap-3 md:px-4">
         <h1 className="text-sm font-semibold text-foreground">{session.name}</h1>

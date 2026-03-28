@@ -1,7 +1,5 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
-import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { AppSidebar } from "@/components/app-sidebar";
+import { AppHeader } from "@/components/app-header";
 import { getServerSession } from "@/lib/auth-server";
 
 export const Route = createFileRoute("/_authed")({
@@ -17,18 +15,11 @@ export const Route = createFileRoute("/_authed")({
 
 function AuthedLayout() {
   return (
-    <TooltipProvider>
-      <SidebarProvider className="h-dvh">
-        <AppSidebar />
-        <main className="flex flex-1 flex-col overflow-hidden">
-          <header className="flex h-10 shrink-0 items-center border-b px-4">
-            <SidebarTrigger />
-          </header>
-          <div className="flex-1 overflow-auto p-4">
-            <Outlet />
-          </div>
-        </main>
-      </SidebarProvider>
-    </TooltipProvider>
+    <div className="flex h-dvh flex-col">
+      <AppHeader />
+      <main className="flex-1 overflow-auto p-4 md:p-6">
+        <Outlet />
+      </main>
+    </div>
   );
 }
