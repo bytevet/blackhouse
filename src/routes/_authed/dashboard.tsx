@@ -46,11 +46,19 @@ import { sessionStatusConfig } from "@/lib/session-status";
 
 export const Route = createFileRoute("/_authed/dashboard")({
   loader: async () => {
-    const [sessions, templates, agentConfigs] = await Promise.all([
+    const [sessions, myTemplates, publicTemplates, agentConfigs] = await Promise.all([
       listSessions(),
+      listTemplates({ data: { mine: true } }),
       listTemplates({ data: { mine: false } }),
       listAgentConfigs(),
     ]);
+    // Merge and deduplicate (user's own + public)
+    const seen = new Set<string>();
+    const templates = [...myTemplates, ...publicTemplates].filter((t) => {
+      if (seen.has(t.id)) return false;
+      seen.add(t.id);
+      return true;
+    });
     return { sessions, templates, agentConfigs };
   },
   component: DashboardPage,
