@@ -87,7 +87,7 @@ describe("Database Schema", () => {
       expect(columns).toContain("gitRepoUrl");
       expect(columns).toContain("gitBranch");
       expect(columns).toContain("templateId");
-      expect(columns).toContain("agentType");
+      expect(columns).toContain("preset");
       expect(columns).toContain("containerId");
       expect(columns).toContain("containerImage");
       expect(columns).toContain("resultHtml");
@@ -105,6 +105,7 @@ describe("Database Schema", () => {
       expect(columns).toContain("skills");
       expect(columns).toContain("mcpConfig");
       expect(columns).toContain("isPublic");
+      expect(columns).toContain("gitRequired");
       expect(columns).toContain("createdAt");
       expect(columns).toContain("updatedAt");
     });
@@ -112,11 +113,11 @@ describe("Database Schema", () => {
     it("should define agentConfigs table with all columns", () => {
       const columns = Object.keys(agentConfigs);
       expect(columns).toContain("id");
-      expect(columns).toContain("agentType");
+      expect(columns).toContain("preset");
       expect(columns).toContain("displayName");
-      expect(columns).toContain("apiKeyEncrypted");
-      expect(columns).toContain("defaultModel");
-      expect(columns).toContain("extraArgs");
+      expect(columns).toContain("agentCommand");
+      expect(columns).toContain("envVars");
+      expect(columns).toContain("volumeMounts");
       expect(columns).toContain("dockerfileContent");
       expect(columns).toContain("imageBuildStatus");
       expect(columns).toContain("imageBuildLog");
@@ -162,7 +163,7 @@ describe("Database Schema", () => {
         gitRepoUrl: null,
         gitBranch: "main",
         templateId: null,
-        agentType: "claude",
+        preset: "claude-code",
         containerId: null,
         containerImage: "ubuntu:latest",
         resultHtml: null,
@@ -182,7 +183,7 @@ describe("Database Schema", () => {
         skills: null,
         mcpConfig: null,
         isPublic: false,
-        yoloMode: true,
+        gitRequired: false,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -192,11 +193,11 @@ describe("Database Schema", () => {
     it("should allow constructing an AgentConfig-shaped object", () => {
       const ac: AgentConfig = {
         id: "ac-uuid",
-        agentType: "claude",
+        preset: "claude-code",
         displayName: "Claude Code",
-        apiKeyEncrypted: null,
-        defaultModel: null,
-        extraArgs: null,
+        agentCommand: null,
+        envVars: null,
+        volumeMounts: null,
         dockerfileContent: null,
         imageBuildStatus: "none",
         imageBuildLog: null,
@@ -204,7 +205,7 @@ describe("Database Schema", () => {
         createdAt: new Date(),
         updatedAt: new Date(),
       };
-      expect(ac.agentType).toBe("claude");
+      expect(ac.preset).toBe("claude-code");
     });
 
     it("should allow constructing a User-shaped object", () => {

@@ -72,7 +72,7 @@ export const createTemplate = createServerFn({ method: "POST" })
       skills: z.unknown().optional(),
       mcpConfig: z.unknown().optional(),
       isPublic: z.boolean().optional(),
-      yoloMode: z.boolean().optional(),
+      gitRequired: z.boolean().optional(),
     }),
   )
   .handler(async ({ data, context }) => {
@@ -88,7 +88,7 @@ export const createTemplate = createServerFn({ method: "POST" })
         skills: data.skills ?? null,
         mcpConfig: data.mcpConfig ?? null,
         isPublic: data.isPublic ?? false,
-        yoloMode: data.yoloMode ?? true,
+        gitRequired: data.gitRequired ?? false,
       })
       .returning();
 
@@ -110,7 +110,7 @@ export const updateTemplate = createServerFn({ method: "POST" })
       skills: z.unknown().optional(),
       mcpConfig: z.unknown().optional(),
       isPublic: z.boolean().optional(),
-      yoloMode: z.boolean().optional(),
+      gitRequired: z.boolean().optional(),
     }),
   )
   .handler(async ({ data, context }) => {
@@ -138,7 +138,7 @@ export const updateTemplate = createServerFn({ method: "POST" })
     if (fields.skills !== undefined) updateData.skills = fields.skills;
     if (fields.mcpConfig !== undefined) updateData.mcpConfig = fields.mcpConfig;
     if (fields.isPublic !== undefined) updateData.isPublic = fields.isPublic;
-    if (fields.yoloMode !== undefined) updateData.yoloMode = fields.yoloMode;
+    if (fields.gitRequired !== undefined) updateData.gitRequired = fields.gitRequired;
 
     const updated = await db
       .update(schema.templates)

@@ -89,7 +89,7 @@ export const codingSessions = pgTable("coding_sessions", {
   templateId: uuid("template_id").references(() => templates.id, {
     onDelete: "set null",
   }),
-  agentType: text("agent_type").notNull(),
+  preset: text("preset").notNull(),
   containerId: text("container_id"),
   containerImage: text("container_image").notNull(),
   resultHtml: text("result_html"),
@@ -108,18 +108,18 @@ export const templates = pgTable("templates", {
   skills: jsonb("skills"),
   mcpConfig: jsonb("mcp_config"),
   isPublic: boolean("is_public").notNull().default(false),
-  yoloMode: boolean("yolo_mode").notNull().default(true),
+  gitRequired: boolean("git_required").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 export const agentConfigs = pgTable("agent_configs", {
   id: uuid("id").defaultRandom().primaryKey(),
-  agentType: text("agent_type").notNull().unique(),
+  preset: text("preset").notNull(),
   displayName: text("display_name").notNull(),
-  apiKeyEncrypted: text("api_key_encrypted"),
-  defaultModel: text("default_model"),
-  extraArgs: jsonb("extra_args"),
+  agentCommand: text("agent_command"),
+  envVars: jsonb("env_vars"),
+  volumeMounts: jsonb("volume_mounts"),
   dockerfileContent: text("dockerfile_content"),
   imageBuildStatus: text("image_build_status").notNull().default("none"),
   imageBuildLog: text("image_build_log"),

@@ -1,0 +1,42 @@
+export type PresetId = "claude-code" | "gemini" | "codex" | "custom";
+
+export interface AgentPreset {
+  id: PresetId;
+  displayName: string;
+  agentCommand: string;
+  volumeMounts: { name: string; mountPath: string }[];
+  dockerfilePath: string;
+}
+
+export const AGENT_PRESETS: Record<PresetId, AgentPreset> = {
+  "claude-code": {
+    id: "claude-code",
+    displayName: "Claude Code",
+    agentCommand: "claude --dangerously-skip-permissions",
+    volumeMounts: [{ name: "claude-credentials", mountPath: "/home/workspace/.claude" }],
+    dockerfilePath: "dockerfiles/claude-code.Dockerfile",
+  },
+  gemini: {
+    id: "gemini",
+    displayName: "Gemini",
+    agentCommand: "gemini --yolo",
+    volumeMounts: [{ name: "gemini-credentials", mountPath: "/home/workspace/.gemini" }],
+    dockerfilePath: "dockerfiles/gemini.Dockerfile",
+  },
+  codex: {
+    id: "codex",
+    displayName: "Codex",
+    agentCommand: "codex --full-auto",
+    volumeMounts: [{ name: "codex-credentials", mountPath: "/home/workspace/.codex" }],
+    dockerfilePath: "dockerfiles/codex.Dockerfile",
+  },
+  custom: {
+    id: "custom",
+    displayName: "Custom",
+    agentCommand: "",
+    volumeMounts: [],
+    dockerfilePath: "dockerfiles/claude-code.Dockerfile",
+  },
+};
+
+export const PRESET_OPTIONS = Object.values(AGENT_PRESETS);

@@ -67,22 +67,21 @@ export const upsertAgentConfig = createServerFn({ method: "POST" })
   .inputValidator(
     z.object({
       id: z.string().optional(),
-      agentType: z.string(),
+      preset: z.string(),
       displayName: z.string(),
-      apiKeyEncrypted: z.string().optional(),
-      apiKey: z.string().optional(),
-      defaultModel: z.string().optional(),
-      extraArgs: z.unknown().optional(),
+      agentCommand: z.string().optional(),
+      envVars: z.array(z.object({ key: z.string(), value: z.string() })).optional(),
+      volumeMounts: z.array(z.object({ name: z.string(), mountPath: z.string() })).optional(),
       dockerfileContent: z.string().nullable().optional(),
     }),
   )
   .handler(async ({ data }) => {
     const values: Record<string, unknown> = {
-      agentType: data.agentType,
+      preset: data.preset,
       displayName: data.displayName,
-      apiKeyEncrypted: data.apiKeyEncrypted ?? data.apiKey ?? null,
-      defaultModel: data.defaultModel ?? null,
-      extraArgs: data.extraArgs ?? null,
+      agentCommand: data.agentCommand ?? null,
+      envVars: data.envVars ?? null,
+      volumeMounts: data.volumeMounts ?? null,
       dockerfileContent: data.dockerfileContent ?? null,
       updatedAt: new Date(),
     };
@@ -156,7 +155,7 @@ export const buildAgentImage = createServerFn({ method: "POST" })
 
     // Start async build (don't await)
     const configId = data.agentConfigId;
-    const agentType = agentConfig.agentType;
+    const preset = agentConfig.preset;
     const dockerfileContent = agentConfig.dockerfileContent;
 
     (async () => {
@@ -166,7 +165,17 @@ export const buildAgentImage = createServerFn({ method: "POST" })
         if (dockerfileContent) {
           dockerfile = dockerfileContent;
         } else {
-          dockerfile = fs.readFileSync(path.resolve(process.cwd(), "Dockerfile.session"), "utf-8");
+          // Read preset-specific dockerfile, fall back to claude-code
+          const presetDockerfile = path.resolve(process.cwd(), `dockerfiles/${preset}.Dockerfile`);
+          const fallbackDockerfile = path.resolve(
+            process.cwd(),
+            "dockerfiles/claude-code.Dockerfile",
+          );
+          if (fs.existsSync(presetDockerfile)) {
+            dockerfile = fs.readFileSync(presetDockerfile, "utf-8");
+          } else {
+            dockerfile = fs.readFileSync(fallbackDockerfile, "utf-8");
+          }
         }
 
         // Read supporting files
@@ -174,20 +183,15 @@ export const buildAgentImage = createServerFn({ method: "POST" })
           path.resolve(process.cwd(), "scripts/session-entrypoint.sh"),
           "utf-8",
         );
-        const resultServer = fs.readFileSync(
-          path.resolve(process.cwd(), "src/mcp/result-server.ts"),
-          "utf-8",
-        );
 
         // Create tar stream with build context
         const pack = tar.pack();
         pack.entry({ name: "Dockerfile" }, dockerfile);
         pack.entry({ name: "scripts/session-entrypoint.sh" }, entrypointScript);
-        pack.entry({ name: "src/mcp/result-server.ts" }, resultServer);
         pack.finalize();
 
         const docker = await getDockerClient();
-        const tag = `blackhouse-agent-${agentType}:latest`;
+        const tag = `blackhouse-agent-${configId}:latest`;
 
         const stream = await docker.buildImage(pack as unknown as NodeJS.ReadableStream, {
           t: tag,

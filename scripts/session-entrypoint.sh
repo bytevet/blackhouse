@@ -1,46 +1,82 @@
 #!/bin/bash
-set -e
 
-# Clone git repo if provided
+# 1) Git clone (shallow, only if URL provided and not already cloned)
 if [ -n "$GIT_REPO_URL" ]; then
-  BRANCH="${GIT_BRANCH:-main}"
   REPO_DIR="/workspace/$(basename "$GIT_REPO_URL" .git)"
-
-  echo "[blackhouse] Cloning $GIT_REPO_URL (branch: $BRANCH)..."
-  git clone --branch "$BRANCH" "$GIT_REPO_URL" "$REPO_DIR" 2>&1 || {
-    echo "[blackhouse] Clone failed, trying without branch..."
-    git clone "$GIT_REPO_URL" "$REPO_DIR" 2>&1
-  }
+  if [ ! -d "$REPO_DIR/.git" ]; then
+    echo "[blackhouse] Cloning $GIT_REPO_URL (branch: ${GIT_BRANCH:-main})..."
+    git clone --depth=1 --branch "${GIT_BRANCH:-main}" "$GIT_REPO_URL" "$REPO_DIR" 2>&1 || \
+    git clone --depth=1 "$GIT_REPO_URL" "$REPO_DIR" 2>&1
+  fi
   cd "$REPO_DIR"
 fi
 
-# Configure MCP result server for the coding agent
+# 2) Install Blackhouse skill for result submission (works across all agents)
 if [ -n "$SESSION_ID" ] && [ -n "$BLACKHOUSE_URL" ]; then
-  mkdir -p "$HOME/.claude"
-
-  # Create Claude Code MCP config
-  cat > "$HOME/.claude/settings.json" << EOF
+  # Create skill config that any agent can discover
+  mkdir -p "$HOME/.skills"
+  cat > "$HOME/.skills/blackhouse-result.json" << EOF
 {
-  "mcpServers": {
-    "blackhouse-result": {
-      "command": "node",
-      "args": ["/opt/blackhouse/result-server.js"],
-      "env": {
-        "SESSION_ID": "$SESSION_ID",
-        "CONTAINER_TOKEN": "$CONTAINER_TOKEN",
-        "BLACKHOUSE_URL": "$BLACKHOUSE_URL"
-      }
-    }
-  }
+  "name": "blackhouse-result",
+  "description": "Submit HTML results back to the Blackhouse session view",
+  "endpoint": "${BLACKHOUSE_URL}/api/sessions/result",
+  "session_id": "${SESSION_ID}",
+  "container_token": "${CONTAINER_TOKEN}"
 }
 EOF
+
+  # Also configure Claude Code MCP if this is a Claude session
+  if command -v claude &> /dev/null; then
+    mkdir -p "$HOME/.claude"
+    cat > "$HOME/.claude/settings.json" << MCPEOF
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl:*)",
+      "Bash(git:*)",
+      "Bash(npm:*)",
+      "Bash(node:*)",
+      "Bash(npx:*)",
+      "Bash(python*:*)",
+      "Bash(pip*:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(mkdir:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)",
+      "Bash(rm:*)",
+      "Bash(chmod:*)",
+      "Bash(echo:*)",
+      "Bash(touch:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Bash(sort:*)",
+      "Bash(sed:*)",
+      "Bash(awk:*)",
+      "Bash(tar:*)",
+      "Bash(unzip:*)",
+      "Bash(wget:*)"
+    ]
+  }
+}
+MCPEOF
+  fi
 fi
 
-# Start the coding agent if configured
+# 3) Run agent command interactively (if set)
 if [ -n "$AGENT_COMMAND" ]; then
   echo "[blackhouse] Starting agent: $AGENT_COMMAND"
-  eval "$AGENT_COMMAND" &
+  if [ -n "$SYSTEM_PROMPT" ]; then
+    # Pipe system prompt as initial input to the agent
+    eval "$AGENT_COMMAND" <<< "$SYSTEM_PROMPT" || true
+  else
+    eval "$AGENT_COMMAND" || true
+  fi
+  echo "[blackhouse] Agent exited. Dropping to shell."
 fi
 
-# Execute the CMD
-exec "$@"
+# 4) Drop to bash shell after agent exits
+exec /bin/bash

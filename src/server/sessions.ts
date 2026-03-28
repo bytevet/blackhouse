@@ -6,38 +6,6 @@ import * as schema from "@/db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { getDockerClient } from "@/lib/docker";
 
-function generateEntrypoint(opts: {
-  gitRepoUrl?: string | null;
-  gitBranch?: string | null;
-  systemPrompt?: string | null;
-  agentType: string;
-}): string {
-  const lines: string[] = ["#!/bin/sh", "set -e"];
-
-  if (opts.gitRepoUrl) {
-    const branch = opts.gitBranch ?? "main";
-    // Skip clone if repo already exists (e.g. after container restart)
-    lines.push(`if [ ! -d "/workspace/.git" ]; then`);
-    lines.push(`  git clone --branch "${branch}" "${opts.gitRepoUrl}" /workspace`);
-    lines.push(`fi`);
-    lines.push("cd /workspace");
-  } else {
-    lines.push("mkdir -p /workspace && cd /workspace");
-  }
-
-  if (opts.systemPrompt) {
-    // Write the system prompt as a config file the agent can read
-    lines.push(`cat > /workspace/.agent-prompt <<'AGENT_PROMPT_EOF'`);
-    lines.push(opts.systemPrompt);
-    lines.push("AGENT_PROMPT_EOF");
-  }
-
-  // Keep container alive so users can attach / the agent runs
-  lines.push("exec tail -f /dev/null");
-
-  return lines.join("\n");
-}
-
 // ---------------------------------------------------------------------------
 // listSessions
 // ---------------------------------------------------------------------------
@@ -105,14 +73,14 @@ export const createSession = createServerFn({ method: "POST" })
       gitRepoUrl: z.string().optional(),
       gitBranch: z.string().optional(),
       templateId: z.string().optional(),
-      agentType: z.string().optional(),
+      preset: z.string().optional(),
       agentConfigId: z.string().optional(),
     }),
   )
   .handler(async ({ data, context }) => {
     const session = context.session;
 
-    // Look up agent config for docker image & keys
+    // Look up agent config for docker image
     let agentConfigRows;
     if (data.agentConfigId) {
       agentConfigRows = await db
@@ -120,18 +88,18 @@ export const createSession = createServerFn({ method: "POST" })
         .from(schema.agentConfigs)
         .where(eq(schema.agentConfigs.id, data.agentConfigId))
         .limit(1);
-    } else if (data.agentType) {
+    } else if (data.preset) {
       agentConfigRows = await db
         .select()
         .from(schema.agentConfigs)
-        .where(eq(schema.agentConfigs.agentType, data.agentType))
+        .where(eq(schema.agentConfigs.preset, data.preset))
         .limit(1);
     } else {
-      throw new Error("Either agentType or agentConfigId is required");
+      throw new Error("Either preset or agentConfigId is required");
     }
 
     if (agentConfigRows.length === 0) {
-      throw new Error(`Unknown agent: ${data.agentConfigId ?? data.agentType}`);
+      throw new Error(`Unknown agent: ${data.agentConfigId ?? data.preset}`);
     }
 
     const agentConfig = agentConfigRows[0];
@@ -140,7 +108,7 @@ export const createSession = createServerFn({ method: "POST" })
       throw new Error(`Agent "${agentConfig.displayName}" does not have a built Docker image`);
     }
 
-    const imageName = `blackhouse-agent-${agentConfig.agentType}:latest`;
+    const imageName = `blackhouse-agent-${agentConfig.id}:latest`;
 
     // If template requested, load it
     let template: typeof schema.templates.$inferSelect | null = null;
@@ -158,6 +126,11 @@ export const createSession = createServerFn({ method: "POST" })
       template = templates[0];
     }
 
+    // Validate git requirement from template
+    if (template?.gitRequired && !data.gitRepoUrl) {
+      throw new Error("This template requires a Git repository");
+    }
+
     const inserted = await db
       .insert(schema.codingSessions)
       .values({
@@ -166,7 +139,7 @@ export const createSession = createServerFn({ method: "POST" })
         gitRepoUrl: data.gitRepoUrl ?? null,
         gitBranch: data.gitBranch ?? "main",
         templateId: data.templateId ?? null,
-        agentType: agentConfig.agentType,
+        preset: agentConfig.preset,
         containerImage: imageName,
         status: "pending",
       })
@@ -177,31 +150,43 @@ export const createSession = createServerFn({ method: "POST" })
     // Build environment variables for the container
     const env: string[] = [
       `SESSION_ID=${codingSession.id}`,
-      `AGENT_TYPE=${agentConfig.agentType}`,
       `SESSION_NAME=${data.name}`,
+      `BLACKHOUSE_URL=${process.env.BETTER_AUTH_URL || "http://host.docker.internal:3000"}`,
+      `CONTAINER_TOKEN=${codingSession.id}`,
     ];
 
-    if (agentConfig.apiKeyEncrypted) {
-      env.push(`AGENT_API_KEY=${agentConfig.apiKeyEncrypted}`);
-    }
-    if (agentConfig.defaultModel) {
-      env.push(`AGENT_MODEL=${agentConfig.defaultModel}`);
-    }
-    const yoloMode = template?.yoloMode ?? true;
-    if (yoloMode) {
-      env.push("AGENT_YOLO=1");
-    }
-    if (agentConfig.extraArgs) {
-      env.push(`AGENT_EXTRA_ARGS=${JSON.stringify(agentConfig.extraArgs)}`);
+    if (data.gitRepoUrl) {
+      env.push(`GIT_REPO_URL=${data.gitRepoUrl}`);
+      if (data.gitBranch) {
+        env.push(`GIT_BRANCH=${data.gitBranch}`);
+      }
     }
 
-    // Build entrypoint script
-    const entrypoint = generateEntrypoint({
-      gitRepoUrl: data.gitRepoUrl,
-      gitBranch: data.gitBranch,
-      systemPrompt: template?.systemPrompt,
-      agentType: agentConfig.agentType,
-    });
+    if (agentConfig.agentCommand) {
+      env.push(`AGENT_COMMAND=${agentConfig.agentCommand}`);
+    }
+
+    if (template?.systemPrompt) {
+      env.push(`SYSTEM_PROMPT=${template.systemPrompt}`);
+    }
+
+    // Add custom env vars from agent config
+    if (Array.isArray(agentConfig.envVars)) {
+      for (const entry of agentConfig.envVars as Array<{ key: string; value: string }>) {
+        env.push(`${entry.key}=${entry.value}`);
+      }
+    }
+
+    // Build volume mounts (Binds) from agent config
+    const binds: string[] = [];
+    if (Array.isArray(agentConfig.volumeMounts)) {
+      for (const mount of agentConfig.volumeMounts as Array<{
+        name: string;
+        mountPath: string;
+      }>) {
+        binds.push(`${mount.name}:${mount.mountPath}`);
+      }
+    }
 
     try {
       const docker = await getDockerClient();
@@ -209,7 +194,8 @@ export const createSession = createServerFn({ method: "POST" })
       const container = await docker.createContainer({
         Image: imageName,
         Env: env,
-        Cmd: ["/bin/sh", "-c", entrypoint],
+        Tty: true,
+        OpenStdin: true,
         Labels: {
           "blackhouse.session_id": codingSession.id,
           "blackhouse.user_id": session.user.id,
@@ -219,6 +205,7 @@ export const createSession = createServerFn({ method: "POST" })
           // Reasonable defaults for coding containers
           Memory: 2 * 1024 * 1024 * 1024, // 2GB
           NanoCpus: 2_000_000_000, // 2 CPUs
+          Binds: binds.length > 0 ? binds : undefined,
         },
       });
 

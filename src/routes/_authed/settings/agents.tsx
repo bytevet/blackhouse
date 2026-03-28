@@ -30,8 +30,16 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/select";
 import { Plus, Trash2, Edit, Hammer, FileText } from "lucide-react";
 import { timeAgo } from "@/lib/time";
+import { AGENT_PRESETS, PRESET_OPTIONS, type PresetId } from "@/lib/agent-presets";
 import type { AgentConfig } from "@/db/schema";
 
 export const Route = createFileRoute("/_authed/settings/agents")({
@@ -127,12 +135,12 @@ function AgentsTab() {
   const [buildLogAgentId, setBuildLogAgentId] = useState<string | null>(null);
 
   // Form
-  const [agentType, setAgentType] = useState("");
+  const [preset, setPreset] = useState<string>("claude-code");
   const [displayName, setDisplayName] = useState("");
-  const [apiKey, setApiKey] = useState("");
+  const [agentCommand, setAgentCommand] = useState("");
+  const [envVars, setEnvVars] = useState<{ key: string; value: string }[]>([]);
+  const [volumeMounts, setVolumeMounts] = useState<{ name: string; mountPath: string }[]>([]);
   const [dockerfileContent, setDockerfileContent] = useState("");
-  const [defaultModel, setDefaultModel] = useState("");
-  const [extraArgs, setExtraArgs] = useState("");
 
   useEffect(() => {
     setConfigs(initial);
@@ -187,49 +195,64 @@ function AgentsTab() {
     setConfigs(updated);
   };
 
+  const handlePresetChange = async (value: string) => {
+    setPreset(value);
+    const p = AGENT_PRESETS[value as PresetId];
+    if (p) {
+      setDisplayName(p.displayName);
+      setAgentCommand(p.agentCommand);
+      setVolumeMounts(p.volumeMounts.map((v) => ({ ...v })));
+      try {
+        const content = await getDefaultDockerfile({ data: { preset: value } });
+        setDockerfileContent(content);
+      } catch {
+        /* ignore */
+      }
+    }
+  };
+
   const openCreate = () => {
     setEditing(null);
-    setAgentType("");
-    setDisplayName("");
-    setApiKey("");
+    setPreset("claude-code");
+    setDisplayName("Claude Code");
+    setAgentCommand("claude --dangerously-skip-permissions");
+    setEnvVars([]);
+    setVolumeMounts([{ name: "claude-credentials", mountPath: "/home/workspace/.claude" }]);
     setDockerfileContent("");
-    setDefaultModel("");
-    setExtraArgs("");
+    handlePresetChange("claude-code"); // load default dockerfile
     setDialogOpen(true);
   };
 
   const openEdit = (config: AgentConfig) => {
     setEditing(config);
-    setAgentType(config.agentType || "");
-    setDisplayName(config.displayName || "");
-    setApiKey("");
+    setPreset(config.preset || "custom");
+    setDisplayName(config.displayName);
+    setAgentCommand(config.agentCommand || "");
+    setEnvVars(
+      Array.isArray(config.envVars) ? (config.envVars as { key: string; value: string }[]) : [],
+    );
+    setVolumeMounts(
+      Array.isArray(config.volumeMounts)
+        ? (config.volumeMounts as { name: string; mountPath: string }[])
+        : [],
+    );
     setDockerfileContent(config.dockerfileContent || "");
-    setDefaultModel(config.defaultModel || "");
-    setExtraArgs(config.extraArgs ? JSON.stringify(config.extraArgs, null, 2) : "");
     setDialogOpen(true);
   };
 
   const handleSave = async () => {
-    if (!agentType.trim() || !displayName.trim()) return;
+    if (!displayName.trim()) return;
     setSaving(true);
     try {
-      let parsedExtraArgs: Record<string, unknown> | undefined = undefined;
-      if (extraArgs.trim()) {
-        try {
-          parsedExtraArgs = JSON.parse(extraArgs.trim());
-        } catch {
-          return;
-        }
-      }
       await upsertAgentConfig({
         data: {
           id: editing?.id,
-          agentType: agentType.trim(),
+          preset,
           displayName: displayName.trim(),
-          apiKey: apiKey.trim() || undefined,
+          agentCommand: agentCommand.trim() || undefined,
+          envVars: envVars.filter((e) => e.key.trim()),
+          volumeMounts: volumeMounts.filter((v) => v.name.trim() && v.mountPath.trim()),
           dockerfileContent: dockerfileContent.trim() || null,
-          defaultModel: defaultModel.trim() || undefined,
-          extraArgs: parsedExtraArgs,
         },
       });
       setDialogOpen(false);
@@ -254,19 +277,23 @@ function AgentsTab() {
       ),
     );
     // Auto-open build log dialog
-    setBuildLogTitle(`Build Log: ${config?.displayName || config?.agentType || "Agent"}`);
+    setBuildLogTitle(`Build Log: ${config?.displayName || "Agent"}`);
     setBuildLogContent("Build started...");
     setBuildLogAgentId(agentConfigId);
     setBuildLogDialogOpen(true);
   };
 
-  const handleLoadDefault = async () => {
-    const content = await getDefaultDockerfile();
-    setDockerfileContent(content);
+  const handleResetDockerfile = async () => {
+    try {
+      const content = await getDefaultDockerfile({ data: { preset } });
+      setDockerfileContent(content);
+    } catch {
+      /* ignore */
+    }
   };
 
   const openBuildLog = (config: AgentConfig) => {
-    setBuildLogTitle(`Build Log: ${config.displayName || config.agentType}`);
+    setBuildLogTitle(`Build Log: ${config.displayName}`);
     setBuildLogContent(config.imageBuildLog || "No build log available.");
     setBuildLogAgentId(config.id);
     setBuildLogDialogOpen(true);
@@ -286,8 +313,8 @@ function AgentsTab() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Agent Type</TableHead>
               <TableHead>Display Name</TableHead>
+              <TableHead>Preset</TableHead>
               <TableHead>Build Status</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
@@ -302,8 +329,10 @@ function AgentsTab() {
             ) : (
               configs.map((c: AgentConfig) => (
                 <TableRow key={c.id}>
-                  <TableCell>{c.agentType}</TableCell>
                   <TableCell>{c.displayName}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline">{c.preset}</Badge>
+                  </TableCell>
                   <TableCell>
                     <BuildStatusBadge
                       status={c.imageBuildStatus}
@@ -339,20 +368,26 @@ function AgentsTab() {
 
       {/* Create / Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>{editing ? "Edit Agent Config" : "Add Agent Config"}</DialogTitle>
             <DialogDescription>Configure a coding agent for sessions.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
             <div className="grid gap-1.5">
-              <Label htmlFor="ac-type">Agent Type</Label>
-              <Input
-                id="ac-type"
-                placeholder="e.g. claude-code"
-                value={agentType}
-                onChange={(e) => setAgentType(e.target.value)}
-              />
+              <Label>Preset</Label>
+              <Select value={preset} onValueChange={handlePresetChange}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PRESET_OPTIONS.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.displayName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="ac-name">Display Name</Label>
@@ -364,30 +399,102 @@ function AgentsTab() {
               />
             </div>
             <div className="grid gap-1.5">
-              <Label htmlFor="ac-key">API Key</Label>
+              <Label htmlFor="ac-command">Agent Command</Label>
               <Input
-                id="ac-key"
-                type="password"
-                placeholder={editing ? "(unchanged)" : "sk-..."}
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
+                id="ac-command"
+                placeholder="e.g. claude --dangerously-skip-permissions"
+                value={agentCommand}
+                onChange={(e) => setAgentCommand(e.target.value)}
               />
             </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="ac-model">Default Model</Label>
-              <Input
-                id="ac-model"
-                placeholder="claude-sonnet-4-20250514"
-                value={defaultModel}
-                onChange={(e) => setDefaultModel(e.target.value)}
-              />
+            <div className="space-y-2">
+              <Label>Environment Variables</Label>
+              {envVars.map((ev, i) => (
+                <div key={i} className="flex gap-2">
+                  <Input
+                    placeholder="KEY"
+                    value={ev.key}
+                    onChange={(e) => {
+                      const n = [...envVars];
+                      n[i] = { ...n[i], key: e.target.value };
+                      setEnvVars(n);
+                    }}
+                    className="flex-1"
+                  />
+                  <Input
+                    placeholder="value"
+                    value={ev.value}
+                    onChange={(e) => {
+                      const n = [...envVars];
+                      n[i] = { ...n[i], value: e.target.value };
+                      setEnvVars(n);
+                    }}
+                    className="flex-1"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => setEnvVars(envVars.filter((_, j) => j !== i))}
+                  >
+                    <Trash2 className="size-3" />
+                  </Button>
+                </div>
+              ))}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setEnvVars([...envVars, { key: "", value: "" }])}
+              >
+                <Plus className="size-3" /> Add Variable
+              </Button>
+            </div>
+            <div className="space-y-2">
+              <Label>Volume Mounts</Label>
+              {volumeMounts.map((vm, i) => (
+                <div key={i} className="flex gap-2">
+                  <Input
+                    placeholder="name"
+                    value={vm.name}
+                    onChange={(e) => {
+                      const n = [...volumeMounts];
+                      n[i] = { ...n[i], name: e.target.value };
+                      setVolumeMounts(n);
+                    }}
+                    className="flex-1"
+                  />
+                  <Input
+                    placeholder="mountPath"
+                    value={vm.mountPath}
+                    onChange={(e) => {
+                      const n = [...volumeMounts];
+                      n[i] = { ...n[i], mountPath: e.target.value };
+                      setVolumeMounts(n);
+                    }}
+                    className="flex-1"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => setVolumeMounts(volumeMounts.filter((_, j) => j !== i))}
+                  >
+                    <Trash2 className="size-3" />
+                  </Button>
+                </div>
+              ))}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setVolumeMounts([...volumeMounts, { name: "", mountPath: "" }])}
+              >
+                <Plus className="size-3" /> Add Mount
+              </Button>
             </div>
             <div className="grid gap-1.5">
               <div className="flex items-center justify-between">
                 <Label htmlFor="ac-dockerfile">Dockerfile Content</Label>
-                <Button variant="outline" size="sm" type="button" onClick={handleLoadDefault}>
+                <Button variant="outline" size="sm" type="button" onClick={handleResetDockerfile}>
                   <FileText className="size-3" />
-                  Load Default
+                  Reset to Default
                 </Button>
               </div>
               <Textarea
@@ -395,25 +502,12 @@ function AgentsTab() {
                 placeholder="Leave empty to use default Dockerfile"
                 value={dockerfileContent}
                 onChange={(e) => setDockerfileContent(e.target.value)}
-                className="font-mono text-xs min-h-64"
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="ac-extra">Extra Args (JSON)</Label>
-              <Textarea
-                id="ac-extra"
-                placeholder='{"key": "value"}'
-                value={extraArgs}
-                onChange={(e) => setExtraArgs(e.target.value)}
-                className="font-mono text-xs"
+                className="font-mono text-xs max-h-64 overflow-auto"
               />
             </div>
           </div>
           <DialogFooter>
-            <Button
-              onClick={handleSave}
-              disabled={!agentType.trim() || !displayName.trim() || saving}
-            >
+            <Button onClick={handleSave} disabled={!displayName.trim() || saving}>
               {saving ? "Saving..." : editing ? "Update" : "Create"}
             </Button>
           </DialogFooter>

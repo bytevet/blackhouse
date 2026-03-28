@@ -166,7 +166,12 @@ function DashboardPage() {
                         value={ac.id}
                         disabled={ac.imageBuildStatus !== "built"}
                       >
-                        {ac.displayName || ac.agentType}
+                        <span className="flex items-center gap-1.5">
+                          {ac.displayName}
+                          <Badge variant="outline" className="text-[10px] px-1 py-0">
+                            {ac.preset}
+                          </Badge>
+                        </span>
                         {ac.imageBuildStatus !== "built" && (
                           <span className="ml-1 text-muted-foreground">(not built)</span>
                         )}
@@ -176,7 +181,12 @@ function DashboardPage() {
                 </Select>
               </div>
               <div className="grid gap-1.5">
-                <Label htmlFor="git-repo">Git Repo URL</Label>
+                <Label htmlFor="git-repo">
+                  Git Repo URL{" "}
+                  {templates.find((t: Template) => t.id === templateId)?.gitRequired && (
+                    <span className="text-destructive">*</span>
+                  )}
+                </Label>
                 <Input
                   id="git-repo"
                   placeholder="https://github.com/user/repo"
@@ -210,7 +220,16 @@ function DashboardPage() {
               </div>
             </div>
             <DialogFooter>
-              <Button onClick={handleCreate} disabled={!name.trim() || !agentConfigId || creating}>
+              <Button
+                onClick={handleCreate}
+                disabled={
+                  !name.trim() ||
+                  !agentConfigId ||
+                  creating ||
+                  (!!templates.find((t: Template) => t.id === templateId)?.gitRequired &&
+                    !gitRepoUrl.trim())
+                }
+              >
                 {creating ? "Creating..." : "Create Session"}
               </Button>
             </DialogFooter>
@@ -245,7 +264,7 @@ function DashboardPage() {
                   </CardTitle>
                   <CardDescription className="flex items-center gap-1">
                     <Bot className="size-3" />
-                    {s.agentType || s.agentConfigId || "Unknown"}
+                    {s.preset || s.agentConfigId || "Unknown"}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-1">

@@ -88,27 +88,35 @@ async function seed() {
   }
 
   // Seed default agent configs
-  const agentConfigs = [
-    {
-      agentType: "claude-code",
-      displayName: "Claude Code",
-      defaultModel: "claude-sonnet-4-20250514",
-    },
-    {
-      agentType: "codex",
-      displayName: "OpenAI Codex CLI",
-    },
-    {
-      agentType: "gemini",
-      displayName: "Gemini CLI",
-    },
-  ];
+  const existingConfigs = await db.select().from(schema.agentConfigs).limit(1);
 
-  for (const config of agentConfigs) {
-    await db
-      .insert(schema.agentConfigs)
-      .values(config)
-      .onConflictDoNothing({ target: schema.agentConfigs.agentType });
+  if (existingConfigs.length === 0) {
+    const agentConfigs = [
+      {
+        preset: "claude-code",
+        displayName: "Claude Code",
+        agentCommand: "claude --dangerously-skip-permissions",
+        volumeMounts: [{ name: "claude-credentials", mountPath: "/home/workspace/.claude" }],
+      },
+      {
+        preset: "gemini",
+        displayName: "Gemini",
+        agentCommand: "gemini --yolo",
+        volumeMounts: [{ name: "gemini-credentials", mountPath: "/home/workspace/.gemini" }],
+      },
+      {
+        preset: "codex",
+        displayName: "Codex",
+        agentCommand: "codex --full-auto",
+        volumeMounts: [{ name: "codex-credentials", mountPath: "/home/workspace/.codex" }],
+      },
+    ];
+
+    for (const config of agentConfigs) {
+      await db.insert(schema.agentConfigs).values(config);
+    }
+  } else {
+    console.log("Agent configs already exist, skipping.");
   }
 
   // Seed default docker config

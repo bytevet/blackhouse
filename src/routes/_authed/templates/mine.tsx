@@ -50,7 +50,7 @@ function MyTemplatesPage() {
   const [description, setDescription] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [isPublic, setIsPublic] = useState(false);
-  const [yoloMode, setYoloMode] = useState(true);
+  const [gitRequired, setGitRequired] = useState(false);
 
   useEffect(() => {
     setTemplates(initialTemplates);
@@ -67,7 +67,7 @@ function MyTemplatesPage() {
     setDescription("");
     setSystemPrompt("");
     setIsPublic(false);
-    setYoloMode(true);
+    setGitRequired(false);
     setDialogOpen(true);
   };
 
@@ -77,7 +77,7 @@ function MyTemplatesPage() {
     setDescription(template.description || "");
     setSystemPrompt(template.systemPrompt || "");
     setIsPublic(template.isPublic ?? false);
-    setYoloMode(template.yoloMode ?? true);
+    setGitRequired(template.gitRequired ?? false);
     setDialogOpen(true);
   };
 
@@ -98,7 +98,7 @@ function MyTemplatesPage() {
             description: description.trim(),
             systemPrompt: systemPrompt.trim(),
             isPublic,
-            yoloMode,
+            gitRequired,
           },
         });
       } else {
@@ -108,7 +108,7 @@ function MyTemplatesPage() {
             description: description.trim(),
             systemPrompt: systemPrompt.trim(),
             isPublic,
-            yoloMode,
+            gitRequired,
           },
         });
       }
@@ -148,7 +148,7 @@ function MyTemplatesPage() {
                 <CardTitle className="flex items-center justify-between gap-2">
                   <span className="truncate">{template.name}</span>
                   <span className="flex shrink-0 gap-1">
-                    {template.yoloMode && <Badge className="shrink-0">Yolo</Badge>}
+                    {template.gitRequired && <Badge className="shrink-0">Git Required</Badge>}
                     <Badge variant="outline" className="shrink-0">
                       {template.isPublic ? "Public" : "Private"}
                     </Badge>
@@ -223,9 +223,14 @@ function MyTemplatesPage() {
               <Label className="text-xs">Public template</Label>
             </div>
             <div className="flex items-center gap-2">
-              <Switch id="yolo-mode" checked={yoloMode} onCheckedChange={setYoloMode} size="sm" />
-              <Label htmlFor="yolo-mode" className="text-xs">
-                Yolo mode (auto-approve agent actions)
+              <Switch
+                id="git-required"
+                checked={gitRequired}
+                onCheckedChange={setGitRequired}
+                size="sm"
+              />
+              <Label htmlFor="git-required" className="text-xs">
+                Require Git repository
               </Label>
             </div>
           </div>
