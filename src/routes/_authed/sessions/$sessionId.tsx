@@ -3,6 +3,14 @@ import { useState, useCallback, useEffect } from "react";
 import { Square, Play, Trash2, PanelRightOpen, PanelRightClose, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TerminalPanel } from "@/components/terminal";
 import { FileExplorer } from "@/components/file-explorer";
@@ -28,6 +36,7 @@ function SessionViewPage() {
   const [selectedFile, setSelectedFile] = useState<string | undefined>();
   const [explorerTab, setExplorerTab] = useState<string>("files");
   const [actionLoading, setActionLoading] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<{ type: "stop" | "destroy" } | null>(null);
 
   useEffect(() => {
     if (!session || session.status !== "running") return;
@@ -109,7 +118,7 @@ function SessionViewPage() {
             <Button
               variant="outline"
               size="xs"
-              onClick={() => handleAction("stop")}
+              onClick={() => setConfirmAction({ type: "stop" })}
               disabled={actionLoading}
             >
               {actionLoading ? (
@@ -141,7 +150,7 @@ function SessionViewPage() {
             <Button
               variant="destructive"
               size="xs"
-              onClick={() => handleAction("destroy")}
+              onClick={() => setConfirmAction({ type: "destroy" })}
               disabled={actionLoading}
             >
               <Trash2 className="size-3" />
@@ -221,6 +230,37 @@ function SessionViewPage() {
           </div>
         )}
       </div>
+
+      {/* Confirm Stop / Destroy Dialog */}
+      <Dialog open={!!confirmAction} onOpenChange={(open) => !open && setConfirmAction(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {confirmAction?.type === "stop" ? "Stop Session" : "Destroy Session"}
+            </DialogTitle>
+            <DialogDescription>
+              {confirmAction?.type === "stop"
+                ? "Are you sure you want to stop this session?"
+                : "Are you sure you want to destroy this session? This action cannot be undone."}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmAction(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                if (!confirmAction) return;
+                await handleAction(confirmAction.type);
+                setConfirmAction(null);
+              }}
+            >
+              {confirmAction?.type === "stop" ? "Stop" : "Destroy"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

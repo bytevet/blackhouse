@@ -76,6 +76,11 @@ function DashboardPage() {
   const [showAll, setShowAll] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<{
+    type: "stop" | "destroy";
+    sessionId: string;
+    sessionName: string;
+  } | null>(null);
 
   const form = useForm({
     defaultValues: {
@@ -379,7 +384,9 @@ function DashboardPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => handleSessionAction(s.id, stopSession)}
+                      onClick={() =>
+                        setConfirmAction({ type: "stop", sessionId: s.id, sessionName: s.name })
+                      }
                     >
                       <Square className="size-3" />
                       Stop
@@ -399,7 +406,9 @@ function DashboardPage() {
                     <Button
                       variant="destructive"
                       size="sm"
-                      onClick={() => handleSessionAction(s.id, destroySession)}
+                      onClick={() =>
+                        setConfirmAction({ type: "destroy", sessionId: s.id, sessionName: s.name })
+                      }
                     >
                       <Trash2 className="size-3" />
                     </Button>
@@ -410,6 +419,38 @@ function DashboardPage() {
           })}
         </div>
       )}
+
+      {/* Confirm Stop / Destroy Dialog */}
+      <Dialog open={!!confirmAction} onOpenChange={(open) => !open && setConfirmAction(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {confirmAction?.type === "stop" ? "Stop Session" : "Destroy Session"}
+            </DialogTitle>
+            <DialogDescription>
+              {confirmAction?.type === "stop"
+                ? `Are you sure you want to stop session '${confirmAction.sessionName}'?`
+                : `Are you sure you want to destroy session '${confirmAction?.sessionName}'? This will delete the session and all its data permanently.`}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmAction(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                if (!confirmAction) return;
+                const action = confirmAction.type === "stop" ? stopSession : destroySession;
+                await handleSessionAction(confirmAction.sessionId, action);
+                setConfirmAction(null);
+              }}
+            >
+              {confirmAction?.type === "stop" ? "Stop" : "Destroy"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

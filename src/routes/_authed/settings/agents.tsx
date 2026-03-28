@@ -130,6 +130,8 @@ function AgentsTab() {
   const [editing, setEditing] = useState<AgentConfig | null>(null);
   const [saving, setSaving] = useState(false);
 
+  const [deletingAgent, setDeletingAgent] = useState<AgentConfig | null>(null);
+
   // Build log dialog
   const [buildLogDialogOpen, setBuildLogDialogOpen] = useState(false);
   const [buildLogContent, setBuildLogContent] = useState("");
@@ -359,7 +361,7 @@ function AgentsTab() {
                       <Button variant="ghost" size="icon-sm" onClick={() => openEdit(c)}>
                         <Edit className="size-3" />
                       </Button>
-                      <Button variant="ghost" size="icon-sm" onClick={() => handleDelete(c.id)}>
+                      <Button variant="ghost" size="icon-sm" onClick={() => setDeletingAgent(c)}>
                         <Trash2 className="size-3" />
                       </Button>
                     </div>
@@ -558,6 +560,34 @@ function AgentsTab() {
                 </Button>
               )}
             />
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!deletingAgent} onOpenChange={(open) => !open && setDeletingAgent(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Agent</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete agent &apos;{deletingAgent?.displayName}&apos;? This
+              action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeletingAgent(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                if (!deletingAgent) return;
+                await handleDelete(deletingAgent.id);
+                setDeletingAgent(null);
+              }}
+            >
+              Delete
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
