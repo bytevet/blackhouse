@@ -125,7 +125,7 @@ export default defineWebSocketHandler({
       // Pipe container output → WebSocket
       terminal.stream.on("data", (chunk: Buffer) => {
         try {
-          peer.send(chunk.toString("binary"));
+          peer.send(new Uint8Array(chunk));
         } catch {
           // peer may have disconnected
         }
