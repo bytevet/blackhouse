@@ -395,7 +395,7 @@ function DashboardPage() {
                       Restart
                     </Button>
                   )}
-                  {status !== "destroyed" && (
+                  {status === "stopped" && (
                     <Button
                       variant="destructive"
                       size="sm"
