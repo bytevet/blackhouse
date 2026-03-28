@@ -150,13 +150,13 @@ export default defineWebSocketHandler({
             terminal.scrollbackSize -= removed.length;
           }
 
-          // Broadcast to ALL connected peers
+          // Broadcast to ALL connected peers (remove dead ones)
           const data = tagOutput(chunk);
           for (const p of terminal.peers) {
             try {
               p.send(data);
             } catch {
-              // peer may have disconnected
+              terminal.peers.delete(p);
             }
           }
         });
