@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useCallback, useEffect } from "react";
-import { Square, Play, Trash2, PanelRightOpen, PanelRightClose } from "lucide-react";
+import { Square, Play, Trash2, PanelRightOpen, PanelRightClose, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -93,7 +93,14 @@ function SessionViewPage() {
           variant="outline"
           className={sessionStatusConfig[session.status as SessionStatus]?.className ?? ""}
         >
-          {session.status}
+          {actionLoading ? (
+            <span className="flex items-center gap-1">
+              <Loader2 className="size-3 animate-spin" />
+              {session.status === "running" ? "Stopping..." : "Restarting..."}
+            </span>
+          ) : (
+            session.status
+          )}
         </Badge>
         <span className="hidden text-xs text-muted-foreground sm:inline">{session.gitRepoUrl}</span>
 
@@ -105,8 +112,12 @@ function SessionViewPage() {
               onClick={() => handleAction("stop")}
               disabled={actionLoading}
             >
-              <Square className="size-3" />
-              <span className="hidden sm:inline">Stop</span>
+              {actionLoading ? (
+                <Loader2 className="size-3 animate-spin" />
+              ) : (
+                <Square className="size-3" />
+              )}
+              <span className="hidden sm:inline">{actionLoading ? "Stopping..." : "Stop"}</span>
             </Button>
           )}
           {session.status === "stopped" && (
@@ -116,8 +127,14 @@ function SessionViewPage() {
               onClick={() => handleAction("restart")}
               disabled={actionLoading}
             >
-              <Play className="size-3" />
-              <span className="hidden sm:inline">Restart</span>
+              {actionLoading ? (
+                <Loader2 className="size-3 animate-spin" />
+              ) : (
+                <Play className="size-3" />
+              )}
+              <span className="hidden sm:inline">
+                {actionLoading ? "Restarting..." : "Restart"}
+              </span>
             </Button>
           )}
           {session.status === "stopped" && (
