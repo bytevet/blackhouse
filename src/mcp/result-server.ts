@@ -48,13 +48,24 @@ function handleRequest(req: JsonRpcRequest) {
             {
               name: "submit_result",
               description:
-                "Submit an HTML result to the Blackhouse session view. Use this to display visual results, reports, or any HTML content to the user.",
+                "Display rich HTML content to the user in the Blackhouse session viewer. " +
+                "Use this tool whenever you want to show the user something visual — " +
+                "dashboards, charts, reports, tables, documentation, diagrams, previews, " +
+                "or any formatted output that benefits from rich rendering. " +
+                "The HTML will be rendered in a sandboxed iframe in the user's browser. " +
+                "You SHOULD proactively use this tool to present results, summaries, " +
+                "and visual artifacts rather than only outputting plain text. " +
+                "The content must be a single self-contained HTML file (inline CSS/JS, no external resources).",
               inputSchema: {
                 type: "object",
                 properties: {
                   html: {
                     type: "string",
-                    description: "Complete HTML content to display (single-file, self-contained)",
+                    description:
+                      "A complete, self-contained HTML document. Include all CSS and JS inline. " +
+                      "Use modern HTML5. For charts, use inline SVG or a CDN like Chart.js/D3 via <script> tag. " +
+                      "For styling, prefer clean minimal design with system fonts. " +
+                      "Example: '<html><body><h1>Results</h1><table>...</table></body></html>'",
                   },
                 },
                 required: ["html"],

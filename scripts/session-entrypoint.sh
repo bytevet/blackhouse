@@ -29,7 +29,7 @@ if [ -n "$SESSION_ID" ] && [ -n "$BLACKHOUSE_URL" ]; then
   cat > "$HOME/.skills/blackhouse-result.json" << EOF
 {
   "name": "blackhouse-result",
-  "description": "Submit HTML results back to the Blackhouse session view",
+  "description": "Display rich HTML content to the user in the Blackhouse session viewer. Use this to show dashboards, charts, reports, tables, previews, or any formatted output. Proactively use this for visual results instead of plain text.",
   "endpoint": "${BLACKHOUSE_URL}/api/sessions/result",
   "session_id": "${SESSION_ID}",
   "container_token": "${CONTAINER_TOKEN}"
