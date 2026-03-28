@@ -15,7 +15,7 @@ export const AGENT_PRESETS: Record<PresetId, AgentPreset> = {
     agentCommand: "claude --dangerously-skip-permissions",
     volumeMounts: [
       { name: "claude-config", mountPath: "/home/workspace/.claude" },
-      { name: "claude-auth", mountPath: "/home/workspace/.claude.json" },
+      { name: "claude-auth", mountPath: "/home/workspace/.config/claude-auth" },
     ],
     dockerfilePath: "dockerfiles/claude-code.Dockerfile",
   },

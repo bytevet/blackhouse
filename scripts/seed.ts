@@ -98,7 +98,7 @@ async function seed() {
         agentCommand: "claude --dangerously-skip-permissions",
         volumeMounts: [
           { name: "claude-config", mountPath: "/home/workspace/.claude" },
-          { name: "claude-auth", mountPath: "/home/workspace/.claude.json" },
+          { name: "claude-auth", mountPath: "/home/workspace/.config/claude-auth" },
         ],
       },
       {

@@ -1,5 +1,16 @@
 #!/bin/bash
 
+# 0) Symlink auth files from config volumes (named volumes can't target single files)
+# Claude Code: ~/.claude.json stored in a separate volume directory
+if [ -d "$HOME/.config/claude-auth" ]; then
+  # If auth file exists in volume, symlink it to where Claude expects it
+  if [ -f "$HOME/.config/claude-auth/.claude.json" ]; then
+    ln -sf "$HOME/.config/claude-auth/.claude.json" "$HOME/.claude.json"
+  fi
+  # After Claude authenticates, copy the file into the volume for persistence
+  trap 'if [ -f "$HOME/.claude.json" ] && [ ! -L "$HOME/.claude.json" ]; then cp "$HOME/.claude.json" "$HOME/.config/claude-auth/.claude.json"; fi' EXIT
+fi
+
 # 1) Git clone (shallow, only if URL provided and not already cloned)
 if [ -n "$GIT_REPO_URL" ]; then
   REPO_DIR="/workspace/$(basename "$GIT_REPO_URL" .git)"
