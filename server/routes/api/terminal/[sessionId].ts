@@ -2,11 +2,11 @@ import { defineWebSocketHandler } from "h3";
 import { getDockerClient } from "../../../../src/lib/docker";
 import { db } from "../../../../src/db";
 import { codingSessions, session as authSession, user } from "../../../../src/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 interface TerminalState {
   stream: NodeJS.ReadWriteStream;
-  exec: import("dockerode").Exec;
+  containerId: string;
 }
 
 const activeTerminals = new Map<string, TerminalState>();
@@ -31,7 +31,6 @@ async function validateSession(
   sessionId: string,
   token?: string,
 ): Promise<{ containerId: string } | null> {
-  // Look up the coding session
   const [codingSession] = await db
     .select()
     .from(codingSessions)
@@ -41,7 +40,6 @@ async function validateSession(
   if (!codingSession || !codingSession.containerId) return null;
   if (codingSession.status !== "running") return null;
 
-  // If a token (auth session token) is provided, validate ownership
   if (token) {
     const [authSess] = await db
       .select()
@@ -51,10 +49,8 @@ async function validateSession(
 
     if (!authSess) return null;
 
-    // Check ownership or admin
     if (codingSession.userId !== authSess.userId) {
       const [usr] = await db.select().from(user).where(eq(user.id, authSess.userId)).limit(1);
-
       if (!usr || usr.role !== "admin") return null;
     }
   }
@@ -76,50 +72,46 @@ export default defineWebSocketHandler({
     }
 
     try {
-      // Reuse existing terminal session if stream is still alive
+      // Reuse existing attach stream if still alive
       const existing = activeTerminals.get(sessionId);
       let terminal: TerminalState;
 
       if (existing && !existing.stream.destroyed) {
         terminal = existing;
-        // Remove old listeners (from previous WebSocket connection)
+        // Detach old WebSocket listeners before attaching new ones
         existing.stream.removeAllListeners("data");
         existing.stream.removeAllListeners("end");
       } else {
-        // Create new exec session (retry up to 3 times for containers still starting)
+        // Attach to the container's main process (the entrypoint shell)
+        // This connects to the SAME process every time — no new bash spawned
         const docker = await getDockerClient();
         const container = docker.getContainer(result.containerId);
 
+        let stream: NodeJS.ReadWriteStream | null = null;
         let lastErr: unknown;
+
         for (let attempt = 0; attempt < 3; attempt++) {
           try {
-            const exec = await container.exec({
-              Cmd: ["/bin/bash"],
-              AttachStdin: true,
-              AttachStdout: true,
-              AttachStderr: true,
-              Tty: true,
-            });
-
-            const stream = await exec.start({
-              hijack: true,
+            stream = (await container.attach({
+              stream: true,
               stdin: true,
-              Tty: true,
-            } as import("dockerode").ExecStartOptions);
-
-            terminal = { stream, exec };
-            activeTerminals.set(sessionId, terminal);
+              stdout: true,
+              stderr: true,
+              hijack: true,
+            })) as NodeJS.ReadWriteStream;
             lastErr = null;
             break;
           } catch (err) {
             lastErr = err;
-            // Wait 2s before retry (container may still be starting)
             if (attempt < 2) {
               await new Promise((r) => setTimeout(r, 2000));
             }
           }
         }
-        if (lastErr) throw lastErr;
+        if (lastErr || !stream) throw lastErr || new Error("Failed to attach");
+
+        terminal = { stream, containerId: result.containerId };
+        activeTerminals.set(sessionId, terminal);
       }
 
       // Pipe container output → WebSocket
@@ -162,7 +154,6 @@ export default defineWebSocketHandler({
     } else if (message instanceof ArrayBuffer || message instanceof Uint8Array) {
       raw = Buffer.from(message);
     } else if (message && typeof message === "object") {
-      // crossws Message object — try rawData first, then text()
       const msg = message as { rawData?: ArrayBuffer | Uint8Array; text?: () => string };
       if (msg.rawData) {
         raw = Buffer.from(msg.rawData);
@@ -184,7 +175,10 @@ export default defineWebSocketHandler({
         const rows = parseInt(parts[1], 10);
         if (cols > 0 && rows > 0) {
           try {
-            await terminal.exec.resize({ w: cols, h: rows });
+            // Use container.resize() instead of exec.resize()
+            const docker = await getDockerClient();
+            const container = docker.getContainer(terminal.containerId);
+            await container.resize({ h: rows, w: cols });
           } catch {
             // ignore resize errors
           }
@@ -198,13 +192,16 @@ export default defineWebSocketHandler({
   },
 
   close(peer) {
+    // Don't destroy the stream on WebSocket close — keep the container process alive
+    // so the user can reconnect and see the same session
     const url = new URL(peer.request?.url ?? "", "http://localhost");
     const sessionId = url.pathname.split("/").pop() ?? "";
     const terminal = activeTerminals.get(sessionId);
 
     if (terminal) {
-      terminal.stream.end();
-      activeTerminals.delete(sessionId);
+      // Only remove listeners, keep the stream alive for reconnection
+      terminal.stream.removeAllListeners("data");
+      terminal.stream.removeAllListeners("end");
     }
   },
 });
