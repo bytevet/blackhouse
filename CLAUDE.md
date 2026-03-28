@@ -73,3 +73,11 @@ These files are generated and managed by shadcn/ui. Do not edit them manually �
 
 - `src/lib/utils.ts` — only contains `cn()`, managed by shadcn. Put custom utilities in separate files (e.g. `src/lib/time.ts`).
 - `src/components/ui/*` — all files in this directory are shadcn/ui components. Never modify them directly.
+
+## shadcn/ui Usage Rules
+
+- **Trust shadcn/ui components** — they work correctly. If something isn't working, the issue is in how you're using them, not in the components.
+- **Never modify `src/components/ui/*`** — these are managed by shadcn. Never add forwardRef wrappers, change props, or alter behavior.
+- **Never create custom alternatives** — don't build custom drag handles, custom selects, or any component that replaces a shadcn/ui component.
+- **Read the docs first** — before using or debugging a shadcn component, fetch the latest docs from https://ui.shadcn.com using Context7. Don't guess the API.
+- **Ask the user if stuck** — don't attempt multiple workarounds. If two attempts fail, ask.
