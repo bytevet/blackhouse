@@ -18,19 +18,15 @@ async function _getSession() {
 // Shared auth helpers (all wrapped in createServerFn for TanStack Start)
 // ---------------------------------------------------------------------------
 
-export const getServerSession = createServerFn({ method: "GET" }).handler(
-  async () => {
-    return _getSession();
-  },
-);
+export const getServerSession = createServerFn({ method: "GET" }).handler(async () => {
+  return _getSession();
+});
 
-export const requireSession = createServerFn({ method: "GET" }).handler(
-  async () => {
-    const session = await _getSession();
-    if (!session) throw new Error("Unauthorized");
-    return session;
-  },
-);
+export const requireSession = createServerFn({ method: "GET" }).handler(async () => {
+  const session = await _getSession();
+  if (!session) throw new Error("Unauthorized");
+  return session;
+});
 
 export const requireSessionOwnership = createServerFn({ method: "GET" })
   .inputValidator((input: { sessionId: string }) => input)
@@ -46,10 +42,7 @@ export const requireSessionOwnership = createServerFn({ method: "GET" })
 
     if (!codingSession) throw new Error("Session not found");
 
-    if (
-      codingSession.userId !== session.user.id &&
-      session.user.role !== "admin"
-    ) {
+    if (codingSession.userId !== session.user.id && session.user.role !== "admin") {
       throw new Error("Forbidden");
     }
 

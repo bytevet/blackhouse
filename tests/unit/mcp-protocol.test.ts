@@ -53,8 +53,7 @@ function handleRequest(req: JsonRpcRequest) {
                 properties: {
                   html: {
                     type: "string",
-                    description:
-                      "Complete HTML content to display (single-file, self-contained)",
+                    description: "Complete HTML content to display (single-file, self-contained)",
                   },
                 },
                 required: ["html"],
@@ -67,8 +66,7 @@ function handleRequest(req: JsonRpcRequest) {
 
     case "tools/call": {
       const toolName = (req.params as { name: string })?.name;
-      const args = (req.params as { arguments: Record<string, string> })
-        ?.arguments;
+      const args = (req.params as { arguments: Record<string, string> })?.arguments;
 
       if (toolName === "submit_result" && args?.html) {
         // In tests we skip the actual HTTP call
@@ -76,9 +74,7 @@ function handleRequest(req: JsonRpcRequest) {
           jsonrpc: "2.0",
           id: req.id,
           result: {
-            content: [
-              { type: "text", text: "Result submitted successfully." },
-            ],
+            content: [{ type: "text", text: "Result submitted successfully." }],
           },
         });
       } else {
@@ -186,9 +182,7 @@ describe("MCP Result Server Protocol", () => {
       });
       const response = JSON.parse(stdoutBuffer[0]);
       expect(response.id).toBe(3);
-      expect(response.result.content[0].text).toBe(
-        "Result submitted successfully.",
-      );
+      expect(response.result.content[0].text).toBe("Result submitted successfully.");
     });
 
     it("should return error for unknown tool", () => {

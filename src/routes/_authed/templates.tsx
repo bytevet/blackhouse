@@ -1,12 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { useSession } from "@/lib/auth-client";
-import {
-  listTemplates,
-  createTemplate,
-  updateTemplate,
-  deleteTemplate,
-} from "@/server/templates";
+import { listTemplates, createTemplate, updateTemplate, deleteTemplate } from "@/server/templates";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -46,8 +41,7 @@ export const Route = createFileRoute("/_authed/templates")({
 });
 
 function TemplatesPage() {
-  const { myTemplates: initialMine, publicTemplates: initialPublic } =
-    Route.useLoaderData();
+  const { myTemplates: initialMine, publicTemplates: initialPublic } = Route.useLoaderData();
   const { data: session } = useSession();
 
   const [myTemplates, setMyTemplates] = useState(initialMine);
@@ -141,8 +135,7 @@ function TemplatesPage() {
     await refreshTemplates();
   };
 
-  const isOwner = (template: Template) =>
-    template.userId === session?.user?.id;
+  const isOwner = (template: Template) => template.userId === session?.user?.id;
 
   const renderTemplateCard = (template: Template) => (
     <Card key={template.id} size="sm">
@@ -154,31 +147,19 @@ function TemplatesPage() {
           </Badge>
         </CardTitle>
         {template.description && (
-          <CardDescription className="line-clamp-2">
-            {template.description}
-          </CardDescription>
+          <CardDescription className="line-clamp-2">{template.description}</CardDescription>
         )}
       </CardHeader>
       <CardContent>
-        <div className="text-xs text-muted-foreground">
-          Created {timeAgo(template.createdAt)}
-        </div>
+        <div className="text-xs text-muted-foreground">Created {timeAgo(template.createdAt)}</div>
       </CardContent>
       {isOwner(template) && (
         <CardFooter className="gap-1.5">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => openEdit(template)}
-          >
+          <Button variant="outline" size="sm" onClick={() => openEdit(template)}>
             <Edit className="size-3" />
             Edit
           </Button>
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={() => openDelete(template)}
-          >
+          <Button variant="destructive" size="sm" onClick={() => openDelete(template)}>
             <Trash2 className="size-3" />
             Delete
           </Button>
@@ -215,9 +196,7 @@ function TemplatesPage() {
         </TabsContent>
         <TabsContent value="public">
           {publicTemplates.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-4">
-              No public templates available.
-            </p>
+            <p className="text-sm text-muted-foreground py-4">No public templates available.</p>
           ) : (
             <div className="grid gap-3 pt-3 sm:grid-cols-2 lg:grid-cols-3">
               {publicTemplates.map(renderTemplateCard)}
@@ -230,13 +209,9 @@ function TemplatesPage() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>
-              {editingTemplate ? "Edit Template" : "Create Template"}
-            </DialogTitle>
+            <DialogTitle>{editingTemplate ? "Edit Template" : "Create Template"}</DialogTitle>
             <DialogDescription>
-              {editingTemplate
-                ? "Update your template details."
-                : "Create a new prompt template."}
+              {editingTemplate ? "Update your template details." : "Create a new prompt template."}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
@@ -269,24 +244,13 @@ function TemplatesPage() {
               />
             </div>
             <div className="flex items-center gap-2">
-              <Switch
-                checked={isPublic}
-                onCheckedChange={setIsPublic}
-                size="sm"
-              />
+              <Switch checked={isPublic} onCheckedChange={setIsPublic} size="sm" />
               <Label className="text-xs">Public template</Label>
             </div>
           </div>
           <DialogFooter>
-            <Button
-              onClick={handleSave}
-              disabled={!name.trim() || saving}
-            >
-              {saving
-                ? "Saving..."
-                : editingTemplate
-                  ? "Update Template"
-                  : "Create Template"}
+            <Button onClick={handleSave} disabled={!name.trim() || saving}>
+              {saving ? "Saving..." : editingTemplate ? "Update Template" : "Create Template"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -298,15 +262,12 @@ function TemplatesPage() {
           <DialogHeader>
             <DialogTitle>Delete Template</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete "{deletingTemplate?.name}"? This
-              action cannot be undone.
+              Are you sure you want to delete "{deletingTemplate?.name}"? This action cannot be
+              undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDeleteDialogOpen(false)}
-            >
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
               Cancel
             </Button>
             <Button variant="destructive" onClick={handleDelete}>

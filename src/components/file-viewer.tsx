@@ -24,9 +24,7 @@ export function FileViewer({ sessionId, filePath }: FileViewerProps) {
 
         const [fileContent, fileDiff] = await Promise.all([
           readFile({ data: { sessionId, path: filePath } }),
-          getFileDiff({ data: { sessionId, path: filePath } }).catch(
-            () => null,
-          ),
+          getFileDiff({ data: { sessionId, path: filePath } }).catch(() => null),
         ]);
 
         if (!cancelled) {
@@ -64,9 +62,7 @@ export function FileViewer({ sessionId, filePath }: FileViewerProps) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
-        <span className="truncate text-xs text-muted-foreground">
-          {filePath}
-        </span>
+        <span className="truncate text-xs text-muted-foreground">{filePath}</span>
         {diff && (
           <button
             type="button"

@@ -1,12 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useCallback, useEffect } from "react";
-import {
-  Square,
-  Play,
-  Trash2,
-  PanelRightOpen,
-  PanelRightClose,
-} from "lucide-react";
+import { Square, Play, Trash2, PanelRightOpen, PanelRightClose } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -14,12 +8,7 @@ import { TerminalPanel } from "@/components/terminal";
 import { FileExplorer } from "@/components/file-explorer";
 import { FileViewer } from "@/components/file-viewer";
 import { ResultViewer } from "@/components/result-viewer";
-import {
-  getSession,
-  stopSession,
-  destroySession,
-  restartSession,
-} from "@/server/sessions";
+import { getSession, stopSession, destroySession, restartSession } from "@/server/sessions";
 import type { SessionStatus } from "@/db/schema";
 import { sessionStatusConfig } from "@/lib/session-status";
 
@@ -96,9 +85,7 @@ function SessionViewPage() {
     <div className="flex h-[calc(100dvh-6.5rem)] flex-col">
       {/* Meta section */}
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2 md:gap-3 md:px-4">
-        <h1 className="text-sm font-semibold text-foreground">
-          {session.name}
-        </h1>
+        <h1 className="text-sm font-semibold text-foreground">{session.name}</h1>
         <Badge variant="outline" className="text-[10px]">
           {session.agentType}
         </Badge>
@@ -108,9 +95,7 @@ function SessionViewPage() {
         >
           {session.status}
         </Badge>
-        <span className="hidden text-xs text-muted-foreground sm:inline">
-          {session.gitRepoUrl}
-        </span>
+        <span className="hidden text-xs text-muted-foreground sm:inline">{session.gitRepoUrl}</span>
 
         <div className="ml-auto flex items-center gap-1">
           {session.status === "running" && (
@@ -146,11 +131,7 @@ function SessionViewPage() {
               <span className="hidden sm:inline">Destroy</span>
             </Button>
           )}
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            onClick={() => setExplorerOpen(!explorerOpen)}
-          >
+          <Button variant="ghost" size="icon-xs" onClick={() => setExplorerOpen(!explorerOpen)}>
             {explorerOpen ? (
               <PanelRightClose className="size-3.5" />
             ) : (
@@ -165,9 +146,7 @@ function SessionViewPage() {
         {/* Terminal */}
         <div
           className={
-            explorerOpen
-              ? "min-h-[200px] flex-1 border-b md:border-b-0 md:border-r"
-              : "flex-1"
+            explorerOpen ? "min-h-[200px] flex-1 border-b md:border-b-0 md:border-r" : "flex-1"
           }
         >
           <TerminalPanel sessionId={session.id} status={session.status} />
@@ -185,14 +164,9 @@ function SessionViewPage() {
                 <TabsTrigger value="files" className="text-xs">
                   File Explorer
                 </TabsTrigger>
-                <TabsTrigger
-                  value="result"
-                  className="text-xs"
-                >
+                <TabsTrigger value="result" className="text-xs">
                   Result
-                  {session.resultHtml && (
-                    <span className="ml-1 size-1.5 rounded-full bg-primary" />
-                  )}
+                  {session.resultHtml && <span className="ml-1 size-1.5 rounded-full bg-primary" />}
                 </TabsTrigger>
               </TabsList>
 
@@ -207,10 +181,7 @@ function SessionViewPage() {
                   </div>
                   <div className="flex-1 overflow-auto">
                     {selectedFile ? (
-                      <FileViewer
-                        sessionId={session.id}
-                        filePath={selectedFile}
-                      />
+                      <FileViewer sessionId={session.id} filePath={selectedFile} />
                     ) : (
                       <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
                         Select a file to view

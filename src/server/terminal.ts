@@ -42,11 +42,7 @@ export async function createTerminalSession(
   return termSession;
 }
 
-export async function resizeTerminal(
-  sessionId: string,
-  cols: number,
-  rows: number,
-) {
+export async function resizeTerminal(sessionId: string, cols: number, rows: number) {
   const session = activeSessions.get(sessionId);
   if (session) {
     await session.exec.resize({ h: rows, w: cols });

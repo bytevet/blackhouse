@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git commit:*)",
+            "command": "npm run format:check && npm test",
+            "timeout": 60,
+            "statusMessage": "Running pre-commit checks (prettier + tests)..."
+          }
+        ]
+      }
+    ]
+  }
+}

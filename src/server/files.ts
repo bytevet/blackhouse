@@ -2,10 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { getDockerClient } from "@/lib/docker";
 import { requireSessionOwnership } from "@/lib/auth-server";
 
-async function execInContainer(
-  containerId: string,
-  cmd: string[],
-): Promise<string> {
+async function execInContainer(containerId: string, cmd: string[]): Promise<string> {
   const docker = await getDockerClient();
   const container = docker.getContainer(containerId);
   const exec = await container.exec({
@@ -31,7 +28,9 @@ async function execInContainer(
 export const listFiles = createServerFn({ method: "GET" })
   .inputValidator((input: { sessionId: string; path: string }) => input)
   .handler(async ({ data }) => {
-    const { codingSession } = await requireSessionOwnership({ data: { sessionId: data.sessionId } });
+    const { codingSession } = await requireSessionOwnership({
+      data: { sessionId: data.sessionId },
+    });
     const output = await execInContainer(codingSession.containerId!, [
       "ls",
       "-la",
@@ -54,9 +53,7 @@ export const listFiles = createServerFn({ method: "GET" })
         "HEAD",
       ]);
       for (const line of gitOutput.trim().split("\n")) {
-        const match = line.match(
-          /^\s*(.+?)\s+\|\s+(\d+)\s+([+-]+)/,
-        );
+        const match = line.match(/^\s*(.+?)\s+\|\s+(\d+)\s+([+-]+)/);
         if (match) {
           const plusCount = (match[3].match(/\+/g) ?? []).length;
           const minusCount = (match[3].match(/-/g) ?? []).length;
@@ -74,9 +71,7 @@ export const listFiles = createServerFn({ method: "GET" })
       if (name === "." || name === "..") continue;
 
       const isDirectory = line.startsWith("d");
-      const path = data.path.endsWith("/")
-        ? `${data.path}${name}`
-        : `${data.path}/${name}`;
+      const path = data.path.endsWith("/") ? `${data.path}${name}` : `${data.path}/${name}`;
 
       files.push({
         name,
@@ -92,18 +87,19 @@ export const listFiles = createServerFn({ method: "GET" })
 export const readFile = createServerFn({ method: "GET" })
   .inputValidator((input: { sessionId: string; path: string }) => input)
   .handler(async ({ data }) => {
-    const { codingSession } = await requireSessionOwnership({ data: { sessionId: data.sessionId } });
-    const content = await execInContainer(codingSession.containerId!, [
-      "cat",
-      data.path,
-    ]);
+    const { codingSession } = await requireSessionOwnership({
+      data: { sessionId: data.sessionId },
+    });
+    const content = await execInContainer(codingSession.containerId!, ["cat", data.path]);
     return content;
   });
 
 export const getGitStatus = createServerFn({ method: "GET" })
   .inputValidator((input: { sessionId: string }) => input)
   .handler(async ({ data }) => {
-    const { codingSession } = await requireSessionOwnership({ data: { sessionId: data.sessionId } });
+    const { codingSession } = await requireSessionOwnership({
+      data: { sessionId: data.sessionId },
+    });
     const output = await execInContainer(codingSession.containerId!, [
       "git",
       "-C",
@@ -117,7 +113,9 @@ export const getGitStatus = createServerFn({ method: "GET" })
 export const getFileDiff = createServerFn({ method: "GET" })
   .inputValidator((input: { sessionId: string; path: string }) => input)
   .handler(async ({ data }) => {
-    const { codingSession } = await requireSessionOwnership({ data: { sessionId: data.sessionId } });
+    const { codingSession } = await requireSessionOwnership({
+      data: { sessionId: data.sessionId },
+    });
     const output = await execInContainer(codingSession.containerId!, [
       "git",
       "diff",

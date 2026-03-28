@@ -1,11 +1,5 @@
 import { Link, useLocation } from "@tanstack/react-router";
-import {
-  LayoutDashboard,
-  FileText,
-  Settings,
-  LogOut,
-  ChevronsUpDown,
-} from "lucide-react";
+import { LayoutDashboard, FileText, Settings, LogOut, ChevronsUpDown } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -54,9 +48,7 @@ export function AppSidebar() {
           <div className="flex size-8 items-center justify-center bg-primary text-primary-foreground text-sm font-bold">
             BH
           </div>
-          <span className="text-sm font-semibold text-sidebar-foreground">
-            Blackhouse
-          </span>
+          <span className="text-sm font-semibold text-sidebar-foreground">Blackhouse</span>
         </Link>
       </SidebarHeader>
 
@@ -68,9 +60,7 @@ export function AppSidebar() {
               {navItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <Link to={item.to} className="block">
-                    <SidebarMenuButton
-                      isActive={location.pathname.startsWith(item.to)}
-                    >
+                    <SidebarMenuButton isActive={location.pathname.startsWith(item.to)}>
                       <item.icon className="shrink-0" />
                       <span className="truncate">{item.title}</span>
                     </SidebarMenuButton>
@@ -85,20 +75,18 @@ export function AppSidebar() {
       <SidebarFooter className="border-t border-sidebar-border">
         <DropdownMenu>
           <DropdownMenuTrigger className="flex w-full items-center gap-2 rounded-[calc(var(--radius-sm)+2px)] p-2 text-left text-xs hover:bg-sidebar-accent hover:text-sidebar-accent-foreground outline-hidden focus-visible:ring-2 ring-sidebar-ring">
-              <Avatar className="size-6 shrink-0">
-                <AvatarImage src={user?.image ?? undefined} />
-                <AvatarFallback className="text-[10px]">
-                  {initials}
-                </AvatarFallback>
-              </Avatar>
-              <span className="flex-1 truncate text-left text-sm">
-                {user?.name ?? "User"}
-              </span>
-              <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
+            <Avatar className="size-6 shrink-0">
+              <AvatarImage src={user?.image ?? undefined} />
+              <AvatarFallback className="text-[10px]">{initials}</AvatarFallback>
+            </Avatar>
+            <span className="flex-1 truncate text-left text-sm">{user?.name ?? "User"}</span>
+            <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
           </DropdownMenuTrigger>
           <DropdownMenuContent side="top" align="start" className="w-56">
             <DropdownMenuItem
-              onClick={() => signOut({ fetchOptions: { onSuccess: () => window.location.href = "/login" } })}
+              onClick={() =>
+                signOut({ fetchOptions: { onSuccess: () => (window.location.href = "/login") } })
+              }
             >
               <LogOut className="mr-2 size-4" />
               Sign out

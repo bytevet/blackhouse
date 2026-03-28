@@ -12,7 +12,10 @@ import { requireSession, requireAdmin } from "@/lib/auth-server";
 // ---------------------------------------------------------------------------
 
 export const updateProfile = createServerFn({ method: "POST" })
-  .inputValidator((input: { name?: string; password?: string; currentPassword?: string; newPassword?: string }) => input)
+  .inputValidator(
+    (input: { name?: string; password?: string; currentPassword?: string; newPassword?: string }) =>
+      input,
+  )
   .handler(async ({ data }) => {
     const session = await requireSession();
 
@@ -20,10 +23,7 @@ export const updateProfile = createServerFn({ method: "POST" })
     if (data.name !== undefined) updateData.name = data.name;
 
     if (Object.keys(updateData).length > 1) {
-      await db
-        .update(schema.user)
-        .set(updateData)
-        .where(eq(schema.user.id, session.user.id));
+      await db.update(schema.user).set(updateData).where(eq(schema.user.id, session.user.id));
     }
 
     // Password change via Better Auth API
@@ -47,19 +47,15 @@ export const updateProfile = createServerFn({ method: "POST" })
 // Agent Configs (admin only)
 // ---------------------------------------------------------------------------
 
-export const listAgentConfigs = createServerFn({ method: "GET" }).handler(
-  async () => {
-    await requireSession();
+export const listAgentConfigs = createServerFn({ method: "GET" }).handler(async () => {
+  await requireSession();
 
-    return db
-      .select()
-      .from(schema.agentConfigs)
-      .orderBy(desc(schema.agentConfigs.createdAt));
-  },
-);
+  return db.select().from(schema.agentConfigs).orderBy(desc(schema.agentConfigs.createdAt));
+});
 
 export const upsertAgentConfig = createServerFn({ method: "POST" })
-  .inputValidator((input: {
+  .inputValidator(
+    (input: {
       id?: string;
       agentType: string;
       displayName: string;
@@ -69,7 +65,8 @@ export const upsertAgentConfig = createServerFn({ method: "POST" })
       defaultModel?: string;
       extraArgs?: unknown;
       dockerImage?: string;
-    }) => input)
+    }) => input,
+  )
   .handler(async ({ data }) => {
     const session = await requireSession();
     requireAdmin(session);
@@ -98,10 +95,7 @@ export const upsertAgentConfig = createServerFn({ method: "POST" })
     }
 
     // Create new
-    const inserted = await db
-      .insert(schema.agentConfigs)
-      .values(values)
-      .returning();
+    const inserted = await db.insert(schema.agentConfigs).values(values).returning();
 
     return inserted[0];
   });
@@ -112,9 +106,7 @@ export const deleteAgentConfig = createServerFn({ method: "POST" })
     const session = await requireSession();
     requireAdmin(session);
 
-    await db
-      .delete(schema.agentConfigs)
-      .where(eq(schema.agentConfigs.id, data.id));
+    await db.delete(schema.agentConfigs).where(eq(schema.agentConfigs.id, data.id));
 
     return { success: true };
   });
@@ -123,38 +115,32 @@ export const deleteAgentConfig = createServerFn({ method: "POST" })
 // Docker Config (admin only)
 // ---------------------------------------------------------------------------
 
-export const getDockerConfig = createServerFn({ method: "GET" }).handler(
-  async () => {
-    const session = await requireSession();
-    requireAdmin(session);
+export const getDockerConfig = createServerFn({ method: "GET" }).handler(async () => {
+  const session = await requireSession();
+  requireAdmin(session);
 
-    const rows = await db
-      .select()
-      .from(schema.dockerConfigs)
-      .limit(1);
+  const rows = await db.select().from(schema.dockerConfigs).limit(1);
 
-    return rows[0] ?? null;
-  },
-);
+  return rows[0] ?? null;
+});
 
 export const updateDockerConfig = createServerFn({ method: "POST" })
-  .inputValidator((input: {
+  .inputValidator(
+    (input: {
       socketPath?: string;
       host?: string;
       port?: number;
       tlsCa?: string;
       tlsCert?: string;
       tlsKey?: string;
-    }) => input)
+    }) => input,
+  )
   .handler(async ({ data }) => {
     const session = await requireSession();
     requireAdmin(session);
 
     // Upsert with id=1 (singleton row)
-    const existing = await db
-      .select()
-      .from(schema.dockerConfigs)
-      .limit(1);
+    const existing = await db.select().from(schema.dockerConfigs).limit(1);
 
     const values = {
       socketPath: data.socketPath ?? "/var/run/docker.sock",
@@ -192,119 +178,110 @@ export const updateDockerConfig = createServerFn({ method: "POST" })
 // Docker Status (admin only)
 // ---------------------------------------------------------------------------
 
-export const getDockerStatus = createServerFn({ method: "GET" }).handler(
-  async () => {
-    const session = await requireSession();
-    requireAdmin(session);
+export const getDockerStatus = createServerFn({ method: "GET" }).handler(async () => {
+  const session = await requireSession();
+  requireAdmin(session);
 
-    try {
-      const docker = await getDockerClient();
-      const info = await docker.info();
+  try {
+    const docker = await getDockerClient();
+    const info = await docker.info();
 
-      return {
-        connected: true,
-        serverVersion: info.ServerVersion as string,
-        os: info.OperatingSystem as string,
-        totalMemory: info.MemTotal as number,
-        containers: info.Containers as number,
-        containersRunning: info.ContainersRunning as number,
-        containersStopped: info.ContainersStopped as number,
-        images: info.Images as number,
-      };
-    } catch (err) {
-      return {
-        connected: false,
-        error: err instanceof Error ? err.message : String(err),
-      };
-    }
-  },
-);
+    return {
+      connected: true,
+      serverVersion: info.ServerVersion as string,
+      os: info.OperatingSystem as string,
+      totalMemory: info.MemTotal as number,
+      containers: info.Containers as number,
+      containersRunning: info.ContainersRunning as number,
+      containersStopped: info.ContainersStopped as number,
+      images: info.Images as number,
+    };
+  } catch (err) {
+    return {
+      connected: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+});
 
 // ---------------------------------------------------------------------------
 // List Containers (admin only)
 // ---------------------------------------------------------------------------
 
-export const listContainers = createServerFn({ method: "GET" }).handler(
-  async () => {
-    const session = await requireSession();
-    requireAdmin(session);
+export const listContainers = createServerFn({ method: "GET" }).handler(async () => {
+  const session = await requireSession();
+  requireAdmin(session);
 
-    try {
-      const docker = await getDockerClient();
-      const containers = await docker.listContainers({
-        all: true,
-        filters: { label: ["blackhouse.managed=true"] },
-      });
+  try {
+    const docker = await getDockerClient();
+    const containers = await docker.listContainers({
+      all: true,
+      filters: { label: ["blackhouse.managed=true"] },
+    });
 
-      // Enrich with session info from DB
-      const sessionIds = containers
-        .map((c) => c.Labels?.["blackhouse.session_id"])
-        .filter(Boolean) as string[];
+    // Enrich with session info from DB
+    const sessionIds = containers
+      .map((c) => c.Labels?.["blackhouse.session_id"])
+      .filter(Boolean) as string[];
 
-      let sessionsMap = new Map<string, typeof schema.codingSessions.$inferSelect>();
+    let sessionsMap = new Map<string, typeof schema.codingSessions.$inferSelect>();
 
-      if (sessionIds.length > 0) {
-        const sessions = await db
-          .select()
-          .from(schema.codingSessions)
-          .where(inArray(schema.codingSessions.id, sessionIds));
+    if (sessionIds.length > 0) {
+      const sessions = await db
+        .select()
+        .from(schema.codingSessions)
+        .where(inArray(schema.codingSessions.id, sessionIds));
 
-        for (const s of sessions) {
-          sessionsMap.set(s.id, s);
-        }
+      for (const s of sessions) {
+        sessionsMap.set(s.id, s);
       }
-
-      return containers.map((c) => {
-        const sessionId = c.Labels?.["blackhouse.session_id"];
-        return {
-          containerId: c.Id,
-          image: c.Image,
-          state: c.State,
-          status: c.Status,
-          created: c.Created,
-          sessionId,
-          session: sessionId ? sessionsMap.get(sessionId) ?? null : null,
-        };
-      });
-    } catch (err) {
-      throw new Error(
-        `Failed to list containers: ${err instanceof Error ? err.message : String(err)}`,
-      );
     }
-  },
-);
+
+    return containers.map((c) => {
+      const sessionId = c.Labels?.["blackhouse.session_id"];
+      return {
+        containerId: c.Id,
+        image: c.Image,
+        state: c.State,
+        status: c.Status,
+        created: c.Created,
+        sessionId,
+        session: sessionId ? (sessionsMap.get(sessionId) ?? null) : null,
+      };
+    });
+  } catch (err) {
+    throw new Error(
+      `Failed to list containers: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+});
 
 // ---------------------------------------------------------------------------
 // User Management (admin only)
 // ---------------------------------------------------------------------------
 
-export const listUsers = createServerFn({ method: "GET" }).handler(
-  async () => {
-    const session = await requireSession();
-    requireAdmin(session);
+export const listUsers = createServerFn({ method: "GET" }).handler(async () => {
+  const session = await requireSession();
+  requireAdmin(session);
 
-    return db
-      .select({
-        id: schema.user.id,
-        name: schema.user.name,
-        email: schema.user.email,
-        role: schema.user.role,
-        banned: schema.user.banned,
-        createdAt: schema.user.createdAt,
-      })
-      .from(schema.user)
-      .orderBy(desc(schema.user.createdAt));
-  },
-);
+  return db
+    .select({
+      id: schema.user.id,
+      name: schema.user.name,
+      email: schema.user.email,
+      role: schema.user.role,
+      banned: schema.user.banned,
+      createdAt: schema.user.createdAt,
+    })
+    .from(schema.user)
+    .orderBy(desc(schema.user.createdAt));
+});
 
 export const createUser = createServerFn({ method: "POST" })
-  .inputValidator((input: {
-      name: string;
-      email: string;
-      username?: string;
-      password: string;
-      role?: string;
-    }) => input)
+  .inputValidator(
+    (input: { name: string; email: string; username?: string; password: string; role?: string }) =>
+      input,
+  )
   .handler(async ({ data }) => {
     const session = await requireSession();
     requireAdmin(session);

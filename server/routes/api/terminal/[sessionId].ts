@@ -12,17 +12,20 @@ interface TerminalState {
 const activeTerminals = new Map<string, TerminalState>();
 
 // Periodic cleanup of stale terminal sessions (every 5 minutes)
-setInterval(() => {
-  for (const [id, terminal] of activeTerminals) {
-    try {
-      if (terminal.stream.destroyed) {
+setInterval(
+  () => {
+    for (const [id, terminal] of activeTerminals) {
+      try {
+        if (terminal.stream.destroyed) {
+          activeTerminals.delete(id);
+        }
+      } catch {
         activeTerminals.delete(id);
       }
-    } catch {
-      activeTerminals.delete(id);
     }
-  }
-}, 5 * 60 * 1000);
+  },
+  5 * 60 * 1000,
+);
 
 async function validateSession(
   sessionId: string,
@@ -50,11 +53,7 @@ async function validateSession(
 
     // Check ownership or admin
     if (codingSession.userId !== authSess.userId) {
-      const [usr] = await db
-        .select()
-        .from(user)
-        .where(eq(user.id, authSess.userId))
-        .limit(1);
+      const [usr] = await db.select().from(user).where(eq(user.id, authSess.userId)).limit(1);
 
       if (!usr || usr.role !== "admin") return null;
     }
@@ -114,8 +113,7 @@ export default defineWebSocketHandler({
         }
       });
     } catch (err) {
-      const msg =
-        err instanceof Error ? err.message : "Failed to attach to container";
+      const msg = err instanceof Error ? err.message : "Failed to attach to container";
       peer.send(`[Error: ${msg}]`);
       peer.close(4002, msg);
     }

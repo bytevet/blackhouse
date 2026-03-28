@@ -39,16 +39,7 @@ import {
   SelectItem,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import {
-  Plus,
-  Eye,
-  Square,
-  Trash2,
-  RotateCcw,
-  GitBranch,
-  Bot,
-  FileText,
-} from "lucide-react";
+import { Plus, Eye, Square, Trash2, RotateCcw, GitBranch, Bot, FileText } from "lucide-react";
 import { timeAgo } from "@/lib/utils";
 import type { CodingSession, Template, AgentConfig, SessionStatus } from "@/db/schema";
 import { sessionStatusConfig } from "@/lib/session-status";
@@ -66,8 +57,7 @@ export const Route = createFileRoute("/_authed/dashboard")({
 });
 
 function DashboardPage() {
-  const { sessions: initialSessions, templates, agentConfigs } =
-    Route.useLoaderData();
+  const { sessions: initialSessions, templates, agentConfigs } = Route.useLoaderData();
   const { data: session } = useSession();
   const isAdmin = session?.user?.role === "admin";
 
@@ -117,7 +107,10 @@ function DashboardPage() {
     }
   };
 
-  const handleSessionAction = async (id: string, action: typeof stopSession | typeof destroySession | typeof restartSession) => {
+  const handleSessionAction = async (
+    id: string,
+    action: typeof stopSession | typeof destroySession | typeof restartSession,
+  ) => {
     await action({ data: { id } });
     await refreshSessions();
   };
@@ -125,9 +118,7 @@ function DashboardPage() {
   const filteredSessions =
     isAdmin && showAll
       ? sessions
-      : sessions.filter(
-          (s: CodingSession) => s.userId === session?.user?.id
-        );
+      : sessions.filter((s: CodingSession) => s.userId === session?.user?.id);
 
   return (
     <div className="space-y-4">
@@ -145,9 +136,7 @@ function DashboardPage() {
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>Create New Session</DialogTitle>
-              <DialogDescription>
-                Start a new coding agent session.
-              </DialogDescription>
+              <DialogDescription>Start a new coding agent session.</DialogDescription>
             </DialogHeader>
             <div className="grid gap-3">
               <div className="grid gap-1.5">
@@ -161,10 +150,7 @@ function DashboardPage() {
               </div>
               <div className="grid gap-1.5">
                 <Label>Coding Agent</Label>
-                <Select
-                  value={agentConfigId}
-                  onValueChange={setAgentConfigId}
-                >
+                <Select value={agentConfigId} onValueChange={setAgentConfigId}>
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="Select an agent" />
                   </SelectTrigger>
@@ -197,10 +183,7 @@ function DashboardPage() {
               </div>
               <div className="grid gap-1.5">
                 <Label>Template</Label>
-                <Select
-                  value={templateId}
-                  onValueChange={setTemplateId}
-                >
+                <Select value={templateId} onValueChange={setTemplateId}>
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="None" />
                   </SelectTrigger>
@@ -215,10 +198,7 @@ function DashboardPage() {
               </div>
             </div>
             <DialogFooter>
-              <Button
-                onClick={handleCreate}
-                disabled={!name.trim() || !agentConfigId || creating}
-              >
+              <Button onClick={handleCreate} disabled={!name.trim() || !agentConfigId || creating}>
                 {creating ? "Creating..." : "Create Session"}
               </Button>
             </DialogFooter>
@@ -228,11 +208,7 @@ function DashboardPage() {
 
       {isAdmin && (
         <div className="flex items-center gap-2">
-          <Switch
-            checked={showAll}
-            onCheckedChange={setShowAll}
-            size="sm"
-          />
+          <Switch checked={showAll} onCheckedChange={setShowAll} size="sm" />
           <Label className="text-xs text-muted-foreground">
             {showAll ? "Show all sessions" : "My sessions"}
           </Label>
@@ -240,9 +216,7 @@ function DashboardPage() {
       )}
 
       {filteredSessions.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No sessions yet. Create one to get started.
-        </p>
+        <p className="text-sm text-muted-foreground">No sessions yet. Create one to get started.</p>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {filteredSessions.map((s: CodingSession) => {
@@ -253,10 +227,7 @@ function DashboardPage() {
                 <CardHeader>
                   <CardTitle className="flex items-center justify-between gap-2">
                     <span className="truncate">{s.name}</span>
-                    <Badge
-                      variant="outline"
-                      className={config.className}
-                    >
+                    <Badge variant="outline" className={config.className}>
                       {config.label}
                     </Badge>
                   </CardTitle>

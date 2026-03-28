@@ -45,16 +45,7 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
-import {
-  Plus,
-  Trash2,
-  Edit,
-  Save,
-  Bot,
-  Container,
-  Users,
-  User,
-} from "lucide-react";
+import { Plus, Trash2, Edit, Save, Bot, Container, Users, User } from "lucide-react";
 import { timeAgo } from "@/lib/utils";
 import type { AgentConfig, User as DbUser } from "@/db/schema";
 
@@ -144,8 +135,7 @@ function ProfileTab() {
   };
 
   const handleChangePassword = async () => {
-    if (!currentPassword || !newPassword || newPassword !== confirmPassword)
-      return;
+    if (!currentPassword || !newPassword || newPassword !== confirmPassword) return;
     setSavingPassword(true);
     try {
       await updateProfile({
@@ -172,10 +162,7 @@ function ProfileTab() {
             onChange={(e) => setDisplayName(e.target.value)}
             placeholder="Your name"
           />
-          <Button
-            onClick={handleSaveName}
-            disabled={!displayName.trim() || savingName}
-          >
+          <Button onClick={handleSaveName} disabled={!displayName.trim() || savingName}>
             <Save className="size-3" />
             {savingName ? "Saving..." : "Save"}
           </Button>
@@ -218,10 +205,7 @@ function ProfileTab() {
           <Button
             onClick={handleChangePassword}
             disabled={
-              !currentPassword ||
-              !newPassword ||
-              newPassword !== confirmPassword ||
-              savingPassword
+              !currentPassword || !newPassword || newPassword !== confirmPassword || savingPassword
             }
             className="w-fit"
           >
@@ -280,9 +264,7 @@ function AgentsTab() {
     setDockerImage(config.dockerImage || "");
     setYoloMode(config.yoloMode ?? false);
     setDefaultModel(config.defaultModel || "");
-    setExtraArgs(
-      config.extraArgs ? JSON.stringify(config.extraArgs, null, 2) : ""
-    );
+    setExtraArgs(config.extraArgs ? JSON.stringify(config.extraArgs, null, 2) : "");
     setDialogOpen(true);
   };
 
@@ -325,9 +307,7 @@ function AgentsTab() {
   return (
     <div className="space-y-4 pt-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium text-foreground">
-          Agent Configurations
-        </h3>
+        <h3 className="text-sm font-medium text-foreground">Agent Configurations</h3>
         <Button size="sm" onClick={openCreate}>
           <Plus className="size-3" />
           Add Agent
@@ -335,70 +315,58 @@ function AgentsTab() {
       </div>
 
       <div className="overflow-x-auto">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Agent Type</TableHead>
-            <TableHead>Display Name</TableHead>
-            <TableHead className="hidden sm:table-cell">Docker Image</TableHead>
-            <TableHead>Yolo</TableHead>
-            <TableHead className="text-right">Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {configs.length === 0 ? (
+        <Table>
+          <TableHeader>
             <TableRow>
-              <TableCell colSpan={5} className="text-center text-muted-foreground">
-                No agent configurations yet.
-              </TableCell>
+              <TableHead>Agent Type</TableHead>
+              <TableHead>Display Name</TableHead>
+              <TableHead className="hidden sm:table-cell">Docker Image</TableHead>
+              <TableHead>Yolo</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
             </TableRow>
-          ) : (
-            configs.map((c: AgentConfig) => (
-              <TableRow key={c.id}>
-                <TableCell>{c.agentType}</TableCell>
-                <TableCell>{c.displayName}</TableCell>
-                <TableCell className="hidden max-w-48 truncate text-muted-foreground sm:table-cell">
-                  {c.dockerImage || "—"}
-                </TableCell>
-                <TableCell>
-                  <Badge variant={c.yoloMode ? "default" : "outline"}>
-                    {c.yoloMode ? "On" : "Off"}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-right">
-                  <div className="flex justify-end gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => openEdit(c)}
-                    >
-                      <Edit className="size-3" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => handleDelete(c.id)}
-                    >
-                      <Trash2 className="size-3" />
-                    </Button>
-                  </div>
+          </TableHeader>
+          <TableBody>
+            {configs.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={5} className="text-center text-muted-foreground">
+                  No agent configurations yet.
                 </TableCell>
               </TableRow>
-            ))
-          )}
-        </TableBody>
-      </Table>
+            ) : (
+              configs.map((c: AgentConfig) => (
+                <TableRow key={c.id}>
+                  <TableCell>{c.agentType}</TableCell>
+                  <TableCell>{c.displayName}</TableCell>
+                  <TableCell className="hidden max-w-48 truncate text-muted-foreground sm:table-cell">
+                    {c.dockerImage || "—"}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={c.yoloMode ? "default" : "outline"}>
+                      {c.yoloMode ? "On" : "Off"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-1">
+                      <Button variant="ghost" size="icon-sm" onClick={() => openEdit(c)}>
+                        <Edit className="size-3" />
+                      </Button>
+                      <Button variant="ghost" size="icon-sm" onClick={() => handleDelete(c.id)}>
+                        <Trash2 className="size-3" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>
-              {editing ? "Edit Agent Config" : "Add Agent Config"}
-            </DialogTitle>
-            <DialogDescription>
-              Configure a coding agent for sessions.
-            </DialogDescription>
+            <DialogTitle>{editing ? "Edit Agent Config" : "Add Agent Config"}</DialogTitle>
+            <DialogDescription>Configure a coding agent for sessions.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
             <div className="grid gap-1.5">
@@ -448,11 +416,7 @@ function AgentsTab() {
               />
             </div>
             <div className="flex items-center gap-2">
-              <Switch
-                checked={yoloMode}
-                onCheckedChange={setYoloMode}
-                size="sm"
-              />
+              <Switch checked={yoloMode} onCheckedChange={setYoloMode} size="sm" />
               <Label className="text-xs">Yolo mode (auto-approve)</Label>
             </div>
             <div className="grid gap-1.5">
@@ -483,9 +447,17 @@ function AgentsTab() {
 // ── Docker Tab ───────────────────────────────────────────────────────────────
 
 function DockerTab() {
-  const [dockerStatus, setDockerStatus] = useState<{ connected: boolean; version?: string } | null>(null);
-  const [dockerConfig, setDockerConfig] = useState<{ socketPath?: string; host?: string; port?: number } | null>(null);
-  const [containers, setContainers] = useState<{ id: string; image: string; status: string; sessionName?: string; createdAt?: string }[]>([]);
+  const [dockerStatus, setDockerStatus] = useState<{ connected: boolean; version?: string } | null>(
+    null,
+  );
+  const [dockerConfig, setDockerConfig] = useState<{
+    socketPath?: string;
+    host?: string;
+    port?: number;
+  } | null>(null);
+  const [containers, setContainers] = useState<
+    { id: string; image: string; status: string; sessionName?: string; createdAt?: string }[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -534,9 +506,7 @@ function DockerTab() {
 
   if (loading) {
     return (
-      <div className="pt-4 text-sm text-muted-foreground">
-        Loading Docker configuration...
-      </div>
+      <div className="pt-4 text-sm text-muted-foreground">Loading Docker configuration...</div>
     );
   }
 
@@ -545,9 +515,7 @@ function DockerTab() {
   return (
     <div className="space-y-6 pt-4">
       <div className="space-y-3">
-        <h3 className="text-sm font-medium text-foreground">
-          Connection Status
-        </h3>
+        <h3 className="text-sm font-medium text-foreground">Connection Status</h3>
         <div className="flex items-center gap-2">
           <span
             className={`inline-block size-2 rounded-full ${
@@ -558,9 +526,7 @@ function DockerTab() {
             {isConnected ? "Connected" : "Disconnected"}
           </span>
           {dockerStatus?.version && (
-            <span className="text-xs text-muted-foreground">
-              (v{dockerStatus.version})
-            </span>
+            <span className="text-xs text-muted-foreground">(v{dockerStatus.version})</span>
           )}
         </div>
       </div>
@@ -596,11 +562,7 @@ function DockerTab() {
               onChange={(e) => setPort(e.target.value)}
             />
           </div>
-          <Button
-            onClick={handleSaveConfig}
-            disabled={saving}
-            className="w-fit"
-          >
+          <Button onClick={handleSaveConfig} disabled={saving} className="w-fit">
             <Save className="size-3" />
             {saving ? "Saving..." : "Save Config"}
           </Button>
@@ -610,50 +572,45 @@ function DockerTab() {
       <div className="space-y-3">
         <h3 className="text-sm font-medium text-foreground">Containers</h3>
         <div className="overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Container ID</TableHead>
-              <TableHead>Image</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="hidden sm:table-cell">Session</TableHead>
-              <TableHead className="hidden sm:table-cell">Created</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {containers.length === 0 ? (
+          <Table>
+            <TableHeader>
               <TableRow>
-                <TableCell
-                  colSpan={5}
-                  className="text-center text-muted-foreground"
-                >
-                  No containers found.
-                </TableCell>
+                <TableHead>Container ID</TableHead>
+                <TableHead>Image</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="hidden sm:table-cell">Session</TableHead>
+                <TableHead className="hidden sm:table-cell">Created</TableHead>
               </TableRow>
-            ) : (
-              containers.map((c) => (
-                <TableRow key={c.id}>
-                  <TableCell className="font-mono text-xs">
-                    {c.id?.slice(0, 12)}
-                  </TableCell>
-                  <TableCell className="max-w-40 truncate text-muted-foreground">
-                    {c.image}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{c.status}</Badge>
-                  </TableCell>
-                  <TableCell className="hidden sm:table-cell text-muted-foreground">
-                    {c.sessionName || "—"}
-                  </TableCell>
-                  <TableCell className="hidden sm:table-cell text-muted-foreground">
-                    {c.createdAt ? timeAgo(c.createdAt) : "—"}
+            </TableHeader>
+            <TableBody>
+              {containers.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center text-muted-foreground">
+                    No containers found.
                   </TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+              ) : (
+                containers.map((c) => (
+                  <TableRow key={c.id}>
+                    <TableCell className="font-mono text-xs">{c.id?.slice(0, 12)}</TableCell>
+                    <TableCell className="max-w-40 truncate text-muted-foreground">
+                      {c.image}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{c.status}</Badge>
+                    </TableCell>
+                    <TableCell className="hidden sm:table-cell text-muted-foreground">
+                      {c.sessionName || "—"}
+                    </TableCell>
+                    <TableCell className="hidden sm:table-cell text-muted-foreground">
+                      {c.createdAt ? timeAgo(c.createdAt) : "—"}
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
       </div>
     </div>
   );
@@ -703,8 +660,7 @@ function UsersTab() {
   };
 
   const handleCreate = async () => {
-    if (!name.trim() || !email.trim() || !username.trim() || !password)
-      return;
+    if (!name.trim() || !email.trim() || !username.trim() || !password) return;
     setCreating(true);
     try {
       await createUser({
@@ -737,11 +693,7 @@ function UsersTab() {
   };
 
   if (loading) {
-    return (
-      <div className="pt-4 text-sm text-muted-foreground">
-        Loading users...
-      </div>
-    );
+    return <div className="pt-4 text-sm text-muted-foreground">Loading users...</div>;
   }
 
   return (
@@ -755,54 +707,56 @@ function UsersTab() {
       </div>
 
       <div className="overflow-x-auto">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Name</TableHead>
-            <TableHead className="hidden sm:table-cell">Email</TableHead>
-            <TableHead className="hidden sm:table-cell">Username</TableHead>
-            <TableHead>Role</TableHead>
-            <TableHead className="text-right">Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {users.map((u) => (
-            <TableRow key={u.id}>
-              <TableCell>{u.name}</TableCell>
-              <TableCell className="hidden sm:table-cell text-muted-foreground">{u.email}</TableCell>
-              <TableCell className="hidden sm:table-cell text-muted-foreground">
-                {u.username || "—"}
-              </TableCell>
-              <TableCell>
-                <Select
-                  value={u.role || "user"}
-                  onValueChange={(val) => handleRoleChange(u.id, val)}
-                >
-                  <SelectTrigger className="h-6 w-24">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="user">User</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
-                  </SelectContent>
-                </Select>
-              </TableCell>
-              <TableCell className="text-right">
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => {
-                    setDeletingUser(u);
-                    setDeleteDialogOpen(true);
-                  }}
-                >
-                  <Trash2 className="size-3" />
-                </Button>
-              </TableCell>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead className="hidden sm:table-cell">Email</TableHead>
+              <TableHead className="hidden sm:table-cell">Username</TableHead>
+              <TableHead>Role</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHeader>
+          <TableBody>
+            {users.map((u) => (
+              <TableRow key={u.id}>
+                <TableCell>{u.name}</TableCell>
+                <TableCell className="hidden sm:table-cell text-muted-foreground">
+                  {u.email}
+                </TableCell>
+                <TableCell className="hidden sm:table-cell text-muted-foreground">
+                  {u.username || "—"}
+                </TableCell>
+                <TableCell>
+                  <Select
+                    value={u.role || "user"}
+                    onValueChange={(val) => handleRoleChange(u.id, val)}
+                  >
+                    <SelectTrigger className="h-6 w-24">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="user">User</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </TableCell>
+                <TableCell className="text-right">
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => {
+                      setDeletingUser(u);
+                      setDeleteDialogOpen(true);
+                    }}
+                  >
+                    <Trash2 className="size-3" />
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       </div>
 
       {/* Add User Dialog */}
@@ -815,11 +769,7 @@ function UsersTab() {
           <div className="grid gap-3">
             <div className="grid gap-1.5">
               <Label htmlFor="user-name">Name</Label>
-              <Input
-                id="user-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
+              <Input id="user-name" value={name} onChange={(e) => setName(e.target.value)} />
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="user-email">Email</Label>
@@ -863,13 +813,7 @@ function UsersTab() {
           <DialogFooter>
             <Button
               onClick={handleCreate}
-              disabled={
-                !name.trim() ||
-                !email.trim() ||
-                !username.trim() ||
-                !password ||
-                creating
-              }
+              disabled={!name.trim() || !email.trim() || !username.trim() || !password || creating}
             >
               {creating ? "Creating..." : "Create User"}
             </Button>
@@ -883,15 +827,11 @@ function UsersTab() {
           <DialogHeader>
             <DialogTitle>Delete User</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete "{deletingUser?.name}"? This
-              action cannot be undone.
+              Are you sure you want to delete "{deletingUser?.name}"? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDeleteDialogOpen(false)}
-            >
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
               Cancel
             </Button>
             <Button variant="destructive" onClick={handleDelete}>

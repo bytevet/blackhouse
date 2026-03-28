@@ -1,0 +1,7 @@
+node_modules
+.output
+.vinxi
+dist
+drizzle
+src/routeTree.gen.ts
+package-lock.json

@@ -34,9 +34,7 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
       if (fitAddon) {
         const dims = fitAddon.proposeDimensions();
         if (dims) {
-          ws.send(
-            JSON.stringify({ type: "resize", cols: dims.cols, rows: dims.rows }),
-          );
+          ws.send(JSON.stringify({ type: "resize", cols: dims.cols, rows: dims.rows }));
         }
       }
     };
@@ -57,9 +55,7 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
     };
 
     ws.onerror = () => {
-      terminalRef.current?.write(
-        "\r\n\x1b[31m[Connection error]\x1b[0m\r\n",
-      );
+      terminalRef.current?.write("\r\n\x1b[31m[Connection error]\x1b[0m\r\n");
     };
   }, [sessionId, status]);
 
@@ -127,10 +123,5 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
     );
   }
 
-  return (
-    <div
-      ref={containerRef}
-      className="h-full w-full bg-[#0a0a0a] p-1"
-    />
-  );
+  return <div ref={containerRef} className="h-full w-full bg-[#0a0a0a] p-1" />;
 }

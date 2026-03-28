@@ -67,8 +67,7 @@ function handleRequest(req: JsonRpcRequest) {
 
     case "tools/call": {
       const toolName = (req.params as { name: string })?.name;
-      const args = (req.params as { arguments: Record<string, string> })
-        ?.arguments;
+      const args = (req.params as { arguments: Record<string, string> })?.arguments;
 
       if (toolName === "submit_result" && args?.html) {
         submitResult(args.html)
@@ -77,9 +76,7 @@ function handleRequest(req: JsonRpcRequest) {
               jsonrpc: "2.0",
               id: req.id,
               result: {
-                content: [
-                  { type: "text", text: "Result submitted successfully." },
-                ],
+                content: [{ type: "text", text: "Result submitted successfully." }],
               },
             });
           })

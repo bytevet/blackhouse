@@ -29,7 +29,7 @@ function generateEntrypoint(opts: {
   }
 
   // Keep container alive so users can attach / the agent runs
-  lines.push('exec tail -f /dev/null');
+  lines.push("exec tail -f /dev/null");
 
   return lines.join("\n");
 }
@@ -83,14 +83,16 @@ export const getSession = createServerFn({ method: "GET" })
 // ---------------------------------------------------------------------------
 
 export const createSession = createServerFn({ method: "POST" })
-  .inputValidator((input: {
+  .inputValidator(
+    (input: {
       name: string;
       gitRepoUrl?: string;
       gitBranch?: string;
       templateId?: string;
       agentType?: string;
       agentConfigId?: string;
-    }) => input)
+    }) => input,
+  )
   .handler(async ({ data }) => {
     const session = await requireSession();
 
@@ -167,9 +169,7 @@ export const createSession = createServerFn({ method: "POST" })
       env.push("AGENT_YOLO=1");
     }
     if (agentConfig.extraArgs) {
-      env.push(
-        `AGENT_EXTRA_ARGS=${JSON.stringify(agentConfig.extraArgs)}`,
-      );
+      env.push(`AGENT_EXTRA_ARGS=${JSON.stringify(agentConfig.extraArgs)}`);
     }
 
     // Build entrypoint script
@@ -192,7 +192,11 @@ export const createSession = createServerFn({ method: "POST" })
               resolve();
               return;
             }
-            docker.modem.followProgress(stream!, () => resolve(), () => {});
+            docker.modem.followProgress(
+              stream!,
+              () => resolve(),
+              () => {},
+            );
           });
         });
       } catch {

@@ -143,12 +143,7 @@ export type Template = typeof templates.$inferSelect;
 export type AgentConfig = typeof agentConfigs.$inferSelect;
 export type User = typeof user.$inferSelect;
 
-export const SESSION_STATUSES = [
-  "pending",
-  "running",
-  "stopped",
-  "destroyed",
-] as const;
+export const SESSION_STATUSES = ["pending", "running", "stopped", "destroyed"] as const;
 export type SessionStatus = (typeof SESSION_STATUSES)[number];
 
 export type UserRole = "admin" | "user";

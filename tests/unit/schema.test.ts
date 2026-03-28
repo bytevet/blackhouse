@@ -30,12 +30,7 @@ describe("Database Schema", () => {
     });
 
     it("should contain the correct status values", () => {
-      expect(sessionStatusEnum.enumValues).toEqual([
-        "pending",
-        "running",
-        "stopped",
-        "destroyed",
-      ]);
+      expect(sessionStatusEnum.enumValues).toEqual(["pending", "running", "stopped", "destroyed"]);
     });
   });
 
@@ -227,12 +222,7 @@ describe("Database Schema", () => {
     });
 
     it("should enforce SessionStatus as a union of valid statuses", () => {
-      const statuses: SessionStatus[] = [
-        "pending",
-        "running",
-        "stopped",
-        "destroyed",
-      ];
+      const statuses: SessionStatus[] = ["pending", "running", "stopped", "destroyed"];
       expect(statuses).toHaveLength(4);
     });
 

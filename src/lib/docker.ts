@@ -7,10 +7,7 @@ let dockerInstance: Docker | null = null;
 async function createDockerClient(): Promise<Docker> {
   // Try loading config from database first
   try {
-    const configs = await db
-      .select()
-      .from(schema.dockerConfigs)
-      .limit(1);
+    const configs = await db.select().from(schema.dockerConfigs).limit(1);
 
     if (configs.length > 0) {
       const config = configs[0];

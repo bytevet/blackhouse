@@ -1,11 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
-import {
-  ChevronRight,
-  ChevronDown,
-  File,
-  Folder,
-  FolderOpen,
-} from "lucide-react";
+import { ChevronRight, ChevronDown, File, Folder, FolderOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface FileNode {
@@ -22,11 +16,7 @@ interface FileExplorerProps {
   selectedFile?: string;
 }
 
-export function FileExplorer({
-  sessionId,
-  onFileSelect,
-  selectedFile,
-}: FileExplorerProps) {
+export function FileExplorer({ sessionId, onFileSelect, selectedFile }: FileExplorerProps) {
   const [tree, setTree] = useState<FileNode[]>([]);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
@@ -72,9 +62,7 @@ export function FileExplorer({
 
   return (
     <div className="h-full overflow-auto text-xs">
-      {loading && (
-        <div className="p-2 text-muted-foreground">Loading files...</div>
-      )}
+      {loading && <div className="p-2 text-muted-foreground">Loading files...</div>}
       {error && <div className="p-2 text-destructive">{error}</div>}
       {!loading && tree.length === 0 && (
         <div className="p-2 text-muted-foreground">No files found</div>
