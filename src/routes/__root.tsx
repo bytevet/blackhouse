@@ -6,6 +6,7 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
+import appCss from "@/index.css?url";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -14,7 +15,10 @@ export const Route = createRootRoute({
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "Blackhouse" },
     ],
-    links: [{ rel: "icon", href: "/favicon.svg" }],
+    links: [
+      { rel: "icon", href: "/favicon.svg" },
+      { rel: "stylesheet", href: appCss },
+    ],
   }),
   component: RootComponent,
 });
