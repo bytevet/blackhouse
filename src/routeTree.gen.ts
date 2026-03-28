@@ -16,8 +16,13 @@ import { Route as ApiHealthRouteImport } from './routes/api/health'
 import { Route as AuthedTemplatesRouteImport } from './routes/_authed/templates'
 import { Route as AuthedSettingsRouteImport } from './routes/_authed/settings'
 import { Route as AuthedDashboardRouteImport } from './routes/_authed/dashboard'
+import { Route as AuthedSettingsIndexRouteImport } from './routes/_authed/settings/index'
 import { Route as ApiSessionsResultRouteImport } from './routes/api/sessions/result'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as AuthedSettingsUsersRouteImport } from './routes/_authed/settings/users'
+import { Route as AuthedSettingsProfileRouteImport } from './routes/_authed/settings/profile'
+import { Route as AuthedSettingsDockerRouteImport } from './routes/_authed/settings/docker'
+import { Route as AuthedSettingsAgentsRouteImport } from './routes/_authed/settings/agents'
 import { Route as AuthedSessionsSessionIdRouteImport } from './routes/_authed/sessions/$sessionId'
 
 const LoginRoute = LoginRouteImport.update({
@@ -54,6 +59,11 @@ const AuthedDashboardRoute = AuthedDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AuthedRoute,
 } as any)
+const AuthedSettingsIndexRoute = AuthedSettingsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AuthedSettingsRoute,
+} as any)
 const ApiSessionsResultRoute = ApiSessionsResultRouteImport.update({
   id: '/api/sessions/result',
   path: '/api/sessions/result',
@@ -63,6 +73,26 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AuthedSettingsUsersRoute = AuthedSettingsUsersRouteImport.update({
+  id: '/users',
+  path: '/users',
+  getParentRoute: () => AuthedSettingsRoute,
+} as any)
+const AuthedSettingsProfileRoute = AuthedSettingsProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => AuthedSettingsRoute,
+} as any)
+const AuthedSettingsDockerRoute = AuthedSettingsDockerRouteImport.update({
+  id: '/docker',
+  path: '/docker',
+  getParentRoute: () => AuthedSettingsRoute,
+} as any)
+const AuthedSettingsAgentsRoute = AuthedSettingsAgentsRouteImport.update({
+  id: '/agents',
+  path: '/agents',
+  getParentRoute: () => AuthedSettingsRoute,
 } as any)
 const AuthedSessionsSessionIdRoute = AuthedSessionsSessionIdRouteImport.update({
   id: '/sessions/$sessionId',
@@ -74,23 +104,32 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/dashboard': typeof AuthedDashboardRoute
-  '/settings': typeof AuthedSettingsRoute
+  '/settings': typeof AuthedSettingsRouteWithChildren
   '/templates': typeof AuthedTemplatesRoute
   '/api/health': typeof ApiHealthRoute
   '/sessions/$sessionId': typeof AuthedSessionsSessionIdRoute
+  '/settings/agents': typeof AuthedSettingsAgentsRoute
+  '/settings/docker': typeof AuthedSettingsDockerRoute
+  '/settings/profile': typeof AuthedSettingsProfileRoute
+  '/settings/users': typeof AuthedSettingsUsersRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/sessions/result': typeof ApiSessionsResultRoute
+  '/settings/': typeof AuthedSettingsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/dashboard': typeof AuthedDashboardRoute
-  '/settings': typeof AuthedSettingsRoute
   '/templates': typeof AuthedTemplatesRoute
   '/api/health': typeof ApiHealthRoute
   '/sessions/$sessionId': typeof AuthedSessionsSessionIdRoute
+  '/settings/agents': typeof AuthedSettingsAgentsRoute
+  '/settings/docker': typeof AuthedSettingsDockerRoute
+  '/settings/profile': typeof AuthedSettingsProfileRoute
+  '/settings/users': typeof AuthedSettingsUsersRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/sessions/result': typeof ApiSessionsResultRoute
+  '/settings': typeof AuthedSettingsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -98,12 +137,17 @@ export interface FileRoutesById {
   '/_authed': typeof AuthedRouteWithChildren
   '/login': typeof LoginRoute
   '/_authed/dashboard': typeof AuthedDashboardRoute
-  '/_authed/settings': typeof AuthedSettingsRoute
+  '/_authed/settings': typeof AuthedSettingsRouteWithChildren
   '/_authed/templates': typeof AuthedTemplatesRoute
   '/api/health': typeof ApiHealthRoute
   '/_authed/sessions/$sessionId': typeof AuthedSessionsSessionIdRoute
+  '/_authed/settings/agents': typeof AuthedSettingsAgentsRoute
+  '/_authed/settings/docker': typeof AuthedSettingsDockerRoute
+  '/_authed/settings/profile': typeof AuthedSettingsProfileRoute
+  '/_authed/settings/users': typeof AuthedSettingsUsersRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/sessions/result': typeof ApiSessionsResultRoute
+  '/_authed/settings/': typeof AuthedSettingsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -115,19 +159,28 @@ export interface FileRouteTypes {
     | '/templates'
     | '/api/health'
     | '/sessions/$sessionId'
+    | '/settings/agents'
+    | '/settings/docker'
+    | '/settings/profile'
+    | '/settings/users'
     | '/api/auth/$'
     | '/api/sessions/result'
+    | '/settings/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/login'
     | '/dashboard'
-    | '/settings'
     | '/templates'
     | '/api/health'
     | '/sessions/$sessionId'
+    | '/settings/agents'
+    | '/settings/docker'
+    | '/settings/profile'
+    | '/settings/users'
     | '/api/auth/$'
     | '/api/sessions/result'
+    | '/settings'
   id:
     | '__root__'
     | '/'
@@ -138,8 +191,13 @@ export interface FileRouteTypes {
     | '/_authed/templates'
     | '/api/health'
     | '/_authed/sessions/$sessionId'
+    | '/_authed/settings/agents'
+    | '/_authed/settings/docker'
+    | '/_authed/settings/profile'
+    | '/_authed/settings/users'
     | '/api/auth/$'
     | '/api/sessions/result'
+    | '/_authed/settings/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -202,6 +260,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedDashboardRouteImport
       parentRoute: typeof AuthedRoute
     }
+    '/_authed/settings/': {
+      id: '/_authed/settings/'
+      path: '/'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof AuthedSettingsIndexRouteImport
+      parentRoute: typeof AuthedSettingsRoute
+    }
     '/api/sessions/result': {
       id: '/api/sessions/result'
       path: '/api/sessions/result'
@@ -216,6 +281,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authed/settings/users': {
+      id: '/_authed/settings/users'
+      path: '/users'
+      fullPath: '/settings/users'
+      preLoaderRoute: typeof AuthedSettingsUsersRouteImport
+      parentRoute: typeof AuthedSettingsRoute
+    }
+    '/_authed/settings/profile': {
+      id: '/_authed/settings/profile'
+      path: '/profile'
+      fullPath: '/settings/profile'
+      preLoaderRoute: typeof AuthedSettingsProfileRouteImport
+      parentRoute: typeof AuthedSettingsRoute
+    }
+    '/_authed/settings/docker': {
+      id: '/_authed/settings/docker'
+      path: '/docker'
+      fullPath: '/settings/docker'
+      preLoaderRoute: typeof AuthedSettingsDockerRouteImport
+      parentRoute: typeof AuthedSettingsRoute
+    }
+    '/_authed/settings/agents': {
+      id: '/_authed/settings/agents'
+      path: '/agents'
+      fullPath: '/settings/agents'
+      preLoaderRoute: typeof AuthedSettingsAgentsRouteImport
+      parentRoute: typeof AuthedSettingsRoute
+    }
     '/_authed/sessions/$sessionId': {
       id: '/_authed/sessions/$sessionId'
       path: '/sessions/$sessionId'
@@ -226,16 +319,36 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AuthedSettingsRouteChildren {
+  AuthedSettingsAgentsRoute: typeof AuthedSettingsAgentsRoute
+  AuthedSettingsDockerRoute: typeof AuthedSettingsDockerRoute
+  AuthedSettingsProfileRoute: typeof AuthedSettingsProfileRoute
+  AuthedSettingsUsersRoute: typeof AuthedSettingsUsersRoute
+  AuthedSettingsIndexRoute: typeof AuthedSettingsIndexRoute
+}
+
+const AuthedSettingsRouteChildren: AuthedSettingsRouteChildren = {
+  AuthedSettingsAgentsRoute: AuthedSettingsAgentsRoute,
+  AuthedSettingsDockerRoute: AuthedSettingsDockerRoute,
+  AuthedSettingsProfileRoute: AuthedSettingsProfileRoute,
+  AuthedSettingsUsersRoute: AuthedSettingsUsersRoute,
+  AuthedSettingsIndexRoute: AuthedSettingsIndexRoute,
+}
+
+const AuthedSettingsRouteWithChildren = AuthedSettingsRoute._addFileChildren(
+  AuthedSettingsRouteChildren,
+)
+
 interface AuthedRouteChildren {
   AuthedDashboardRoute: typeof AuthedDashboardRoute
-  AuthedSettingsRoute: typeof AuthedSettingsRoute
+  AuthedSettingsRoute: typeof AuthedSettingsRouteWithChildren
   AuthedTemplatesRoute: typeof AuthedTemplatesRoute
   AuthedSessionsSessionIdRoute: typeof AuthedSessionsSessionIdRoute
 }
 
 const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedDashboardRoute: AuthedDashboardRoute,
-  AuthedSettingsRoute: AuthedSettingsRoute,
+  AuthedSettingsRoute: AuthedSettingsRouteWithChildren,
   AuthedTemplatesRoute: AuthedTemplatesRoute,
   AuthedSessionsSessionIdRoute: AuthedSessionsSessionIdRoute,
 }
