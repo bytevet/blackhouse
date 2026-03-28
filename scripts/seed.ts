@@ -96,19 +96,22 @@ async function seed() {
         preset: "claude-code",
         displayName: "Claude Code",
         agentCommand: "claude --dangerously-skip-permissions",
-        volumeMounts: [{ name: "claude-credentials", mountPath: "/home/workspace/.claude" }],
+        volumeMounts: [
+          { name: "claude-config", mountPath: "/home/workspace/.claude" },
+          { name: "claude-auth", mountPath: "/home/workspace/.claude.json" },
+        ],
       },
       {
         preset: "gemini",
         displayName: "Gemini",
         agentCommand: "gemini --yolo",
-        volumeMounts: [{ name: "gemini-credentials", mountPath: "/home/workspace/.gemini" }],
+        volumeMounts: [{ name: "gemini-config", mountPath: "/home/workspace/.gemini" }],
       },
       {
         preset: "codex",
         displayName: "Codex",
         agentCommand: "codex --full-auto",
-        volumeMounts: [{ name: "codex-credentials", mountPath: "/home/workspace/.codex" }],
+        volumeMounts: [{ name: "codex-config", mountPath: "/home/workspace/.codex" }],
       },
     ];
 

@@ -267,10 +267,16 @@ export const getAgentBuildStatus = createServerFn({ method: "GET" })
 
 export const getDefaultDockerfile = createServerFn({ method: "GET" })
   .middleware([adminMiddleware])
-  .handler(async () => {
-    const content = fs.readFileSync(path.resolve(process.cwd(), "Dockerfile.session"), "utf-8");
+  .inputValidator(z.object({ preset: z.string().optional() }).optional())
+  .handler(async ({ data }) => {
+    const preset = data?.preset || "claude-code";
+    const dockerfilePath = path.resolve(process.cwd(), `dockerfiles/${preset}.Dockerfile`);
 
-    return content;
+    // Fall back to claude-code if preset file doesn't exist
+    const fallbackPath = path.resolve(process.cwd(), "dockerfiles/claude-code.Dockerfile");
+    const filePath = fs.existsSync(dockerfilePath) ? dockerfilePath : fallbackPath;
+
+    return fs.readFileSync(filePath, "utf-8");
   });
 
 // ---------------------------------------------------------------------------

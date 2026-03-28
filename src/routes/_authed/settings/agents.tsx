@@ -211,16 +211,12 @@ function AgentsTab() {
     }
   };
 
-  const openCreate = () => {
+  const openCreate = async () => {
     setEditing(null);
-    setPreset("claude-code");
-    setDisplayName("Claude Code");
-    setAgentCommand("claude --dangerously-skip-permissions");
     setEnvVars([]);
-    setVolumeMounts([{ name: "claude-credentials", mountPath: "/home/workspace/.claude" }]);
-    setDockerfileContent("");
-    handlePresetChange("claude-code"); // load default dockerfile
+    setDockerfileContent("Loading...");
     setDialogOpen(true);
+    await handlePresetChange("claude-code");
   };
 
   const openEdit = (config: AgentConfig) => {
