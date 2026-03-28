@@ -158,14 +158,6 @@ export default defineWebSocketHandler({
           // already closed
         }
       });
-      // Send an empty line to trigger a fresh prompt (attach doesn't replay history)
-      setTimeout(() => {
-        try {
-          terminal.stream.write("\n");
-        } catch {
-          // ignore
-        }
-      }, 200);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to attach to container";
       peer.send(`[Error: ${msg}]`);
