@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   ChevronRight,
   ChevronDown,
@@ -54,9 +54,9 @@ export function FileExplorer({
     setLoading(false);
   }, [loadDirectory]);
 
-  useState(() => {
+  useEffect(() => {
     loadRoot();
-  });
+  }, [loadRoot]);
 
   const toggleDir = async (path: string) => {
     const next = new Set(expandedPaths);

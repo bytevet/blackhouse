@@ -1,27 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getRequest } from "@tanstack/react-start/server";
-import { auth } from "@/lib/auth";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { getDockerClient } from "@/lib/docker";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-async function requireSession() {
-  const request = getRequest();
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) throw new Error("Unauthorized");
-  return session;
-}
-
-function requireAdmin(session: { user: { role?: string | null } }) {
-  if (session.user.role !== "admin") {
-    throw new Error("Forbidden: admin access required");
-  }
-}
+import { requireSession, requireAdmin, requireSessionOwnership } from "@/lib/auth-server";
 
 function generateEntrypoint(opts: {
   gitRepoUrl?: string | null;
@@ -92,25 +74,7 @@ export const listSessions = createServerFn({ method: "GET" })
 export const getSession = createServerFn({ method: "GET" })
   .inputValidator((input: { id: string }) => input)
   .handler(async ({ data }) => {
-    const session = await requireSession();
-
-    const rows = await db
-      .select()
-      .from(schema.codingSessions)
-      .where(eq(schema.codingSessions.id, data.id))
-      .limit(1);
-
-    if (rows.length === 0) throw new Error("Session not found");
-
-    const codingSession = rows[0];
-
-    if (
-      codingSession.userId !== session.user.id &&
-      session.user.role !== "admin"
-    ) {
-      throw new Error("Forbidden");
-    }
-
+    const { codingSession } = await requireSessionOwnership({ data: { sessionId: data.id } });
     return codingSession;
   });
 
@@ -289,23 +253,7 @@ export const createSession = createServerFn({ method: "POST" })
 export const stopSession = createServerFn({ method: "POST" })
   .inputValidator((input: { id: string }) => input)
   .handler(async ({ data }) => {
-    const session = await requireSession();
-
-    const rows = await db
-      .select()
-      .from(schema.codingSessions)
-      .where(eq(schema.codingSessions.id, data.id))
-      .limit(1);
-
-    if (rows.length === 0) throw new Error("Session not found");
-    const codingSession = rows[0];
-
-    if (
-      codingSession.userId !== session.user.id &&
-      session.user.role !== "admin"
-    ) {
-      throw new Error("Forbidden");
-    }
+    const { codingSession } = await requireSessionOwnership({ data: { sessionId: data.id } });
 
     if (!codingSession.containerId) {
       throw new Error("No container associated with this session");
@@ -339,23 +287,7 @@ export const stopSession = createServerFn({ method: "POST" })
 export const destroySession = createServerFn({ method: "POST" })
   .inputValidator((input: { id: string }) => input)
   .handler(async ({ data }) => {
-    const session = await requireSession();
-
-    const rows = await db
-      .select()
-      .from(schema.codingSessions)
-      .where(eq(schema.codingSessions.id, data.id))
-      .limit(1);
-
-    if (rows.length === 0) throw new Error("Session not found");
-    const codingSession = rows[0];
-
-    if (
-      codingSession.userId !== session.user.id &&
-      session.user.role !== "admin"
-    ) {
-      throw new Error("Forbidden");
-    }
+    const { codingSession } = await requireSessionOwnership({ data: { sessionId: data.id } });
 
     if (codingSession.containerId) {
       try {
@@ -390,23 +322,7 @@ export const destroySession = createServerFn({ method: "POST" })
 export const restartSession = createServerFn({ method: "POST" })
   .inputValidator((input: { id: string }) => input)
   .handler(async ({ data }) => {
-    const session = await requireSession();
-
-    const rows = await db
-      .select()
-      .from(schema.codingSessions)
-      .where(eq(schema.codingSessions.id, data.id))
-      .limit(1);
-
-    if (rows.length === 0) throw new Error("Session not found");
-    const codingSession = rows[0];
-
-    if (
-      codingSession.userId !== session.user.id &&
-      session.user.role !== "admin"
-    ) {
-      throw new Error("Forbidden");
-    }
+    const { codingSession } = await requireSessionOwnership({ data: { sessionId: data.id } });
 
     if (!codingSession.containerId) {
       throw new Error("No container associated with this session");

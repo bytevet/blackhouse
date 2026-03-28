@@ -3,25 +3,9 @@ import { getRequest } from "@tanstack/react-start/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, inArray } from "drizzle-orm";
 import { getDockerClient, resetDockerClient } from "@/lib/docker";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-async function requireSession() {
-  const request = getRequest();
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) throw new Error("Unauthorized");
-  return session;
-}
-
-function requireAdmin(session: { user: { role?: string | null } }) {
-  if (session.user.role !== "admin") {
-    throw new Error("Forbidden: admin access required");
-  }
-}
+import { requireSession, requireAdmin } from "@/lib/auth-server";
 
 // ---------------------------------------------------------------------------
 // Profile
@@ -262,7 +246,8 @@ export const listContainers = createServerFn({ method: "GET" }).handler(
       if (sessionIds.length > 0) {
         const sessions = await db
           .select()
-          .from(schema.codingSessions);
+          .from(schema.codingSessions)
+          .where(inArray(schema.codingSessions.id, sessionIds));
 
         for (const s of sessions) {
           sessionsMap.set(s.id, s);

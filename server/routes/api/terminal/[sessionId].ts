@@ -11,6 +11,19 @@ interface TerminalState {
 
 const activeTerminals = new Map<string, TerminalState>();
 
+// Periodic cleanup of stale terminal sessions (every 5 minutes)
+setInterval(() => {
+  for (const [id, terminal] of activeTerminals) {
+    try {
+      if (terminal.stream.destroyed) {
+        activeTerminals.delete(id);
+      }
+    } catch {
+      activeTerminals.delete(id);
+    }
+  }
+}, 5 * 60 * 1000);
+
 async function validateSession(
   sessionId: string,
   token?: string,

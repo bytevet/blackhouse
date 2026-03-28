@@ -1,33 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getRequest } from "@tanstack/react-start/server";
-import { auth } from "@/lib/auth";
-import { db } from "@/db";
-import { codingSessions } from "@/db/schema";
-import { eq } from "drizzle-orm";
 import { getDockerClient } from "@/lib/docker";
-
-async function getAuthorizedSession(sessionId: string) {
-  const request = getRequest();
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) throw new Error("Unauthorized");
-
-  const [codingSession] = await db
-    .select()
-    .from(codingSessions)
-    .where(eq(codingSessions.id, sessionId))
-    .limit(1);
-
-  if (!codingSession) throw new Error("Session not found");
-  if (
-    codingSession.userId !== session.user.id &&
-    session.user.role !== "admin"
-  ) {
-    throw new Error("Forbidden");
-  }
-  if (!codingSession.containerId) throw new Error("No container");
-
-  return codingSession;
-}
+import { requireSessionOwnership } from "@/lib/auth-server";
 
 async function execInContainer(
   containerId: string,
@@ -58,8 +31,8 @@ async function execInContainer(
 export const listFiles = createServerFn({ method: "GET" })
   .inputValidator((input: { sessionId: string; path: string }) => input)
   .handler(async ({ data }) => {
-    const session = await getAuthorizedSession(data.sessionId);
-    const output = await execInContainer(session.containerId!, [
+    const { codingSession } = await requireSessionOwnership({ data: { sessionId: data.sessionId } });
+    const output = await execInContainer(codingSession.containerId!, [
       "ls",
       "-la",
       "--group-directories-first",
@@ -72,7 +45,7 @@ export const listFiles = createServerFn({ method: "GET" })
     // Also try to get git status for this directory
     let gitStatusMap: Record<string, string> = {};
     try {
-      const gitOutput = await execInContainer(session.containerId!, [
+      const gitOutput = await execInContainer(codingSession.containerId!, [
         "git",
         "-C",
         data.path,
@@ -119,8 +92,8 @@ export const listFiles = createServerFn({ method: "GET" })
 export const readFile = createServerFn({ method: "GET" })
   .inputValidator((input: { sessionId: string; path: string }) => input)
   .handler(async ({ data }) => {
-    const session = await getAuthorizedSession(data.sessionId);
-    const content = await execInContainer(session.containerId!, [
+    const { codingSession } = await requireSessionOwnership({ data: { sessionId: data.sessionId } });
+    const content = await execInContainer(codingSession.containerId!, [
       "cat",
       data.path,
     ]);
@@ -130,8 +103,8 @@ export const readFile = createServerFn({ method: "GET" })
 export const getGitStatus = createServerFn({ method: "GET" })
   .inputValidator((input: { sessionId: string }) => input)
   .handler(async ({ data }) => {
-    const session = await getAuthorizedSession(data.sessionId);
-    const output = await execInContainer(session.containerId!, [
+    const { codingSession } = await requireSessionOwnership({ data: { sessionId: data.sessionId } });
+    const output = await execInContainer(codingSession.containerId!, [
       "git",
       "-C",
       "/workspace",
@@ -144,8 +117,8 @@ export const getGitStatus = createServerFn({ method: "GET" })
 export const getFileDiff = createServerFn({ method: "GET" })
   .inputValidator((input: { sessionId: string; path: string }) => input)
   .handler(async ({ data }) => {
-    const session = await getAuthorizedSession(data.sessionId);
-    const output = await execInContainer(session.containerId!, [
+    const { codingSession } = await requireSessionOwnership({ data: { sessionId: data.sessionId } });
+    const output = await execInContainer(codingSession.containerId!, [
       "git",
       "diff",
       "HEAD",
