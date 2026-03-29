@@ -46,18 +46,24 @@ async function requireSessionOwnership(
     .where(eq(schema.codingSessions.id, sessionId))
     .limit(1);
   if (!codingSession) throw new Error("Session not found");
+  if (!codingSession.containerId) throw new Error("Session has no container");
   if (codingSession.userId !== session.user.id && session.user.role !== "admin") {
     throw new Error("Forbidden");
   }
-  return codingSession;
+  return codingSession as typeof codingSession & { containerId: string };
 }
 
 export const listFiles = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
-  .inputValidator(z.object({ sessionId: z.string(), path: z.string() }))
+  .inputValidator(
+    z.object({
+      sessionId: z.string(),
+      path: z.string().refine((p) => !p.includes(".."), "Path traversal not allowed"),
+    }),
+  )
   .handler(async ({ data, context }) => {
     const codingSession = await requireSessionOwnership(data.sessionId, context.session);
-    const output = await execInContainer(codingSession.containerId!, [
+    const output = await execInContainer(codingSession.containerId, [
       "ls",
       "-la",
       "--group-directories-first",
@@ -72,7 +78,7 @@ export const listFiles = createServerFn({ method: "GET" })
     let gitStatusMap: Record<string, string> = {};
     try {
       const gitOutput = await execInContainer(
-        codingSession.containerId!,
+        codingSession.containerId,
         ["git", "-C", data.path, "diff", "--stat"],
         { stdoutOnly: true },
       );
@@ -110,10 +116,15 @@ export const listFiles = createServerFn({ method: "GET" })
 
 export const readFile = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
-  .inputValidator(z.object({ sessionId: z.string(), path: z.string() }))
+  .inputValidator(
+    z.object({
+      sessionId: z.string(),
+      path: z.string().refine((p) => !p.includes(".."), "Path traversal not allowed"),
+    }),
+  )
   .handler(async ({ data, context }) => {
     const codingSession = await requireSessionOwnership(data.sessionId, context.session);
-    const content = await execInContainer(codingSession.containerId!, ["cat", data.path]);
+    const content = await execInContainer(codingSession.containerId, ["cat", data.path]);
     return content;
   });
 
@@ -123,7 +134,7 @@ export const getGitStatus = createServerFn({ method: "GET" })
   .handler(async ({ data, context }) => {
     const codingSession = await requireSessionOwnership(data.sessionId, context.session);
     const output = await execInContainer(
-      codingSession.containerId!,
+      codingSession.containerId,
       ["git", "-C", "/workspace", "diff", "--stat"],
       { stdoutOnly: true },
     );
@@ -132,11 +143,16 @@ export const getGitStatus = createServerFn({ method: "GET" })
 
 export const getFileDiff = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
-  .inputValidator(z.object({ sessionId: z.string(), path: z.string() }))
+  .inputValidator(
+    z.object({
+      sessionId: z.string(),
+      path: z.string().refine((p) => !p.includes(".."), "Path traversal not allowed"),
+    }),
+  )
   .handler(async ({ data, context }) => {
     const codingSession = await requireSessionOwnership(data.sessionId, context.session);
     const output = await execInContainer(
-      codingSession.containerId!,
+      codingSession.containerId,
       ["git", "diff", "--", data.path],
       { stdoutOnly: true },
     );

@@ -78,7 +78,7 @@ export const upsertAgentConfig = createServerFn({ method: "POST" })
   )
 
   .handler(async ({ data }) => {
-    const values: Record<string, unknown> = {
+    const values: Partial<typeof schema.agentConfigs.$inferInsert> = {
       preset: data.preset,
       displayName: data.displayName,
       agentCommand: data.agentCommand ?? null,
@@ -116,7 +116,7 @@ export const upsertAgentConfig = createServerFn({ method: "POST" })
     // Create new
     const inserted = await db
       .insert(schema.agentConfigs)
-      .values(values as typeof schema.agentConfigs.$inferInsert)
+      .values(values as Required<typeof values>)
       .returning();
 
     return inserted[0];

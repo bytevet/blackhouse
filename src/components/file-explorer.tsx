@@ -76,20 +76,21 @@ export function FileExplorer({
           return mergeTree(prev, newRoot);
         });
 
-        // Re-fetch expanded directories in parallel
+        // Re-fetch expanded directories in parallel, batch into single state update
         const expanded = Array.from(expandedPathsRef.current);
         const results = await Promise.all(expanded.map((dirPath) => loadDirectory(dirPath)));
-        for (let i = 0; i < expanded.length; i++) {
-          const dirPath = expanded[i];
-          const newChildren = results[i];
-          setTree((prev) => {
-            const existing = findNode(prev, dirPath)?.children;
-            if (existing && fileListFingerprint(existing) === fileListFingerprint(newChildren)) {
-              return prev;
+        setTree((prev) => {
+          let tree = prev;
+          for (let i = 0; i < expanded.length; i++) {
+            const dirPath = expanded[i];
+            const newChildren = results[i];
+            const existing = findNode(tree, dirPath)?.children;
+            if (!existing || fileListFingerprint(existing) !== fileListFingerprint(newChildren)) {
+              tree = updateTreeChildren(tree, dirPath, newChildren);
             }
-            return updateTreeChildren(prev, dirPath, newChildren);
-          });
-        }
+          }
+          return tree;
+        });
       } catch {
         // ignore polling errors
       }

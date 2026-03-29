@@ -7,6 +7,7 @@ import {
   jsonb,
   uuid,
   pgEnum,
+  index,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
@@ -77,44 +78,58 @@ export const sessionStatusEnum = pgEnum("session_status", [
   "destroyed",
 ]);
 
-export const codingSessions = pgTable("coding_sessions", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => user.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  status: sessionStatusEnum("status").notNull().default("pending"),
-  gitRepoUrl: text("git_repo_url"),
-  gitBranch: text("git_branch").default("main"),
-  templateId: uuid("template_id").references(() => templates.id, {
-    onDelete: "set null",
-  }),
-  preset: text("preset").notNull(),
-  agentConfigId: text("agent_config_id"),
-  containerId: text("container_id"),
-  sessionToken: text("session_token"),
-  containerImage: text("container_image").notNull(),
-  resultHtml: text("result_html"),
-  agentTitle: text("agent_title"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+export const codingSessions = pgTable(
+  "coding_sessions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    status: sessionStatusEnum("status").notNull().default("pending"),
+    gitRepoUrl: text("git_repo_url"),
+    gitBranch: text("git_branch").default("main"),
+    templateId: uuid("template_id").references(() => templates.id, {
+      onDelete: "set null",
+    }),
+    preset: text("preset").notNull(),
+    agentConfigId: text("agent_config_id"),
+    containerId: text("container_id"),
+    sessionToken: text("session_token"),
+    containerImage: text("container_image").notNull(),
+    resultHtml: text("result_html"),
+    agentTitle: text("agent_title"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("idx_sessions_user_id").on(table.userId),
+    index("idx_sessions_status").on(table.status),
+  ],
+);
 
-export const templates = pgTable("templates", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => user.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  description: text("description"),
-  systemPrompt: text("system_prompt"),
-  skills: jsonb("skills").$type<object[] | null>(),
-  mcpConfig: jsonb("mcp_config").$type<object | null>(),
-  isPublic: boolean("is_public").notNull().default(false),
-  gitRequired: boolean("git_required").notNull().default(false),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+export const templates = pgTable(
+  "templates",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    systemPrompt: text("system_prompt"),
+    skills: jsonb("skills").$type<object[] | null>(),
+    mcpConfig: jsonb("mcp_config").$type<object | null>(),
+    isPublic: boolean("is_public").notNull().default(false),
+    gitRequired: boolean("git_required").notNull().default(false),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("idx_templates_user_id").on(table.userId),
+    index("idx_templates_is_public").on(table.isPublic),
+  ],
+);
 
 export const agentConfigs = pgTable("agent_configs", {
   id: uuid("id").defaultRandom().primaryKey(),
