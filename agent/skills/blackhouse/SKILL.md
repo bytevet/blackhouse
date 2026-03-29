@@ -23,6 +23,7 @@ configured. The scripts below use them automatically — just run the commands.
 ## When to use
 
 ALWAYS use `submit-result.sh` when you:
+
 - Create or modify an HTML file — submit it so the user can preview it
 - Generate a report, summary, or analysis
 - Build a chart, dashboard, table, or any visual artifact
@@ -30,6 +31,7 @@ ALWAYS use `submit-result.sh` when you:
 - Produce any output that benefits from rendering rather than raw text
 
 ALWAYS use `update-title.sh` when you:
+
 - Start working on a new task
 - Complete a milestone or finish a step
 - Switch to a different activity
@@ -76,6 +78,7 @@ HTML
 ```
 
 Requirements:
+
 - HTML must be a complete, self-contained document
 - Include all CSS and JS inline (no external resources)
 - Use modern HTML5 with clean, minimal design

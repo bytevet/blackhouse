@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -7,7 +7,13 @@
     <link rel="icon" href="/favicon.svg" />
     <script>
       // Theme initialization — runs before React to prevent flash
-      (function(){try{var t=localStorage.getItem("blackhouse-theme");if(t==="dark"||(t!=="light"&&matchMedia("(prefers-color-scheme:dark)").matches))document.documentElement.classList.add("dark")}catch(e){}})()
+      (function () {
+        try {
+          var t = localStorage.getItem("blackhouse-theme");
+          if (t === "dark" || (t !== "light" && matchMedia("(prefers-color-scheme:dark)").matches))
+            document.documentElement.classList.add("dark");
+        } catch (e) {}
+      })();
     </script>
   </head>
   <body>

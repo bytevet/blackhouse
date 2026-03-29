@@ -124,14 +124,14 @@ agent/                 # Injected into coding agent containers
 
 ## Environment Variables
 
-| Variable | Purpose | Default |
-|----------|---------|---------|
-| `DATABASE_URL` | PostgreSQL connection string | — |
-| `BETTER_AUTH_SECRET` | Auth session signing key | — |
-| `BETTER_AUTH_URL` | Public URL (auth callbacks) | `http://localhost:3000` |
+| Variable                   | Purpose                            | Default                            |
+| -------------------------- | ---------------------------------- | ---------------------------------- |
+| `DATABASE_URL`             | PostgreSQL connection string       | —                                  |
+| `BETTER_AUTH_SECRET`       | Auth session signing key           | —                                  |
+| `BETTER_AUTH_URL`          | Public URL (auth callbacks)        | `http://localhost:3000`            |
 | `BLACKHOUSE_CONTAINER_URL` | URL containers use to reach server | `http://host.docker.internal:3000` |
-| `GITHUB_CLIENT_ID` | GitHub OAuth (optional) | — |
-| `GITHUB_CLIENT_SECRET` | GitHub OAuth (optional) | — |
+| `GITHUB_CLIENT_ID`         | GitHub OAuth (optional)            | —                                  |
+| `GITHUB_CLIENT_SECRET`     | GitHub OAuth (optional)            | —                                  |
 
 ## License
 

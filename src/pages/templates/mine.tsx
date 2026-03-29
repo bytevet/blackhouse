@@ -60,7 +60,13 @@ export function MyTemplatesPage() {
 
   const openCreate = () => {
     setEditingTemplate(null);
-    setFormData({ name: "", description: "", systemPrompt: "", isPublic: false, gitRequired: false });
+    setFormData({
+      name: "",
+      description: "",
+      systemPrompt: "",
+      isPublic: false,
+      gitRequired: false,
+    });
     setDialogOpen(true);
   };
 
