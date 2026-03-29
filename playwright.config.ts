@@ -7,7 +7,7 @@ export default defineConfig({
   timeout: 30000,
   expect: { timeout: 10000 },
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: "http://localhost:5173", // Vite dev server (proxies /api to Hono on 3000)
     trace: "on-first-retry",
   },
   projects: [
@@ -18,8 +18,8 @@ export default defineConfig({
   ],
   webServer: {
     command: "npm run dev",
-    url: "http://localhost:3000",
+    url: "http://localhost:5173",
     reuseExistingServer: true,
-    timeout: 30000,
+    timeout: 60000,
   },
 });
