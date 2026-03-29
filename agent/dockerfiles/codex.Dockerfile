@@ -26,7 +26,7 @@ RUN mkdir -p /workspace && chown workspace:workspace /workspace
 WORKDIR /workspace
 
 # Copy entrypoint
-COPY scripts/session-entrypoint.sh /opt/blackhouse/entrypoint.sh
+COPY agent/entrypoint.sh /opt/blackhouse/entrypoint.sh
 RUN chmod +x /opt/blackhouse/entrypoint.sh
 
 USER workspace

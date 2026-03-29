@@ -2,7 +2,7 @@ import { defineEventHandler, getRouterParam, setResponseHeader } from "h3";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const SKILLS_DIR = join(process.cwd(), "skills");
+const SKILLS_DIR = join(process.cwd(), "agent", "skills");
 
 const INDEX = {
   skills: [

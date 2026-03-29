@@ -14,22 +14,26 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR_VER:-22}.x | bash -
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Gemini CLI globally
-RUN npm install -g @google/gemini-cli
-
-# Create non-root workspace user
+# Create non-root workspace user (before installing agent so it goes to user home)
 RUN groupadd --gid 1001 workspace \
     && useradd --uid 1001 --gid 1001 --shell /bin/bash --create-home workspace
+
+# Install Claude Code as workspace user via official installer
+USER workspace
+RUN curl -fsSL https://claude.ai/install.sh | bash
+ENV PATH="/home/workspace/.local/bin:${PATH}"
+USER root
 
 # Create workspace directory
 RUN mkdir -p /workspace && chown workspace:workspace /workspace
 WORKDIR /workspace
 
 # Copy entrypoint
-COPY scripts/session-entrypoint.sh /opt/blackhouse/entrypoint.sh
+COPY agent/entrypoint.sh /opt/blackhouse/entrypoint.sh
 RUN chmod +x /opt/blackhouse/entrypoint.sh
 
 USER workspace
+ENV PATH="/home/workspace/.local/bin:${PATH}"
 
 ENTRYPOINT ["dumb-init", "--", "/opt/blackhouse/entrypoint.sh"]
 CMD ["sleep", "infinity"]

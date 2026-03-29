@@ -32,7 +32,6 @@ src/
 │   ├── session-status.ts # Status badge colors
 │   ├── time.ts           # timeAgo() — NOT in utils.ts (shadcn overwrites it)
 │   └── docker.ts         # Docker client singleton
-├── mcp/               # MCP result server (injected into containers)
 ├── routes/
 │   ├── __root.tsx     # Root route (auth context, error/notFound components)
 │   ├── _authed.tsx    # Auth guard layout (redirects to /login?redirect=)
@@ -52,11 +51,16 @@ src/
 │   ├── settings.ts     # Agent configs, Docker config, user management
 │   └── files.ts        # File explorer via Docker exec
 server/
-└── routes/api/terminal/[sessionId].ts  # WebSocket terminal (binary protocol, multi-peer)
-dockerfiles/           # Per-agent preset Dockerfiles
+└── routes/
+    ├── api/terminal/[sessionId].ts      # WebSocket terminal (binary protocol, multi-peer)
+    └── .well-known/agent-skills/        # Skills API for `npx skills add`
+agent/                 # Everything injected into coding agent containers
+├── dockerfiles/       # Per-agent preset Dockerfiles (claude-code, gemini, codex)
+├── entrypoint.sh      # Container entrypoint (git clone, skills, MCP, agent start)
+├── mcp-server.ts      # MCP server source (submit_result, update_title tools)
+└── skills/blackhouse/ # SKILL.md served via .well-known endpoint
 scripts/
-├── seed.ts            # DB seed (admin user + agent presets)
-└── session-entrypoint.sh  # Container entrypoint (git clone, agent start, bash fallback)
+└── seed.ts            # DB seed (admin user + agent presets)
 ```
 
 ## Pre-Commit Requirements

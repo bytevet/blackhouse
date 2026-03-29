@@ -17,28 +17,28 @@ export const AGENT_PRESETS: Record<PresetId, AgentPreset> = {
       { name: "claude-config", mountPath: "/home/workspace/.claude" },
       { name: "claude-auth", mountPath: "/home/workspace/.config/claude-auth" },
     ],
-    dockerfilePath: "dockerfiles/claude-code.Dockerfile",
+    dockerfilePath: "agent/dockerfiles/claude-code.Dockerfile",
   },
   gemini: {
     id: "gemini",
     displayName: "Gemini",
     agentCommand: "gemini --yolo",
     volumeMounts: [{ name: "gemini-config", mountPath: "/home/workspace/.gemini" }],
-    dockerfilePath: "dockerfiles/gemini.Dockerfile",
+    dockerfilePath: "agent/dockerfiles/gemini.Dockerfile",
   },
   codex: {
     id: "codex",
     displayName: "Codex",
     agentCommand: "codex --full-auto",
     volumeMounts: [{ name: "codex-config", mountPath: "/home/workspace/.codex" }],
-    dockerfilePath: "dockerfiles/codex.Dockerfile",
+    dockerfilePath: "agent/dockerfiles/codex.Dockerfile",
   },
   custom: {
     id: "custom",
     displayName: "Custom",
     agentCommand: "",
     volumeMounts: [],
-    dockerfilePath: "dockerfiles/claude-code.Dockerfile",
+    dockerfilePath: "agent/dockerfiles/claude-code.Dockerfile",
   },
 };
 

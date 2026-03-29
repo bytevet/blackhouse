@@ -18,6 +18,7 @@ import { Route as AuthedSettingsRouteImport } from './routes/_authed/settings'
 import { Route as AuthedDashboardRouteImport } from './routes/_authed/dashboard'
 import { Route as AuthedTemplatesIndexRouteImport } from './routes/_authed/templates/index'
 import { Route as AuthedSettingsIndexRouteImport } from './routes/_authed/settings/index'
+import { Route as ApiSessionsTitleRouteImport } from './routes/api/sessions/title'
 import { Route as ApiSessionsResultRouteImport } from './routes/api/sessions/result'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as AuthedTemplatesPublicRouteImport } from './routes/_authed/templates/public'
@@ -71,6 +72,11 @@ const AuthedSettingsIndexRoute = AuthedSettingsIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AuthedSettingsRoute,
+} as any)
+const ApiSessionsTitleRoute = ApiSessionsTitleRouteImport.update({
+  id: '/api/sessions/title',
+  path: '/api/sessions/title',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ApiSessionsResultRoute = ApiSessionsResultRouteImport.update({
   id: '/api/sessions/result',
@@ -134,6 +140,7 @@ export interface FileRoutesByFullPath {
   '/templates/public': typeof AuthedTemplatesPublicRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/sessions/result': typeof ApiSessionsResultRoute
+  '/api/sessions/title': typeof ApiSessionsTitleRoute
   '/settings/': typeof AuthedSettingsIndexRoute
   '/templates/': typeof AuthedTemplatesIndexRoute
 }
@@ -151,6 +158,7 @@ export interface FileRoutesByTo {
   '/templates/public': typeof AuthedTemplatesPublicRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/sessions/result': typeof ApiSessionsResultRoute
+  '/api/sessions/title': typeof ApiSessionsTitleRoute
   '/settings': typeof AuthedSettingsIndexRoute
   '/templates': typeof AuthedTemplatesIndexRoute
 }
@@ -172,6 +180,7 @@ export interface FileRoutesById {
   '/_authed/templates/public': typeof AuthedTemplatesPublicRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/sessions/result': typeof ApiSessionsResultRoute
+  '/api/sessions/title': typeof ApiSessionsTitleRoute
   '/_authed/settings/': typeof AuthedSettingsIndexRoute
   '/_authed/templates/': typeof AuthedTemplatesIndexRoute
 }
@@ -193,6 +202,7 @@ export interface FileRouteTypes {
     | '/templates/public'
     | '/api/auth/$'
     | '/api/sessions/result'
+    | '/api/sessions/title'
     | '/settings/'
     | '/templates/'
   fileRoutesByTo: FileRoutesByTo
@@ -210,6 +220,7 @@ export interface FileRouteTypes {
     | '/templates/public'
     | '/api/auth/$'
     | '/api/sessions/result'
+    | '/api/sessions/title'
     | '/settings'
     | '/templates'
   id:
@@ -230,6 +241,7 @@ export interface FileRouteTypes {
     | '/_authed/templates/public'
     | '/api/auth/$'
     | '/api/sessions/result'
+    | '/api/sessions/title'
     | '/_authed/settings/'
     | '/_authed/templates/'
   fileRoutesById: FileRoutesById
@@ -241,6 +253,7 @@ export interface RootRouteChildren {
   ApiHealthRoute: typeof ApiHealthRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiSessionsResultRoute: typeof ApiSessionsResultRoute
+  ApiSessionsTitleRoute: typeof ApiSessionsTitleRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -307,6 +320,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/settings/'
       preLoaderRoute: typeof AuthedSettingsIndexRouteImport
       parentRoute: typeof AuthedSettingsRoute
+    }
+    '/api/sessions/title': {
+      id: '/api/sessions/title'
+      path: '/api/sessions/title'
+      fullPath: '/api/sessions/title'
+      preLoaderRoute: typeof ApiSessionsTitleRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/api/sessions/result': {
       id: '/api/sessions/result'
@@ -434,6 +454,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiHealthRoute: ApiHealthRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiSessionsResultRoute: ApiSessionsResultRoute,
+  ApiSessionsTitleRoute: ApiSessionsTitleRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

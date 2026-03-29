@@ -166,10 +166,13 @@ export const buildAgentImage = createServerFn({ method: "POST" })
           dockerfile = dockerfileContent;
         } else {
           // Read preset-specific dockerfile, fall back to claude-code
-          const presetDockerfile = path.resolve(process.cwd(), `dockerfiles/${preset}.Dockerfile`);
+          const presetDockerfile = path.resolve(
+            process.cwd(),
+            `agent/dockerfiles/${preset}.Dockerfile`,
+          );
           const fallbackDockerfile = path.resolve(
             process.cwd(),
-            "dockerfiles/claude-code.Dockerfile",
+            "agent/dockerfiles/claude-code.Dockerfile",
           );
           if (fs.existsSync(presetDockerfile)) {
             dockerfile = fs.readFileSync(presetDockerfile, "utf-8");
@@ -180,14 +183,14 @@ export const buildAgentImage = createServerFn({ method: "POST" })
 
         // Read supporting files
         const entrypointScript = fs.readFileSync(
-          path.resolve(process.cwd(), "scripts/session-entrypoint.sh"),
+          path.resolve(process.cwd(), "agent/entrypoint.sh"),
           "utf-8",
         );
 
         // Create tar stream with build context
         const pack = tar.pack();
         pack.entry({ name: "Dockerfile" }, dockerfile);
-        pack.entry({ name: "scripts/session-entrypoint.sh" }, entrypointScript);
+        pack.entry({ name: "agent/entrypoint.sh" }, entrypointScript);
         pack.finalize();
 
         const docker = await getDockerClient();
@@ -270,10 +273,10 @@ export const getDefaultDockerfile = createServerFn({ method: "GET" })
   .inputValidator(z.object({ preset: z.string().optional() }).optional())
   .handler(async ({ data }) => {
     const preset = data?.preset || "claude-code";
-    const dockerfilePath = path.resolve(process.cwd(), `dockerfiles/${preset}.Dockerfile`);
+    const dockerfilePath = path.resolve(process.cwd(), `agent/dockerfiles/${preset}.Dockerfile`);
 
     // Fall back to claude-code if preset file doesn't exist
-    const fallbackPath = path.resolve(process.cwd(), "dockerfiles/claude-code.Dockerfile");
+    const fallbackPath = path.resolve(process.cwd(), "agent/dockerfiles/claude-code.Dockerfile");
     const filePath = fs.existsSync(dockerfilePath) ? dockerfilePath : fallbackPath;
 
     return fs.readFileSync(filePath, "utf-8");
