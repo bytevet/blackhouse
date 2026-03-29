@@ -26,7 +26,7 @@ vi.mock("@/db/schema", () => ({
   dockerConfigs: {},
 }));
 
-import { getDockerClient, resetDockerClient } from "@/lib/docker";
+import { getDockerClient, resetDockerClient } from "../../server/lib/docker";
 
 describe("Docker Client", () => {
   beforeEach(() => {
