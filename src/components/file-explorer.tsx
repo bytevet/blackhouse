@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { ChevronRight, ChevronDown, File, Folder, FolderOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -14,13 +14,27 @@ interface FileExplorerProps {
   sessionId: string;
   onFileSelect: (path: string) => void;
   selectedFile?: string;
+  rootPath?: string;
+  status?: string;
 }
 
-export function FileExplorer({ sessionId, onFileSelect, selectedFile }: FileExplorerProps) {
+function fileListFingerprint(files: FileNode[]): string {
+  return files.map((f) => `${f.name}:${f.isDirectory}:${f.gitStatus ?? ""}`).join("|");
+}
+
+export function FileExplorer({
+  sessionId,
+  onFileSelect,
+  selectedFile,
+  rootPath = "/workspace",
+  status,
+}: FileExplorerProps) {
   const [tree, setTree] = useState<FileNode[]>([]);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const expandedPathsRef = useRef(expandedPaths);
+  expandedPathsRef.current = expandedPaths;
 
   const loadDirectory = useCallback(
     async (path: string) => {
@@ -39,14 +53,49 @@ export function FileExplorer({ sessionId, onFileSelect, selectedFile }: FileExpl
   const loadRoot = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const files = await loadDirectory("/workspace");
+    const files = await loadDirectory(rootPath);
     setTree(files);
     setLoading(false);
-  }, [loadDirectory]);
+  }, [loadDirectory, rootPath]);
 
   useEffect(() => {
     loadRoot();
   }, [loadRoot]);
+
+  // Poll for changes when session is running
+  useEffect(() => {
+    if (status !== "running") return;
+
+    const poll = async () => {
+      try {
+        // Re-fetch root
+        const newRoot = await loadDirectory(rootPath);
+        setTree((prev) => {
+          if (fileListFingerprint(prev) === fileListFingerprint(newRoot)) return prev;
+          // Preserve children of expanded dirs
+          return mergeTree(prev, newRoot);
+        });
+
+        // Re-fetch expanded directories
+        const expanded = expandedPathsRef.current;
+        for (const dirPath of expanded) {
+          const newChildren = await loadDirectory(dirPath);
+          setTree((prev) => {
+            const existing = findNode(prev, dirPath)?.children;
+            if (existing && fileListFingerprint(existing) === fileListFingerprint(newChildren)) {
+              return prev;
+            }
+            return updateTreeChildren(prev, dirPath, newChildren);
+          });
+        }
+      } catch {
+        // ignore polling errors
+      }
+    };
+
+    const id = setInterval(poll, 3000);
+    return () => clearInterval(id);
+  }, [status, rootPath, loadDirectory]);
 
   const toggleDir = async (path: string) => {
     const next = new Set(expandedPaths);
@@ -181,4 +230,25 @@ function updateTreeChildren(
     }
     return node;
   });
+}
+
+function mergeTree(oldTree: FileNode[], newTree: FileNode[]): FileNode[] {
+  return newTree.map((newNode) => {
+    const oldNode = oldTree.find((o) => o.path === newNode.path);
+    if (oldNode?.children && newNode.isDirectory) {
+      return { ...newNode, children: oldNode.children };
+    }
+    return newNode;
+  });
+}
+
+function findNode(tree: FileNode[], path: string): FileNode | undefined {
+  for (const node of tree) {
+    if (node.path === path) return node;
+    if (node.children) {
+      const found = findNode(node.children, path);
+      if (found) return found;
+    }
+  }
+  return undefined;
 }

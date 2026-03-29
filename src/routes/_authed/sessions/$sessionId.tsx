@@ -236,6 +236,15 @@ function SessionViewPage() {
                         sessionId={session.id}
                         onFileSelect={setSelectedFile}
                         selectedFile={selectedFile}
+                        status={session.status}
+                        rootPath={
+                          session.gitRepoUrl
+                            ? `/workspace/${session.gitRepoUrl
+                                .replace(/\.git$/, "")
+                                .split("/")
+                                .pop()}`
+                            : "/workspace"
+                        }
                       />
                     </div>
                   </ResizablePanel>
@@ -243,7 +252,11 @@ function SessionViewPage() {
                   <ResizablePanel defaultSize={65} minSize={20}>
                     <div className="h-full overflow-auto">
                       {selectedFile ? (
-                        <FileViewer sessionId={session.id} filePath={selectedFile} />
+                        <FileViewer
+                          sessionId={session.id}
+                          filePath={selectedFile}
+                          status={session.status}
+                        />
                       ) : (
                         <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
                           Select a file to view

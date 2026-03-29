@@ -1,15 +1,18 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 interface FileViewerProps {
   sessionId: string;
   filePath: string;
+  status?: string;
 }
 
-export function FileViewer({ sessionId, filePath }: FileViewerProps) {
+export function FileViewer({ sessionId, filePath, status }: FileViewerProps) {
   const [content, setContent] = useState<string | null>(null);
   const [diff, setDiff] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showDiff, setShowDiff] = useState(false);
+  const contentRef = useRef<string | null>(null);
+  const diffRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -18,6 +21,8 @@ export function FileViewer({ sessionId, filePath }: FileViewerProps) {
       setLoading(true);
       setContent(null);
       setDiff(null);
+      contentRef.current = null;
+      diffRef.current = null;
 
       try {
         const { readFile, getFileDiff } = await import("@/server/files");
@@ -28,6 +33,8 @@ export function FileViewer({ sessionId, filePath }: FileViewerProps) {
         ]);
 
         if (!cancelled) {
+          contentRef.current = fileContent as string;
+          diffRef.current = fileDiff as string | null;
           setContent(fileContent as string);
           setDiff(fileDiff as string | null);
           setShowDiff(!!fileDiff);
@@ -48,6 +55,38 @@ export function FileViewer({ sessionId, filePath }: FileViewerProps) {
       cancelled = true;
     };
   }, [sessionId, filePath]);
+
+  // Poll for content changes when session is running
+  useEffect(() => {
+    if (status !== "running" || !filePath) return;
+
+    const poll = async () => {
+      try {
+        const { readFile, getFileDiff } = await import("@/server/files");
+        const [newContent, newDiff] = await Promise.all([
+          readFile({ data: { sessionId, path: filePath } }),
+          getFileDiff({ data: { sessionId, path: filePath } }).catch(() => null),
+        ]);
+
+        const nc = newContent as string;
+        const nd = newDiff as string | null;
+
+        if (nc !== contentRef.current) {
+          contentRef.current = nc;
+          setContent(nc);
+        }
+        if (nd !== diffRef.current) {
+          diffRef.current = nd;
+          setDiff(nd);
+        }
+      } catch {
+        // ignore polling errors
+      }
+    };
+
+    const id = setInterval(poll, 3000);
+    return () => clearInterval(id);
+  }, [status, sessionId, filePath]);
 
   if (loading) {
     return (

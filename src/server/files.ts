@@ -6,22 +6,29 @@ import * as schema from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getDockerClient } from "@/lib/docker";
 
-async function execInContainer(containerId: string, cmd: string[]): Promise<string> {
+async function execInContainer(
+  containerId: string,
+  cmd: string[],
+  { stdoutOnly = false }: { stdoutOnly?: boolean } = {},
+): Promise<string> {
   const docker = await getDockerClient();
   const container = docker.getContainer(containerId);
   const exec = await container.exec({
     Cmd: cmd,
     AttachStdout: true,
-    AttachStderr: true,
+    AttachStderr: !stdoutOnly,
   });
   const stream = await exec.start({ hijack: false, stdin: false });
 
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     stream.on("data", (chunk: Buffer) => {
-      // Docker multiplexed stream: first 8 bytes are header
+      // Docker multiplexed stream: 8-byte header per frame
+      // header[0]: 1=stdout, 2=stderr
       if (chunk.length > 8) {
-        chunks.push(chunk.subarray(8));
+        if (!stdoutOnly || chunk[0] === 1) {
+          chunks.push(chunk.subarray(8));
+        }
       }
     });
     stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
@@ -61,16 +68,14 @@ export const listFiles = createServerFn({ method: "GET" })
     const files = [];
 
     // Also try to get git status for this directory
+    // Use --stat without HEAD to avoid "Could not access 'HEAD'" in repos with no commits
     let gitStatusMap: Record<string, string> = {};
     try {
-      const gitOutput = await execInContainer(codingSession.containerId!, [
-        "git",
-        "-C",
-        data.path,
-        "diff",
-        "--stat",
-        "HEAD",
-      ]);
+      const gitOutput = await execInContainer(
+        codingSession.containerId!,
+        ["git", "-C", data.path, "diff", "--stat"],
+        { stdoutOnly: true },
+      );
       for (const line of gitOutput.trim().split("\n")) {
         const match = line.match(/^\s*(.+?)\s+\|\s+(\d+)\s+([+-]+)/);
         if (match) {
@@ -117,13 +122,11 @@ export const getGitStatus = createServerFn({ method: "GET" })
   .inputValidator(z.object({ sessionId: z.string() }))
   .handler(async ({ data, context }) => {
     const codingSession = await requireSessionOwnership(data.sessionId, context.session);
-    const output = await execInContainer(codingSession.containerId!, [
-      "git",
-      "-C",
-      "/workspace",
-      "diff",
-      "--stat",
-    ]);
+    const output = await execInContainer(
+      codingSession.containerId!,
+      ["git", "-C", "/workspace", "diff", "--stat"],
+      { stdoutOnly: true },
+    );
     return output;
   });
 
@@ -132,12 +135,10 @@ export const getFileDiff = createServerFn({ method: "GET" })
   .inputValidator(z.object({ sessionId: z.string(), path: z.string() }))
   .handler(async ({ data, context }) => {
     const codingSession = await requireSessionOwnership(data.sessionId, context.session);
-    const output = await execInContainer(codingSession.containerId!, [
-      "git",
-      "diff",
-      "HEAD",
-      "--",
-      data.path,
-    ]);
+    const output = await execInContainer(
+      codingSession.containerId!,
+      ["git", "diff", "--", data.path],
+      { stdoutOnly: true },
+    );
     return output || null;
   });
