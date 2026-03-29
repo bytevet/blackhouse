@@ -1,28 +1,25 @@
 import { defineConfig } from "vite";
-import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import { nitro } from "nitro/vite";
+import path from "node:path";
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "src"),
+    },
+  },
   server: {
     host: "0.0.0.0",
-    port: 3000,
-    allowedHosts: ["localhost", "host.docker.internal"],
+    port: 5173,
+    proxy: {
+      "/api": "http://localhost:3000",
+      "/ws": { target: "ws://localhost:3000", ws: true },
+      "/.well-known": "http://localhost:3000",
+    },
   },
-  resolve: {
-    tsconfigPaths: true,
-  },
-  plugins: [
-    tailwindcss(),
-    tanstackStart({ spa: {} }),
-    react(),
-    nitro({
-      features: { websocket: true },
-      serverDir: "./server",
-    }),
-  ],
-  optimizeDeps: {
-    exclude: ["ssh2", "cpu-features"],
+  plugins: [tailwindcss(), react()],
+  build: {
+    outDir: "dist/client",
   },
 });
