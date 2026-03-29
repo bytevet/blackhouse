@@ -162,7 +162,7 @@ function SessionView({
         {session.agentTitle && (
           <span className="text-xs text-muted-foreground">— {session.agentTitle}</span>
         )}
-        <Badge variant="outline" className="text-[10px]">
+        <Badge variant="outline" className="text-xs">
           {session.preset}
         </Badge>
         <Badge
@@ -184,7 +184,7 @@ function SessionView({
           {session.status === "running" && (
             <Button
               variant="outline"
-              size="xs"
+              size="sm"
               onClick={() => setConfirmAction({ type: "stop" })}
               disabled={actionLoading}
             >
@@ -199,7 +199,7 @@ function SessionView({
           {session.status === "stopped" && (
             <Button
               variant="outline"
-              size="xs"
+              size="sm"
               onClick={() => handleAction("restart")}
               disabled={actionLoading}
             >
@@ -214,7 +214,7 @@ function SessionView({
             </Button>
           )}
           {session.status === "stopped" && (
-            <Button variant="outline" size="xs" onClick={handleRecreate} disabled={actionLoading}>
+            <Button variant="outline" size="sm" onClick={handleRecreate} disabled={actionLoading}>
               <Copy className="size-3" />
               <span className="hidden sm:inline">Re-create</span>
             </Button>
@@ -222,7 +222,7 @@ function SessionView({
           {session.status === "stopped" && (
             <Button
               variant="destructive"
-              size="xs"
+              size="sm"
               onClick={() => setConfirmAction({ type: "destroy" })}
               disabled={actionLoading}
             >
@@ -232,7 +232,7 @@ function SessionView({
           )}
           <Button
             variant={explorerOpen ? "outline" : "default"}
-            size="xs"
+            size="sm"
             onClick={() => setExplorerOpen((p) => !p)}
           >
             {explorerOpen ? (
@@ -253,10 +253,7 @@ function SessionView({
 
       {/* Main content */}
       {explorerOpen ? (
-        <ResizablePanelGroup
-          orientation={isMobile ? "vertical" : "horizontal"}
-          className="flex-1"
-        >
+        <ResizablePanelGroup orientation={isMobile ? "vertical" : "horizontal"} className="flex-1">
           <ResizablePanel id="terminal" defaultSize={50} minSize={20}>
             <TerminalPanel sessionId={session.id} status={session.status} />
           </ResizablePanel>
@@ -278,10 +275,7 @@ function SessionView({
               </TabsList>
 
               <TabsContent value="files" className="flex-1 overflow-hidden">
-                <ResizablePanelGroup
-                  orientation="horizontal"
-                  className="h-full"
-                >
+                <ResizablePanelGroup orientation="horizontal" className="h-full">
                   <ResizablePanel id="file-tree" defaultSize={35} minSize={20}>
                     <div className="h-full overflow-auto">
                       <FileExplorer

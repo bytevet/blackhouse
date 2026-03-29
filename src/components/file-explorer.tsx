@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { ChevronRight, ChevronDown, File, Folder, FolderOpen } from "lucide-react";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 interface FileNode {
@@ -190,12 +191,10 @@ function FileTreeNode({
             <File className={cn("size-3.5 shrink-0", fileIconColor(node.name))} />
           </>
         )}
-        <span className="truncate">{node.name}</span>
-        {node.gitStatus && (
-          <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
-            {node.gitStatus}
-          </span>
-        )}
+        <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+          <span className="truncate">{node.name}</span>
+          {node.gitStatus && <GitStatusBadge status={node.gitStatus} />}
+        </span>
       </button>
       {node.isDirectory && isExpanded && node.children && (
         <>
@@ -254,6 +253,30 @@ function findNode(tree: FileNode[], path: string): FileNode | undefined {
     }
   }
   return undefined;
+}
+
+const GIT_STATUS_CONFIG: Record<string, { label: string; tooltip: string; className: string }> = {
+  M: { label: "M", tooltip: "Modified", className: "text-yellow-500" },
+  U: { label: "U", tooltip: "Untracked", className: "text-green-500" },
+  D: { label: "D", tooltip: "Deleted", className: "text-red-500" },
+};
+
+function GitStatusBadge({ status }: { status: string }) {
+  const c = GIT_STATUS_CONFIG[status] ?? GIT_STATUS_CONFIG.M;
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span className={`shrink-0 cursor-default text-xs font-semibold ${c.className}`}>
+            {c.label}
+          </span>
+        }
+      />
+      <TooltipContent side="right" className="text-xs">
+        {c.tooltip}
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 function fileIconColor(name: string): string {

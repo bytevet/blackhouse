@@ -73,25 +73,24 @@ export const listFiles = createServerFn({ method: "GET" })
     const lines = output.trim().split("\n").slice(1); // skip "total" line
     const files = [];
 
-    // Also try to get git status for this directory
-    // Use --stat without HEAD to avoid "Could not access 'HEAD'" in repos with no commits
+    // Get git status and build a map of path → status code
     let gitStatusMap: Record<string, string> = {};
     try {
+      const gitRoot = (
+        await execInContainer(
+          codingSession.containerId,
+          ["git", "-C", data.path, "rev-parse", "--show-toplevel"],
+          { stdoutOnly: true },
+        )
+      ).trim();
       const gitOutput = await execInContainer(
         codingSession.containerId,
-        ["git", "-C", data.path, "diff", "--stat"],
+        ["git", "-C", gitRoot, "status", "--porcelain"],
         { stdoutOnly: true },
       );
-      for (const line of gitOutput.trim().split("\n")) {
-        const match = line.match(/^\s*(.+?)\s+\|\s+(\d+)\s+([+-]+)/);
-        if (match) {
-          const plusCount = (match[3].match(/\+/g) ?? []).length;
-          const minusCount = (match[3].match(/-/g) ?? []).length;
-          gitStatusMap[match[1].trim()] = `+${plusCount} -${minusCount}`;
-        }
-      }
+      gitStatusMap = parseGitPorcelain(gitOutput, gitRoot, data.path);
     } catch {
-      // not a git repo or no changes
+      // not a git repo
     }
 
     for (const line of lines) {
@@ -101,13 +100,22 @@ export const listFiles = createServerFn({ method: "GET" })
       if (name === "." || name === "..") continue;
 
       const isDirectory = line.startsWith("d");
-      const path = data.path.endsWith("/") ? `${data.path}${name}` : `${data.path}/${name}`;
+      const absPath = data.path.endsWith("/") ? `${data.path}${name}` : `${data.path}/${name}`;
+
+      // Look up by absolute path first, then by name
+      const status = gitStatusMap[absPath] || gitStatusMap[name];
+      let gitStatus: string | undefined;
+      if (status) {
+        if (status === "??" || status === "A") gitStatus = "U";
+        else if (status === "D") gitStatus = "D";
+        else gitStatus = "M";
+      }
 
       files.push({
         name,
-        path,
+        path: absPath,
         isDirectory,
-        gitStatus: gitStatusMap[name],
+        gitStatus,
       });
     }
 
@@ -151,10 +159,80 @@ export const getFileDiff = createServerFn({ method: "GET" })
   )
   .handler(async ({ data, context }) => {
     const codingSession = await requireSessionOwnership(data.sessionId, context.session);
+    // Try to find the git root, then diff relative to it
+    let gitRoot: string;
+    try {
+      gitRoot = (
+        await execInContainer(
+          codingSession.containerId,
+          [
+            "git",
+            "-C",
+            data.path.substring(0, data.path.lastIndexOf("/")),
+            "rev-parse",
+            "--show-toplevel",
+          ],
+          { stdoutOnly: true },
+        )
+      ).trim();
+    } catch {
+      return null; // not a git repo
+    }
     const output = await execInContainer(
       codingSession.containerId,
-      ["git", "diff", "--", data.path],
+      ["git", "-C", gitRoot, "diff", "--", data.path],
       { stdoutOnly: true },
     );
     return output || null;
   });
+
+/**
+ * Parse `git status --porcelain` output into a map of path → status code.
+ * Keys include absolute paths, direct child names, and parent directories.
+ */
+export function parseGitPorcelain(
+  porcelainOutput: string,
+  gitRoot: string,
+  listPath: string,
+): Record<string, string> {
+  const map: Record<string, string> = {};
+  const listDir = listPath.endsWith("/") ? listPath.slice(0, -1) : listPath;
+  const listDirRel = listDir.startsWith(gitRoot + "/") ? listDir.slice(gitRoot.length + 1) : "";
+
+  // Porcelain v1: "XY path" or "XY old -> new" for renames
+  // X = index status, Y = worktree status
+  const porcelainLine = /^(.)(.) (.+)$/;
+  for (const line of porcelainOutput.split("\n")) {
+    const match = line.match(porcelainLine);
+    if (!match) continue;
+    const [, indexStatus, workStatus, rawPath] = match;
+    const code = (indexStatus + workStatus).trim() || "M";
+    let relPath = rawPath;
+    if (relPath.includes(" -> ")) relPath = relPath.split(" -> ")[1];
+
+    // Store by absolute path
+    map[`${gitRoot}/${relPath}`] = code;
+
+    // Store by direct child name relative to listed directory
+    if (listDirRel) {
+      if (relPath.startsWith(listDirRel + "/")) {
+        const rest = relPath.slice(listDirRel.length + 1);
+        const directChild = rest.split("/")[0];
+        if (!map[directChild]) map[directChild] = code;
+      }
+    } else {
+      const directChild = relPath.split("/")[0];
+      if (!map[directChild]) map[directChild] = code;
+    }
+
+    // Mark parent directories as modified
+    const segments = relPath.split("/");
+    let dir = gitRoot;
+    for (let i = 0; i < segments.length - 1; i++) {
+      dir += "/" + segments[i];
+      if (!map[dir]) map[dir] = "M";
+    }
+  }
+
+  return map;
+}

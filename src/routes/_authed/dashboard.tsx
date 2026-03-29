@@ -460,7 +460,7 @@ function DashboardPage() {
                     </Badge>
                   </CardTitle>
                   {s.agentTitle && (
-                    <p className="truncate text-[10px] text-muted-foreground">{s.agentTitle}</p>
+                    <p className="truncate text-xs text-muted-foreground">{s.agentTitle}</p>
                   )}
                 </CardHeader>
                 <CardContent className="flex-1 space-y-1.5">
@@ -477,13 +477,13 @@ function DashboardPage() {
                   {s.resultHtml && (
                     <Badge
                       variant="outline"
-                      className="gap-1 border-green-500/30 bg-green-500/10 text-[10px] text-green-700 dark:text-green-400"
+                      className="gap-1 border-green-500/30 bg-green-500/10 text-xs text-green-700 dark:text-green-400"
                     >
                       <span className="size-1.5 rounded-full bg-green-500" />
                       Result
                     </Badge>
                   )}
-                  <div className="text-[10px] text-muted-foreground">{timeAgo(s.createdAt)}</div>
+                  <div className="text-xs text-muted-foreground">{timeAgo(s.createdAt)}</div>
                 </CardContent>
                 <CardFooter className="gap-1.5">
                   <Link

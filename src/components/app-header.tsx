@@ -92,13 +92,13 @@ export function AppHeader() {
           <DropdownMenuTrigger className="flex items-center gap-2 rounded-md px-2 py-1 text-xs outline-hidden hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/30">
             <Avatar className="size-6">
               <AvatarImage src={user?.image ?? undefined} />
-              <AvatarFallback className="text-[10px]">{initials}</AvatarFallback>
+              <AvatarFallback className="text-xs">{initials}</AvatarFallback>
             </Avatar>
             <span className="hidden text-sm sm:inline">{user?.name ?? "User"}</span>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
             <div className="px-2 py-1.5">
-              <p className="text-[10px] font-medium text-muted-foreground">Theme</p>
+              <p className="text-xs font-medium text-muted-foreground">Theme</p>
               <div className="mt-1 flex gap-1">
                 {themeOptions.map((opt) => (
                   <button
@@ -106,7 +106,7 @@ export function AppHeader() {
                     type="button"
                     onClick={() => setTheme(opt.value)}
                     className={cn(
-                      "flex flex-1 items-center justify-center gap-1 rounded-sm px-2 py-1 text-[10px] transition-colors",
+                      "flex flex-1 items-center justify-center gap-1 rounded-sm px-2 py-1 text-xs transition-colors",
                       theme === opt.value
                         ? "bg-accent text-accent-foreground"
                         : "text-muted-foreground hover:bg-muted hover:text-foreground",

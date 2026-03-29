@@ -106,14 +106,25 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
     let terminal: InstanceType<typeof import("@xterm/xterm").Terminal> | null = null;
 
     (async () => {
-      const [{ Terminal }, { FitAddon }, { WebLinksAddon }, { Unicode11Addon }] = await Promise.all(
-        [
-          import("@xterm/xterm"),
-          import("@xterm/addon-fit"),
-          import("@xterm/addon-web-links"),
-          import("@xterm/addon-unicode11"),
-        ],
-      );
+      const [
+        { Terminal },
+        { FitAddon },
+        { WebLinksAddon },
+        { Unicode11Addon },
+        { WebglAddon },
+        { ImageAddon },
+        { ClipboardAddon },
+        { SearchAddon },
+      ] = await Promise.all([
+        import("@xterm/xterm"),
+        import("@xterm/addon-fit"),
+        import("@xterm/addon-web-links"),
+        import("@xterm/addon-unicode11"),
+        import("@xterm/addon-webgl"),
+        import("@xterm/addon-image"),
+        import("@xterm/addon-clipboard"),
+        import("@xterm/addon-search"),
+      ]);
       await import("@xterm/xterm/css/xterm.css");
 
       if (disposed || !containerRef.current) return;
@@ -123,14 +134,18 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
         "#0a0a0a";
 
       terminal = new Terminal({
-        fontFamily: "'JetBrains Mono Variable', 'JetBrains Mono', monospace",
-        fontSize: 13,
-        lineHeight: 1.0,
-        letterSpacing: 0,
+        fontFamily: "'Source Code Pro Variable', 'Source Code Pro', monospace",
+        fontSize: 14,
+        lineHeight: 1.15,
         cursorBlink: true,
         cursorStyle: "bar",
         allowProposedApi: true,
-        scrollback: 10000,
+        scrollback: 50000,
+        drawBoldTextInBrightColors: true,
+        minimumContrastRatio: 4.5,
+        macOptionIsMeta: true,
+        macOptionClickForcesSelection: true,
+        rightClickSelectsWord: true,
         theme: {
           background: termBg,
           foreground: "#d4d4d8",
@@ -158,14 +173,23 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
       });
 
       const fitAddon = new FitAddon();
-      const webLinksAddon = new WebLinksAddon();
-      const unicode11Addon = new Unicode11Addon();
-
       terminal.loadAddon(fitAddon);
-      terminal.loadAddon(webLinksAddon);
-      terminal.loadAddon(unicode11Addon);
+      terminal.loadAddon(new WebLinksAddon());
+      terminal.loadAddon(new Unicode11Addon());
+      terminal.loadAddon(new ClipboardAddon());
+      terminal.loadAddon(new ImageAddon());
+      terminal.loadAddon(new SearchAddon());
       terminal.unicode.activeVersion = "11";
       terminal.open(containerRef.current);
+
+      // GPU-accelerated rendering with canvas fallback
+      try {
+        const webgl = new WebglAddon();
+        webgl.onContextLoss(() => webgl.dispose());
+        terminal.loadAddon(webgl);
+      } catch {
+        // WebGL not available — falls back to canvas renderer
+      }
 
       terminalRef.current = terminal;
       fitAddonRef.current = fitAddon;
@@ -234,7 +258,7 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
     <div className="relative h-full w-full bg-terminal">
       <div ref={containerRef} className="absolute inset-0 bottom-6" />
       <div
-        className="absolute inset-x-0 bottom-0 flex h-6 items-center justify-between border-t border-white/10 px-2 font-mono text-[10px]"
+        className="absolute inset-x-0 bottom-0 flex h-6 items-center justify-between border-t border-white/10 px-2 font-mono text-xs"
         onClick={() => terminalRef.current?.focus()}
       >
         <span className="flex items-center gap-1.5">

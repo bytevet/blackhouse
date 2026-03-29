@@ -1,7 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@fontsource-variable/jetbrains-mono";
+@import "@fontsource-variable/source-code-pro";
 @import "@fontsource-variable/geist-mono";
 
 @custom-variant dark (&:is(.dark *));
@@ -137,6 +137,24 @@
   html {
     @apply font-mono;
   }
+}
+
+/* Terminal scrollbar */
+.xterm .xterm-viewport::-webkit-scrollbar {
+  width: 6px;
+}
+
+.xterm .xterm-viewport::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+
+.xterm .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.xterm .xterm-viewport::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 /* Shiki dual-theme: swap token colors in dark mode */

@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import type { Highlighter, ShikiTransformer } from "shiki";
+import { FileCode, GitCompareArrows } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 let highlighterPromise: Promise<Highlighter> | null = null;
 
@@ -206,16 +208,26 @@ export function FileViewer({ sessionId, filePath, status }: FileViewerProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
-        <span className="truncate text-xs text-muted-foreground">{filePath}</span>
-        {diff && (
-          <button
-            type="button"
+      <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
+        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{filePath}</span>
+        {diff !== null && (
+          <Button
+            variant={showDiff ? "default" : "outline"}
+            size="xs"
             onClick={() => setShowDiff(!showDiff)}
-            className="shrink-0 text-[10px] text-primary hover:underline"
           >
-            {showDiff ? "Show file" : "Show diff"}
-          </button>
+            {showDiff ? (
+              <>
+                <GitCompareArrows className="size-3" />
+                Diff
+              </>
+            ) : (
+              <>
+                <FileCode className="size-3" />
+                Plain
+              </>
+            )}
+          </Button>
         )}
       </div>
       {highlightedHtml ? (
