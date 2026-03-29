@@ -126,13 +126,15 @@ function UsersTab() {
   };
 
   if (loading) {
-    return <div className="pt-4 text-sm text-muted-foreground">Loading users...</div>;
+    return <div className="text-sm text-muted-foreground">Loading users...</div>;
   }
 
   return (
-    <div className="space-y-4 pt-4">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium text-foreground">User Management</h3>
+        <p className="text-xs text-muted-foreground">
+          Manage platform users and their roles. Only admins can access this page.
+        </p>
         <Button size="sm" onClick={openCreate}>
           <Plus className="size-3" />
           Add User

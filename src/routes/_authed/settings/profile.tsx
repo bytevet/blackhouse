@@ -56,9 +56,12 @@ function ProfileTab() {
   });
 
   return (
-    <div className="max-w-md space-y-6 pt-4">
+    <div className="max-w-md space-y-6">
       <div className="space-y-3">
-        <h3 className="text-sm font-medium text-foreground">Display Name</h3>
+        <h2 className="text-sm font-medium text-foreground">Display Name</h2>
+        <p className="text-xs text-muted-foreground">
+          This is the name displayed across the platform.
+        </p>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -93,7 +96,10 @@ function ProfileTab() {
       </div>
 
       <div className="space-y-3">
-        <h3 className="text-sm font-medium text-foreground">Change Password</h3>
+        <h2 className="text-sm font-medium text-foreground">Change Password</h2>
+        <p className="text-xs text-muted-foreground">
+          Update your password to keep your account secure.
+        </p>
         <form
           onSubmit={(e) => {
             e.preventDefault();

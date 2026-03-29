@@ -5,6 +5,7 @@ import appCss from "@/index.css?url";
 import { DefaultErrorComponent } from "@/components/default-error";
 import { NotFound } from "@/components/not-found";
 import { getServerSession } from "@/lib/auth-server";
+import { useTheme } from "@/hooks/use-theme";
 
 export const Route = createRootRoute({
   beforeLoad: async () => {
@@ -36,6 +37,7 @@ export const Route = createRootRoute({
 });
 
 function RootComponent() {
+  useTheme();
   return (
     <RootDocument>
       <Outlet />

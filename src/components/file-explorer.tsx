@@ -76,10 +76,12 @@ export function FileExplorer({
           return mergeTree(prev, newRoot);
         });
 
-        // Re-fetch expanded directories
-        const expanded = expandedPathsRef.current;
-        for (const dirPath of expanded) {
-          const newChildren = await loadDirectory(dirPath);
+        // Re-fetch expanded directories in parallel
+        const expanded = Array.from(expandedPathsRef.current);
+        const results = await Promise.all(expanded.map((dirPath) => loadDirectory(dirPath)));
+        for (let i = 0; i < expanded.length; i++) {
+          const dirPath = expanded[i];
+          const newChildren = results[i];
           setTree((prev) => {
             const existing = findNode(prev, dirPath)?.children;
             if (existing && fileListFingerprint(existing) === fileListFingerprint(newChildren)) {
@@ -184,7 +186,7 @@ function FileTreeNode({
         ) : (
           <>
             <span className="size-3 shrink-0" />
-            <File className="size-3.5 shrink-0 text-muted-foreground" />
+            <File className={cn("size-3.5 shrink-0", fileIconColor(node.name))} />
           </>
         )}
         <span className="truncate">{node.name}</span>
@@ -251,4 +253,59 @@ function findNode(tree: FileNode[], path: string): FileNode | undefined {
     }
   }
   return undefined;
+}
+
+function fileIconColor(name: string): string {
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  const lname = name.toLowerCase();
+  if (lname === "dockerfile" || lname.startsWith("dockerfile.")) return "text-sky-400";
+  switch (ext) {
+    case "ts":
+    case "tsx":
+    case "mts":
+    case "cts":
+      return "text-blue-400";
+    case "js":
+    case "jsx":
+    case "mjs":
+    case "cjs":
+      return "text-yellow-400";
+    case "json":
+      return "text-yellow-600";
+    case "css":
+    case "scss":
+    case "less":
+      return "text-purple-400";
+    case "html":
+    case "htm":
+      return "text-orange-400";
+    case "md":
+    case "mdx":
+      return "text-slate-400";
+    case "py":
+      return "text-green-400";
+    case "rs":
+      return "text-orange-500";
+    case "go":
+      return "text-cyan-400";
+    case "sh":
+    case "bash":
+    case "zsh":
+      return "text-green-500";
+    case "yaml":
+    case "yml":
+    case "toml":
+      return "text-red-400";
+    case "sql":
+      return "text-pink-400";
+    case "svg":
+    case "png":
+    case "jpg":
+    case "jpeg":
+    case "gif":
+    case "ico":
+      return "text-emerald-400";
+    default:
+      return "text-muted-foreground";
+  }
 }

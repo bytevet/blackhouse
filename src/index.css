@@ -83,7 +83,7 @@
 
 @theme inline {
   --font-heading: var(--font-mono);
-  --font-mono: 'Geist Mono Variable', monospace;
+  --font-mono: "Geist Mono Variable", monospace;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -124,23 +124,6 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-*,
-::after,
-::before {
-  border-color: var(--color-border);
-  outline-color: color-mix(in oklch, var(--color-ring) 50%, transparent);
-}
-
-body {
-  margin: 0;
-  background-color: var(--color-background);
-  color: var(--color-foreground);
-}
-
-html {
-  font-family: var(--font-mono);
-}
-
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -151,4 +134,15 @@ html {
   html {
     @apply font-mono;
   }
+}
+
+/* Shiki dual-theme: swap token colors in dark mode */
+.shiki,
+.shiki span {
+  color: var(--shiki-light);
+}
+
+.dark .shiki,
+.dark .shiki span {
+  color: var(--shiki-dark);
 }

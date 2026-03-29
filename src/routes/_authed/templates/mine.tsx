@@ -131,15 +131,20 @@ function MyTemplatesPage() {
 
   return (
     <>
-      <div className="flex items-center justify-end">
-        <Button onClick={openCreate}>
-          <Plus className="size-3.5" />
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">
+          Create reusable prompt templates for your coding agent sessions.
+        </p>
+        <Button size="sm" onClick={openCreate}>
+          <Plus className="size-3" />
           New Template
         </Button>
       </div>
 
       {templates.length === 0 ? (
-        <p className="text-sm text-muted-foreground py-4">You haven't created any templates yet.</p>
+        <p className="text-sm text-muted-foreground py-4">
+          No templates yet. Create one to get started.
+        </p>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {templates.map((template) => (

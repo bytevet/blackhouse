@@ -207,12 +207,12 @@ function SessionViewPage() {
 
       {/* Main content */}
       {explorerOpen ? (
-        <ResizablePanelGroup orientation="horizontal" className="flex-1">
-          <ResizablePanel defaultSize={60} minSize={20}>
+        <ResizablePanelGroup orientation="horizontal" className="flex-1" autoSaveId="session-main">
+          <ResizablePanel id="terminal" defaultSize={50} minSize={20}>
             <TerminalPanel sessionId={session.id} status={session.status} />
           </ResizablePanel>
           <ResizableHandle withHandle />
-          <ResizablePanel defaultSize={40} minSize={15}>
+          <ResizablePanel id="sidebar" defaultSize={50} minSize={15}>
             <Tabs
               value={explorerTab}
               onValueChange={setExplorerTab}
@@ -229,8 +229,12 @@ function SessionViewPage() {
               </TabsList>
 
               <TabsContent value="files" className="flex-1 overflow-hidden">
-                <ResizablePanelGroup orientation="horizontal" className="h-full">
-                  <ResizablePanel defaultSize={35} minSize={20}>
+                <ResizablePanelGroup
+                  orientation="horizontal"
+                  className="h-full"
+                  autoSaveId="session-files"
+                >
+                  <ResizablePanel id="file-tree" defaultSize={35} minSize={20}>
                     <div className="h-full overflow-auto">
                       <FileExplorer
                         sessionId={session.id}
@@ -249,7 +253,7 @@ function SessionViewPage() {
                     </div>
                   </ResizablePanel>
                   <ResizableHandle withHandle />
-                  <ResizablePanel defaultSize={65} minSize={20}>
+                  <ResizablePanel id="file-viewer" defaultSize={65} minSize={20}>
                     <div className="h-full overflow-auto">
                       {selectedFile ? (
                         <FileViewer

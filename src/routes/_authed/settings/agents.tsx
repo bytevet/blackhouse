@@ -307,9 +307,11 @@ function AgentsTab() {
   };
 
   return (
-    <div className="space-y-4 pt-4">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium text-foreground">Agent Configurations</h3>
+        <p className="text-xs text-muted-foreground">
+          Configure coding agents with custom commands, Dockerfiles, and environment variables.
+        </p>
         <Button size="sm" onClick={openCreate}>
           <Plus className="size-3" />
           Add Agent

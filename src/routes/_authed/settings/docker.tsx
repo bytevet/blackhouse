@@ -86,34 +86,30 @@ function DockerTab() {
   }, []);
 
   if (loading) {
-    return (
-      <div className="pt-4 text-sm text-muted-foreground">Loading Docker configuration...</div>
-    );
+    return <div className="text-sm text-muted-foreground">Loading Docker configuration...</div>;
   }
 
   const isConnected = dockerStatus?.connected ?? false;
 
   return (
-    <div className="space-y-6 pt-4">
+    <div className="space-y-6">
       <div className="space-y-3">
-        <h3 className="text-sm font-medium text-foreground">Connection Status</h3>
+        <h2 className="text-sm font-medium text-foreground">Connection Status</h2>
         <div className="flex items-center gap-2">
-          <span
-            className={`inline-block size-2 rounded-full ${
-              isConnected ? "bg-green-500" : "bg-red-500"
-            }`}
-          />
-          <span className="text-sm text-muted-foreground">
+          <Badge variant={isConnected ? "default" : "destructive"}>
             {isConnected ? "Connected" : "Disconnected"}
-          </span>
+          </Badge>
           {dockerStatus?.version && (
-            <span className="text-xs text-muted-foreground">(v{dockerStatus.version})</span>
+            <span className="text-xs text-muted-foreground">v{dockerStatus.version}</span>
           )}
         </div>
       </div>
 
       <div className="max-w-md space-y-3">
-        <h3 className="text-sm font-medium text-foreground">Configuration</h3>
+        <h2 className="text-sm font-medium text-foreground">Configuration</h2>
+        <p className="text-xs text-muted-foreground">
+          Configure how Blackhouse connects to the Docker daemon.
+        </p>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -176,7 +172,8 @@ function DockerTab() {
       </div>
 
       <div className="space-y-3">
-        <h3 className="text-sm font-medium text-foreground">Containers</h3>
+        <h2 className="text-sm font-medium text-foreground">Active Containers</h2>
+        <p className="text-xs text-muted-foreground">Containers managed by Blackhouse sessions.</p>
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
