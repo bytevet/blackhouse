@@ -13,9 +13,7 @@
     },
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
-    "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true
+    "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "server", "vite.config.ts", "drizzle.config.ts"],
-  "exclude": ["src/entry-client.tsx"]
+  "include": ["src", "server", "vite.config.ts", "drizzle.config.ts"]
 }

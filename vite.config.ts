@@ -21,5 +21,14 @@ export default defineConfig({
   plugins: [tailwindcss(), react()],
   build: {
     outDir: "dist/client",
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("@xterm")) return "xterm";
+          if (id.includes("shiki")) return "shiki";
+        },
+      },
+    },
   },
 });
