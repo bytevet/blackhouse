@@ -5,39 +5,78 @@ description: Blackhouse session tools — submit visual results and update sessi
 
 # Blackhouse Session Tools
 
-You are running inside a **Blackhouse** coding session. The following environment
-variables are available: `SESSION_ID`, `BLACKHOUSE_URL`, `CONTAINER_TOKEN`.
+IMPORTANT: You are running inside a Blackhouse session. The user views your work through
+a web-based terminal and result viewer. There is NO local browser or desktop — the user
+CANNOT open files locally. You MUST use these tools to present any visual output.
 
-## Submit Result — Show visual output to the user
+The environment variables `SESSION_ID`, `BLACKHOUSE_URL`, and `SESSION_TOKEN` are already
+configured. The scripts below use them automatically — just run the commands.
 
-Whenever you produce something visual — a report, dashboard, chart, table, documentation,
-diagram, or any formatted output — submit it as HTML to the Blackhouse result viewer.
-The user sees this in a dedicated "Result" panel alongside your terminal.
+## CRITICAL RULES
 
-**Proactively use this** — don't just output plain text when a visual would be better.
+- NEVER tell the user to "open a file in a browser" or use `open`, `xdg-open`, etc.
+  There is no browser in this environment. Use `submit-result.sh` instead.
+- ALWAYS submit HTML files, game demos, previews, reports, or any visual output
+  via `submit-result.sh`. The user sees it instantly in the Blackhouse result panel.
+- ALWAYS call `update-title.sh` when you start a task, finish a step, or change activity.
+
+## When to use
+
+ALWAYS use `submit-result.sh` when you:
+- Create or modify an HTML file — submit it so the user can preview it
+- Generate a report, summary, or analysis
+- Build a chart, dashboard, table, or any visual artifact
+- Write a game, demo, or interactive page
+- Produce any output that benefits from rendering rather than raw text
+
+ALWAYS use `update-title.sh` when you:
+- Start working on a new task
+- Complete a milestone or finish a step
+- Switch to a different activity
+
+## update-title.sh — Update session status
+
+Shows what you're currently working on in the Blackhouse UI.
 
 ```bash
-curl -X POST "$BLACKHOUSE_URL/api/sessions/result" \
-  -H "Content-Type: application/json" \
-  -d "{\"sessionId\": \"$SESSION_ID\", \"token\": \"$CONTAINER_TOKEN\", \"html\": \"<html>YOUR HTML HERE</html>\"}"
+bash ~/.agents/skills/blackhouse/update-title.sh "your status here"
 ```
 
-- The HTML must be a **complete, self-contained document** (inline CSS/JS, no external resources)
-- Use modern HTML5, clean minimal design with system fonts
+Examples:
+
+```bash
+bash ~/.agents/skills/blackhouse/update-title.sh "analyzing codebase"
+bash ~/.agents/skills/blackhouse/update-title.sh "implementing auth module"
+bash ~/.agents/skills/blackhouse/update-title.sh "fixing test failures"
+bash ~/.agents/skills/blackhouse/update-title.sh "tests passing, cleaning up"
+```
+
+## submit-result.sh — Submit visual results
+
+Sends HTML to the Blackhouse result viewer. The user sees it immediately in their browser.
+
+To submit an existing HTML file:
+
+```bash
+cat path/to/file.html | bash ~/.agents/skills/blackhouse/submit-result.sh
+```
+
+To submit inline HTML:
+
+```bash
+cat <<'HTML' | bash ~/.agents/skills/blackhouse/submit-result.sh
+<html>
+<head><style>body { font-family: system-ui; padding: 2rem; }</style></head>
+<body>
+  <h1>Results</h1>
+  <table>...</table>
+</body>
+</html>
+HTML
+```
+
+Requirements:
+- HTML must be a complete, self-contained document
+- Include all CSS and JS inline (no external resources)
+- Use modern HTML5 with clean, minimal design
 - For charts, use inline SVG or load Chart.js/D3 from a CDN via `<script>`
-
-## Update Title — Show your current activity
-
-Update the session title to show what you are currently working on. The title is displayed
-next to the session name in the Blackhouse UI, so the user can see your progress at a glance.
-
-```bash
-curl -X POST "$BLACKHOUSE_URL/api/sessions/title" \
-  -H "Content-Type: application/json" \
-  -d "{\"sessionId\": \"$SESSION_ID\", \"token\": \"$CONTAINER_TOKEN\", \"title\": \"YOUR STATUS HERE\"}"
-```
-
-- Call it when you **start a new task**: `"implementing auth module"`
-- Call it when you **reach a milestone**: `"tests passing"`
-- Keep it short (~50 chars max)
-- Examples: `"analyzing codebase"`, `"fixing bug #42"`, `"writing tests"`, `"deploying"`

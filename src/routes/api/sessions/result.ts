@@ -28,8 +28,7 @@ export const Route = createFileRoute("/api/sessions/result")({
           return new Response("Session not found", { status: 404 });
         }
 
-        // Simple token validation: the token should be the container ID
-        if (session.containerId !== body.token) {
+        if (!session.sessionToken || session.sessionToken !== body.token) {
           return new Response("Invalid token", { status: 403 });
         }
 

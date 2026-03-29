@@ -52,9 +52,11 @@ function SessionViewPage() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const [session, setSession] = useState(initialSession);
-  const [explorerOpen, setExplorerOpen] = useState(false);
+  const [explorerOpen, setExplorerOpen] = useState(!!initialSession.resultHtml);
   const [selectedFile, setSelectedFile] = useState<string | undefined>();
-  const [explorerTab, setExplorerTab] = useState<string>("files");
+  const [explorerTab, setExplorerTab] = useState<string>(
+    initialSession.resultHtml ? "result" : "files",
+  );
   const [actionLoading, setActionLoading] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ type: "stop" | "destroy" } | null>(null);
 
@@ -340,8 +342,9 @@ function SessionViewPage() {
               variant="destructive"
               onClick={async () => {
                 if (!confirmAction) return;
-                await handleAction(confirmAction.type);
+                const action = confirmAction.type;
                 setConfirmAction(null);
+                await handleAction(action);
               }}
             >
               {confirmAction?.type === "stop" ? "Stop" : "Destroy"}

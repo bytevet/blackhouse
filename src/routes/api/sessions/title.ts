@@ -27,7 +27,7 @@ export const Route = createFileRoute("/api/sessions/title")({
           return new Response("Session not found", { status: 404 });
         }
 
-        if (session.containerId !== body.token) {
+        if (!session.sessionToken || session.sessionToken !== body.token) {
           return new Response("Invalid token", { status: 403 });
         }
 

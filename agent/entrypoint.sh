@@ -26,13 +26,14 @@ fi
 if [ -n "$SESSION_ID" ] && [ -n "$BLACKHOUSE_URL" ]; then
   if command -v npx &> /dev/null; then
     echo "[blackhouse] Installing skills from $BLACKHOUSE_URL..."
-    npx -y skills add "$BLACKHOUSE_URL" --global 2>/dev/null || true
+    npx -y skills add "$BLACKHOUSE_URL" --yes --global 2>/dev/null || true
   else
     # Fallback: fetch SKILL.md directly
     mkdir -p "$HOME/.claude/skills/blackhouse"
     curl -sf "$BLACKHOUSE_URL/.well-known/agent-skills/blackhouse/SKILL.md" \
       -o "$HOME/.claude/skills/blackhouse/SKILL.md" 2>/dev/null || true
   fi
+
 fi
 
 # 3) Run agent command interactively (if set)

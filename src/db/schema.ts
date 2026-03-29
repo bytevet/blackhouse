@@ -92,6 +92,7 @@ export const codingSessions = pgTable("coding_sessions", {
   preset: text("preset").notNull(),
   agentConfigId: text("agent_config_id"),
   containerId: text("container_id"),
+  sessionToken: text("session_token"),
   containerImage: text("container_image").notNull(),
   resultHtml: text("result_html"),
   agentTitle: text("agent_title"),

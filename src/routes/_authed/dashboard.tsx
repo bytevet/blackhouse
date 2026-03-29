@@ -13,14 +13,7 @@ import {
 import { listTemplates } from "@/server/templates";
 import { listAgentConfigs } from "@/server/settings";
 import { Button, buttonVariants } from "@/components/ui/button";
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-  CardFooter,
-} from "@/components/ui/card";
+import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -42,7 +35,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Field, FieldLabel, FieldError, FieldGroup } from "@/components/ui/field";
-import { Plus, Eye, Square, Trash2, RotateCcw, GitBranch, Bot, FileText, Copy } from "lucide-react";
+import { Plus, Eye, Square, Trash2, RotateCcw, GitBranch, Bot, FileText } from "lucide-react";
 import { timeAgo } from "@/lib/time";
 import type { CodingSession, Template, AgentConfig, SessionStatus } from "@/db/schema";
 import { sessionStatusConfig } from "@/lib/session-status";
@@ -139,13 +132,18 @@ function DashboardPage() {
   const handleRecreate = async (sessionId: string) => {
     try {
       const params = await getSessionRecreateParams({ data: { sessionId } });
-      form.reset();
-      form.setFieldValue("name", params.name);
-      form.setFieldValue("agentConfigId", params.agentConfigId);
-      form.setFieldValue("gitRepoUrl", params.gitRepoUrl);
-      form.setFieldValue("gitBranch", params.gitBranch);
-      form.setFieldValue("templateId", params.templateId);
-      setDialogOpen(true);
+      const newSession = await createSession({
+        data: {
+          name: params.name,
+          agentConfigId: params.agentConfigId || undefined,
+          gitRepoUrl: params.gitRepoUrl || undefined,
+          gitBranch: params.gitBranch || undefined,
+          templateId: params.templateId || undefined,
+        },
+      });
+      if (newSession?.id) {
+        navigate({ to: "/sessions/$sessionId", params: { sessionId: newSession.id } });
+      }
     } catch {
       // ignore errors
     }
@@ -435,45 +433,42 @@ function DashboardPage() {
               <Card key={s.id} size="sm">
                 <CardHeader>
                   <CardTitle className="flex items-center justify-between gap-2">
-                    <span className="flex min-w-0 items-baseline gap-1">
-                      <Link
-                        to="/sessions/$sessionId"
-                        params={{ sessionId: s.id }}
-                        className="truncate hover:underline"
-                      >
-                        {s.name}
-                      </Link>
-                      {s.agentTitle && (
-                        <span className="truncate text-[10px] font-normal text-muted-foreground">
-                          — {s.agentTitle}
-                        </span>
-                      )}
-                    </span>
-                    <Badge variant="outline" className={config.className}>
+                    <Link
+                      to="/sessions/$sessionId"
+                      params={{ sessionId: s.id }}
+                      className="truncate hover:underline"
+                    >
+                      {s.name}
+                    </Link>
+                    <Badge variant="outline" className={`shrink-0 ${config.className}`}>
                       {config.label}
                     </Badge>
                   </CardTitle>
-                  <CardDescription className="flex items-center gap-1">
-                    <Bot className="size-3" />
-                    {s.preset || s.agentConfigId || "Unknown"}
-                  </CardDescription>
+                  {s.agentTitle && (
+                    <p className="truncate text-[10px] text-muted-foreground">{s.agentTitle}</p>
+                  )}
                 </CardHeader>
-                <CardContent className="space-y-1">
+                <CardContent className="flex-1 space-y-1.5">
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <Bot className="size-3 shrink-0" />
+                    {s.preset}
+                  </div>
                   {s.gitRepoUrl && (
-                    <div className="flex items-center gap-1 text-xs text-muted-foreground truncate">
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
                       <GitBranch className="size-3 shrink-0" />
                       <span className="truncate">{s.gitRepoUrl}</span>
                     </div>
                   )}
-                  {s.templateName && (
-                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <FileText className="size-3 shrink-0" />
-                      {s.templateName}
-                    </div>
+                  {s.resultHtml && (
+                    <Badge
+                      variant="outline"
+                      className="gap-1 border-green-500/30 bg-green-500/10 text-[10px] text-green-700 dark:text-green-400"
+                    >
+                      <span className="size-1.5 rounded-full bg-green-500" />
+                      Result
+                    </Badge>
                   )}
-                  <div className="text-xs text-muted-foreground">
-                    Created {timeAgo(s.createdAt)}
-                  </div>
+                  <div className="text-[10px] text-muted-foreground">{timeAgo(s.createdAt)}</div>
                 </CardContent>
                 <CardFooter className="gap-1.5">
                   <Link
@@ -489,26 +484,20 @@ function DashboardPage() {
                       variant="outline"
                       size="sm"
                       onClick={() =>
-                        setConfirmAction({ type: "stop", sessionId: s.id, sessionName: s.name })
+                        setConfirmAction({
+                          type: "stop",
+                          sessionId: s.id,
+                          sessionName: s.name,
+                        })
                       }
                     >
                       <Square className="size-3" />
                       Stop
                     </Button>
                   )}
-                  {(status === "stopped" || status === "pending") && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleSessionAction(s.id, restartSession)}
-                    >
-                      <RotateCcw className="size-3" />
-                      Restart
-                    </Button>
-                  )}
                   {status === "stopped" && (
                     <Button variant="outline" size="sm" onClick={() => handleRecreate(s.id)}>
-                      <Copy className="size-3" />
+                      <RotateCcw className="size-3" />
                       Re-create
                     </Button>
                   )}
@@ -517,7 +506,11 @@ function DashboardPage() {
                       variant="destructive"
                       size="sm"
                       onClick={() =>
-                        setConfirmAction({ type: "destroy", sessionId: s.id, sessionName: s.name })
+                        setConfirmAction({
+                          type: "destroy",
+                          sessionId: s.id,
+                          sessionName: s.name,
+                        })
                       }
                     >
                       <Trash2 className="size-3" />

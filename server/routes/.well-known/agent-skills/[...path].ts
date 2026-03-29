@@ -9,7 +9,7 @@ const INDEX = {
     {
       name: "blackhouse",
       description: "Blackhouse session tools — submit visual results and update session status",
-      files: ["SKILL.md"],
+      files: ["SKILL.md", "submit-result.sh", "update-title.sh"],
     },
   ],
 };
@@ -33,7 +33,10 @@ export default defineEventHandler((event) => {
 
     try {
       const content = readFileSync(join(SKILLS_DIR, skillName, fileName), "utf-8");
-      setResponseHeader(event, "content-type", "text/markdown; charset=utf-8");
+      const contentType = fileName.endsWith(".sh")
+        ? "application/x-shellscript; charset=utf-8"
+        : "text/markdown; charset=utf-8";
+      setResponseHeader(event, "content-type", contentType);
       return content;
     } catch {
       return new Response("Not found", { status: 404 });

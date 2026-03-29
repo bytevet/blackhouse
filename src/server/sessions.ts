@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { randomBytes } from "node:crypto";
 import { authMiddleware } from "@/server/middleware";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
@@ -155,6 +156,8 @@ export const createSession = createServerFn({ method: "POST" })
       throw new Error("This template requires a Git repository");
     }
 
+    const sessionToken = randomBytes(32).toString("hex");
+
     const inserted = await db
       .insert(schema.codingSessions)
       .values({
@@ -166,6 +169,7 @@ export const createSession = createServerFn({ method: "POST" })
         preset: agentConfig.preset,
         agentConfigId: agentConfig.id,
         containerImage: imageName,
+        sessionToken,
         status: "pending",
       })
       .returning();
@@ -179,8 +183,8 @@ export const createSession = createServerFn({ method: "POST" })
       "LC_ALL=C.UTF-8",
       `SESSION_ID=${codingSession.id}`,
       `SESSION_NAME=${data.name}`,
-      `BLACKHOUSE_URL=${process.env.BETTER_AUTH_URL || "http://host.docker.internal:3000"}`,
-      `CONTAINER_TOKEN=${codingSession.id}`,
+      `BLACKHOUSE_URL=${process.env.BLACKHOUSE_CONTAINER_URL || "http://host.docker.internal:3000"}`,
+      `SESSION_TOKEN=${sessionToken}`,
     ];
 
     if (data.gitRepoUrl) {
