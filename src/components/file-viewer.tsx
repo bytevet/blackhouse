@@ -3,6 +3,7 @@ import type { Highlighter, ShikiTransformer } from "shiki";
 import { FileCode, GitCompareArrows } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
 
 let highlighterPromise: Promise<Highlighter> | null = null;
 
@@ -105,8 +106,6 @@ export function FileViewer({ sessionId, filePath, status }: FileViewerProps) {
       diffRef.current = null;
 
       try {
-        const { api } = await import("@/lib/api");
-
         const [fileContent, fileDiff] = await Promise.all([
           api.get<string>(
             `/files/read?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(filePath)}`,
@@ -148,7 +147,6 @@ export function FileViewer({ sessionId, filePath, status }: FileViewerProps) {
 
     const poll = async () => {
       try {
-        const { api } = await import("@/lib/api");
         const [newContent, newDiff] = await Promise.all([
           api.get<string>(
             `/files/read?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(filePath)}`,

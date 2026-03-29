@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
 
 interface FileNode {
   name: string;
@@ -54,7 +55,6 @@ export function FileExplorer({
   const loadDirectory = useCallback(
     async (path: string) => {
       try {
-        const { api } = await import("@/lib/api");
         const files = await api.get<FileNode[]>(
           `/files/list?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}`,
         );
