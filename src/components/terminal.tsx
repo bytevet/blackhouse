@@ -8,6 +8,10 @@ interface TerminalPanelProps {
 // Resize message prefix byte (0x01) — distinguishes from terminal input
 const RESIZE_PREFIX = 0x01;
 
+function RunningCat() {
+  return <img src="/nyancat.svg" alt="" className="h-4" draggable={false} />;
+}
+
 function encodeResize(cols: number, rows: number): Uint8Array {
   const payload = `${cols}:${rows}`;
   const buf = new Uint8Array(1 + payload.length);
@@ -23,6 +27,8 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
   const fitAddonRef = useRef<FitAddon | null>(null);
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const [connected, setConnected] = useState(false);
+  const [focused, setFocused] = useState(false);
 
   const sendResize = useCallback((cols: number, rows: number) => {
     // Debounce: only send the last resize after 50ms of no changes
@@ -49,6 +55,7 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
     ws.binaryType = "arraybuffer";
 
     ws.onopen = () => {
+      setConnected(true);
       terminalRef.current?.focus();
       const fitAddon = fitAddonRef.current;
       if (fitAddon) {
@@ -81,10 +88,12 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
     };
 
     ws.onclose = () => {
+      setConnected(false);
       terminalRef.current?.write("\r\n\x1b[33m[Connection closed]\x1b[0m\r\n");
     };
 
     ws.onerror = () => {
+      setConnected(false);
       terminalRef.current?.write("\r\n\x1b[31m[Connection error]\x1b[0m\r\n");
     };
   }, [sessionId, status, sendResize]);
@@ -108,6 +117,10 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
 
       if (disposed || !containerRef.current) return;
 
+      const termBg =
+        getComputedStyle(containerRef.current).getPropertyValue("--color-terminal").trim() ||
+        "#0a0a0a";
+
       terminal = new Terminal({
         fontFamily: "'JetBrains Mono Variable', 'JetBrains Mono', monospace",
         fontSize: 13,
@@ -118,7 +131,7 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
         allowProposedApi: true,
         scrollback: 10000,
         theme: {
-          background: "#0a0a0a",
+          background: termBg,
           foreground: "#d4d4d8",
           cursor: "#d4d4d8",
           cursorAccent: "#0a0a0a",
@@ -157,6 +170,13 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
       fitAddonRef.current = fitAddon;
 
       fitAddon.fit();
+
+      const textarea = terminal.textarea;
+      if (textarea) {
+        textarea.addEventListener("focus", () => setFocused(true));
+        textarea.addEventListener("blur", () => setFocused(false));
+      }
+
       terminal.focus();
 
       // Terminal input → WebSocket (binary frame with 0x00 prefix)
@@ -191,17 +211,37 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
       resizeObserverRef.current?.disconnect();
       wsRef.current?.close();
       wsRef.current = null;
+      setConnected(false);
+      setFocused(false);
       terminal?.dispose();
     };
   }, [connect, sendResize]);
 
   if (status !== "running") {
     return (
-      <div className="flex h-full items-center justify-center bg-[#0a0a0a] text-sm text-muted-foreground">
+      <div className="flex h-full items-center justify-center bg-terminal text-sm text-muted-foreground">
         Session is {status}. Start the session to access the terminal.
       </div>
     );
   }
 
-  return <div ref={containerRef} className="h-full w-full bg-[#0a0a0a]" />;
+  return (
+    <div className="relative h-full w-full bg-terminal">
+      <div ref={containerRef} className="absolute inset-0 bottom-6" />
+      <div
+        className="absolute inset-x-0 bottom-0 flex h-6 items-center justify-between border-t border-white/10 px-2 font-mono text-[10px]"
+        onClick={() => terminalRef.current?.focus()}
+      >
+        <span className="flex items-center gap-1.5">
+          <span className={`size-1.5 rounded-full ${connected ? "bg-green-500" : "bg-red-500"}`} />
+          <span className="text-muted-foreground">{connected ? "Connected" : "Disconnected"}</span>
+        </span>
+        {focused ? (
+          <RunningCat />
+        ) : (
+          <span className="text-muted-foreground/50">Click to focus</span>
+        )}
+      </div>
+    </div>
+  );
 }

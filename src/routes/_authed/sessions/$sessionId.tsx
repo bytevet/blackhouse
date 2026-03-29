@@ -1,6 +1,17 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useCallback, useEffect, useRef } from "react";
-import { Square, Play, Trash2, PanelRightOpen, PanelRightClose, Loader2, Copy } from "lucide-react";
+import {
+  Square,
+  Play,
+  Trash2,
+  PanelRightOpen,
+  PanelRightClose,
+  PanelBottomOpen,
+  PanelBottomClose,
+  Loader2,
+  Copy,
+} from "lucide-react";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
@@ -39,6 +50,7 @@ export const Route = createFileRoute("/_authed/sessions/$sessionId")({
 function SessionViewPage() {
   const { session: initialSession } = Route.useLoaderData();
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const [session, setSession] = useState(initialSession);
   const [explorerOpen, setExplorerOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<string | undefined>();
@@ -128,7 +140,7 @@ function SessionViewPage() {
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2 md:gap-3 md:px-4">
         <h1 className="text-sm font-semibold text-foreground">{session.name}</h1>
         <Badge variant="outline" className="text-[10px]">
-          {session.agentType}
+          {session.preset}
         </Badge>
         <Badge
           variant="outline"
@@ -195,19 +207,34 @@ function SessionViewPage() {
               <span className="hidden sm:inline">Destroy</span>
             </Button>
           )}
-          <Button variant="ghost" size="icon-xs" onClick={() => setExplorerOpen((p) => !p)}>
+          <Button
+            variant={explorerOpen ? "outline" : "default"}
+            size="xs"
+            onClick={() => setExplorerOpen((p) => !p)}
+          >
             {explorerOpen ? (
-              <PanelRightClose className="size-3.5" />
+              isMobile ? (
+                <PanelBottomClose className="size-3" />
+              ) : (
+                <PanelRightClose className="size-3" />
+              )
+            ) : isMobile ? (
+              <PanelBottomOpen className="size-3" />
             ) : (
-              <PanelRightOpen className="size-3.5" />
+              <PanelRightOpen className="size-3" />
             )}
+            <span className="hidden sm:inline">{explorerOpen ? "Hide Panel" : "Files"}</span>
           </Button>
         </div>
       </div>
 
       {/* Main content */}
       {explorerOpen ? (
-        <ResizablePanelGroup orientation="horizontal" className="flex-1" autoSaveId="session-main">
+        <ResizablePanelGroup
+          orientation={isMobile ? "vertical" : "horizontal"}
+          className="flex-1"
+          autoSaveId={isMobile ? "session-main-v" : "session-main-h"}
+        >
           <ResizablePanel id="terminal" defaultSize={50} minSize={20}>
             <TerminalPanel sessionId={session.id} status={session.status} />
           </ResizablePanel>
@@ -218,7 +245,7 @@ function SessionViewPage() {
               onValueChange={setExplorerTab}
               className="flex h-full flex-col"
             >
-              <TabsList variant="line" className="w-full">
+              <TabsList variant="line" className="w-full border-b">
                 <TabsTrigger value="files" className="text-xs">
                   File Explorer
                 </TabsTrigger>

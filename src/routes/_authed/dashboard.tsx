@@ -12,7 +12,7 @@ import {
 } from "@/server/sessions";
 import { listTemplates } from "@/server/templates";
 import { listAgentConfigs } from "@/server/settings";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Card,
   CardHeader,
@@ -435,7 +435,13 @@ function DashboardPage() {
               <Card key={s.id} size="sm">
                 <CardHeader>
                   <CardTitle className="flex items-center justify-between gap-2">
-                    <span className="truncate">{s.name}</span>
+                    <Link
+                      to="/sessions/$sessionId"
+                      params={{ sessionId: s.id }}
+                      className="truncate hover:underline"
+                    >
+                      {s.name}
+                    </Link>
                     <Badge variant="outline" className={config.className}>
                       {config.label}
                     </Badge>
@@ -463,10 +469,14 @@ function DashboardPage() {
                   </div>
                 </CardContent>
                 <CardFooter className="gap-1.5">
-                  <Button variant="outline" size="sm" render={<Link to={`/sessions/${s.id}`} />}>
+                  <Link
+                    to="/sessions/$sessionId"
+                    params={{ sessionId: s.id }}
+                    className={buttonVariants({ variant: "outline", size: "sm" })}
+                  >
                     <Eye className="size-3" />
                     View
-                  </Button>
+                  </Link>
                   {status === "running" && (
                     <Button
                       variant="outline"
