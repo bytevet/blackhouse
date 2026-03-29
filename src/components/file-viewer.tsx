@@ -1,47 +1,9 @@
 import { useState, useEffect, useRef } from "react";
-import type { Highlighter, ShikiTransformer } from "shiki";
 import { FileCode, GitCompareArrows } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
-
-let highlighterPromise: Promise<Highlighter> | null = null;
-
-const stripPreBackground: ShikiTransformer = {
-  pre(node) {
-    delete node.properties.style;
-  },
-};
-
-function getHighlighter(): Promise<Highlighter> {
-  if (!highlighterPromise) {
-    highlighterPromise = import("shiki").then((shiki) =>
-      shiki.createHighlighter({
-        themes: ["github-dark", "github-light"],
-        langs: [
-          "javascript",
-          "typescript",
-          "jsx",
-          "tsx",
-          "json",
-          "html",
-          "css",
-          "markdown",
-          "python",
-          "bash",
-          "yaml",
-          "toml",
-          "sql",
-          "rust",
-          "go",
-          "dockerfile",
-          "diff",
-        ],
-      }),
-    );
-  }
-  return highlighterPromise;
-}
+import { getHighlighter } from "@/lib/shiki";
 
 const EXT_LANG: Record<string, string> = {
   js: "javascript",
@@ -197,7 +159,6 @@ export function FileViewer({ sessionId, filePath, status }: FileViewerProps) {
           lang,
           themes: { dark: "github-dark", light: "github-light" },
           defaultColor: false,
-          transformers: [stripPreBackground],
         });
         setHighlightedHtml(html);
       })
@@ -243,10 +204,7 @@ export function FileViewer({ sessionId, filePath, status }: FileViewerProps) {
       </div>
       {highlightedHtml ? (
         <div
-          className={cn(
-            "flex-1 overflow-auto [&_pre]:bg-transparent [&_pre]:leading-relaxed",
-            showDiff ? "p-2" : "line-numbers",
-          )}
+          className={cn("flex-1 overflow-auto", showDiff ? "p-2" : "line-numbers")}
           dangerouslySetInnerHTML={{ __html: highlightedHtml }}
         />
       ) : (

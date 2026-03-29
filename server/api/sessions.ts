@@ -491,10 +491,10 @@ app.get("/:id/recreate-params", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/sessions/:id/clear-result
+// DELETE /api/sessions/:id/result
 // ---------------------------------------------------------------------------
 
-app.post("/:id/clear-result", async (c) => {
+app.delete("/:id/result", async (c) => {
   const session = c.get("session");
   const id = c.req.param("id");
 

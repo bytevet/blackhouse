@@ -2,27 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Code, Eye, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { timeAgo } from "@/lib/time";
-import type { Highlighter, ShikiTransformer } from "shiki";
-
-let highlighterPromise: Promise<Highlighter> | null = null;
-
-const stripPreBg: ShikiTransformer = {
-  pre(node) {
-    delete node.properties.style;
-  },
-};
-
-function getHighlighter(): Promise<Highlighter> {
-  if (!highlighterPromise) {
-    highlighterPromise = import("shiki").then((shiki) =>
-      shiki.createHighlighter({
-        themes: ["github-dark", "github-light"],
-        langs: ["html"],
-      }),
-    );
-  }
-  return highlighterPromise;
-}
+import { getHighlighter } from "@/lib/shiki";
 
 interface ResultViewerProps {
   html: string;
@@ -48,7 +28,6 @@ export function ResultViewer({ html, updatedAt, onDelete }: ResultViewerProps) {
           lang: "html",
           themes: { dark: "github-dark", light: "github-light" },
           defaultColor: false,
-          transformers: [stripPreBg],
         });
         setHighlightedHtml(result);
       })
@@ -105,7 +84,7 @@ export function ResultViewer({ html, updatedAt, onDelete }: ResultViewerProps) {
       {showSource ? (
         highlightedHtml ? (
           <div
-            className="flex-1 overflow-auto [&_pre]:bg-transparent [&_pre]:p-3 [&_pre]:text-xs [&_pre]:leading-relaxed [&_code]:text-xs"
+            className="flex-1 overflow-auto"
             dangerouslySetInnerHTML={{ __html: highlightedHtml }}
           />
         ) : (
