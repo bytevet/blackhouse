@@ -1,4 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from "react";
+import type { Terminal } from "@xterm/xterm";
+import type { FitAddon } from "@xterm/addon-fit";
 
 interface TerminalPanelProps {
   sessionId: string;
@@ -76,7 +78,6 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
         const type = bytes[0];
         const payload = bytes.subarray(1);
         if (type === 0x00) {
-          // Terminal data
           terminal.write(payload);
         }
         // 0x02 = system info — ignore
@@ -180,7 +181,11 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
       terminal.focus();
 
       // Terminal input → WebSocket (binary frame with 0x00 prefix)
+      // Filter out terminal query sequences (DA, DSR, cursor position) that
+      // xterm.js auto-sends — these get echoed as literal text by the shell
+      const TERM_QUERY = /\x1b\[[\d;]*c|\x1b\[\?[\d;]*c|\x1b\[[\d;]*n|\x1b\[[\d;]*R/;
       terminal.onData((data) => {
+        if (TERM_QUERY.test(data)) return;
         const ws = wsRef.current;
         if (ws?.readyState === WebSocket.OPEN) {
           const encoded = new TextEncoder().encode(data);

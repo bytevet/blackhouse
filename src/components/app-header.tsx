@@ -121,7 +121,13 @@ export function AppHeader() {
             <Separator />
             <DropdownMenuItem
               onClick={() =>
-                signOut({ fetchOptions: { onSuccess: () => (window.location.href = "/login") } })
+                signOut({
+                  fetchOptions: {
+                    onSuccess: () => {
+                      window.location.href = "/login";
+                    },
+                  },
+                })
               }
             >
               <LogOut className="mr-2 size-4" />

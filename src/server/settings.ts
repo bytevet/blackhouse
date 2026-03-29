@@ -58,6 +58,7 @@ export const updateProfile = createServerFn({ method: "POST" })
 
 export const listAgentConfigs = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
+
   .handler(async () => {
     return db.select().from(schema.agentConfigs).orderBy(desc(schema.agentConfigs.createdAt));
   });
@@ -75,6 +76,7 @@ export const upsertAgentConfig = createServerFn({ method: "POST" })
       dockerfileContent: z.string().nullable().optional(),
     }),
   )
+
   .handler(async ({ data }) => {
     const values: Record<string, unknown> = {
       preset: data.preset,
@@ -112,7 +114,10 @@ export const upsertAgentConfig = createServerFn({ method: "POST" })
     }
 
     // Create new
-    const inserted = await db.insert(schema.agentConfigs).values(values).returning();
+    const inserted = await db
+      .insert(schema.agentConfigs)
+      .values(values as typeof schema.agentConfigs.$inferInsert)
+      .returning();
 
     return inserted[0];
   });
@@ -434,6 +439,7 @@ export const listUsers = createServerFn({ method: "GET" })
         id: schema.user.id,
         name: schema.user.name,
         email: schema.user.email,
+        username: schema.user.username,
         role: schema.user.role,
         banned: schema.user.banned,
         createdAt: schema.user.createdAt,

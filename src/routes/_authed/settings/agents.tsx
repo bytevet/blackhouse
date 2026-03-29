@@ -39,6 +39,7 @@ import {
   SelectItem,
 } from "@/components/ui/select";
 import { Field, FieldLabel, FieldError, FieldGroup } from "@/components/ui/field";
+import { toFieldErrors } from "@/lib/form-errors";
 import { Plus, Trash2, Edit, Hammer, FileText } from "lucide-react";
 import { timeAgo } from "@/lib/time";
 import { AGENT_PRESETS, PRESET_OPTIONS, type PresetId } from "@/lib/agent-presets";
@@ -390,7 +391,7 @@ function AgentsTab() {
                   <FieldLabel>Preset</FieldLabel>
                   <Select
                     value={field.state.value}
-                    onValueChange={handlePresetChange}
+                    onValueChange={(v) => v !== null && handlePresetChange(v)}
                     items={PRESET_OPTIONS.map((p) => ({ label: p.displayName, value: p.id }))}
                   >
                     <SelectTrigger>
@@ -423,7 +424,7 @@ function AgentsTab() {
                       onChange={(e) => field.handleChange(e.target.value)}
                       onBlur={field.handleBlur}
                     />
-                    {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                    {isInvalid && <FieldError errors={toFieldErrors(field.state.meta.errors)} />}
                   </Field>
                 );
               }}

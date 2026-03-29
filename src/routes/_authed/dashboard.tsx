@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Field, FieldLabel, FieldError, FieldGroup } from "@/components/ui/field";
+import { toFieldErrors } from "@/lib/form-errors";
 import { Plus, Eye, Square, Trash2, RotateCcw, GitBranch, Bot, FileText } from "lucide-react";
 import { timeAgo } from "@/lib/time";
 import type { CodingSession, Template, AgentConfig, SessionStatus } from "@/db/schema";
@@ -42,12 +43,12 @@ import { sessionStatusConfig } from "@/lib/session-status";
 
 export const Route = createFileRoute("/_authed/dashboard")({
   loader: async () => {
-    const [sessions, myTemplates, publicTemplates, agentConfigs] = await Promise.all([
+    const [sessions, myTemplates, publicTemplates, agentConfigs] = (await Promise.all([
       listSessions(),
       listTemplates({ data: { mine: true } }),
       listTemplates({ data: { mine: false } }),
       listAgentConfigs(),
-    ]);
+    ])) as [CodingSession[], Template[], Template[], AgentConfig[]];
     // Merge and deduplicate (user's own + public)
     const seen = new Set<string>();
     const templates = [...myTemplates, ...publicTemplates].filter((t) => {
@@ -61,7 +62,15 @@ export const Route = createFileRoute("/_authed/dashboard")({
 });
 
 function DashboardPage() {
-  const { sessions: initialSessions, templates, agentConfigs } = Route.useLoaderData();
+  const {
+    sessions: initialSessions,
+    templates,
+    agentConfigs,
+  } = Route.useLoaderData() as {
+    sessions: CodingSession[];
+    templates: Template[];
+    agentConfigs: AgentConfig[];
+  };
   const { data: session } = useSession();
   const navigate = useNavigate();
   const isAdmin = session?.user?.role === "admin";
@@ -202,7 +211,9 @@ function DashboardPage() {
                                     onChange={(e) => field.handleChange(e.target.value)}
                                     onBlur={field.handleBlur}
                                   />
-                                  {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                                  {isInvalid && (
+                                    <FieldError errors={toFieldErrors(field.state.meta.errors)} />
+                                  )}
                                 </Field>
                               );
                             }}
@@ -220,7 +231,7 @@ function DashboardPage() {
                                   <FieldLabel>Coding Agent</FieldLabel>
                                   <Select
                                     value={field.state.value}
-                                    onValueChange={field.handleChange}
+                                    onValueChange={(v) => v !== null && field.handleChange(v)}
                                     items={[
                                       { label: "Select an agent", value: null },
                                       ...agentConfigs.map((ac: AgentConfig) => ({
@@ -248,7 +259,9 @@ function DashboardPage() {
                                       ))}
                                     </SelectContent>
                                   </Select>
-                                  {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                                  {isInvalid && (
+                                    <FieldError errors={toFieldErrors(field.state.meta.errors)} />
+                                  )}
                                 </Field>
                               );
                             }}
@@ -261,7 +274,7 @@ function DashboardPage() {
                                 <Select
                                   value={field.state.value || "__none__"}
                                   onValueChange={(v) =>
-                                    field.handleChange(v === "__none__" ? "" : v)
+                                    v !== null && field.handleChange(v === "__none__" ? "" : v)
                                   }
                                   items={[
                                     { label: "None", value: "__none__" },
@@ -321,7 +334,9 @@ function DashboardPage() {
                                             onBlur={field.handleBlur}
                                           />
                                           {isInvalid && (
-                                            <FieldError errors={field.state.meta.errors} />
+                                            <FieldError
+                                              errors={toFieldErrors(field.state.meta.errors)}
+                                            />
                                           )}
                                         </Field>
                                       );

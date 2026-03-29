@@ -31,8 +31,10 @@ import {
   SelectItem,
 } from "@/components/ui/select";
 import { Field, FieldLabel, FieldError, FieldGroup } from "@/components/ui/field";
+import { toFieldErrors } from "@/lib/form-errors";
 import { Plus, Trash2 } from "lucide-react";
-import type { User as DbUser } from "@/db/schema";
+
+type UserRow = Awaited<ReturnType<typeof listUsers>>[number];
 
 const createUserSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -53,11 +55,11 @@ export const Route = createFileRoute("/_authed/settings/users")({
 });
 
 function UsersTab() {
-  const [users, setUsers] = useState<DbUser[]>([]);
+  const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [deletingUser, setDeletingUser] = useState<DbUser | null>(null);
+  const [deletingUser, setDeletingUser] = useState<UserRow | null>(null);
   const [creating, setCreating] = useState(false);
 
   const form = useForm({
@@ -165,7 +167,7 @@ function UsersTab() {
                 <TableCell>
                   <Select
                     value={u.role || "user"}
-                    onValueChange={(val) => handleRoleChange(u.id, val)}
+                    onValueChange={(val) => val !== null && handleRoleChange(u.id, val)}
                     items={[
                       { label: "User", value: "user" },
                       { label: "Admin", value: "admin" },
@@ -221,7 +223,7 @@ function UsersTab() {
                       onChange={(e) => field.handleChange(e.target.value)}
                       onBlur={field.handleBlur}
                     />
-                    {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                    {isInvalid && <FieldError errors={toFieldErrors(field.state.meta.errors)} />}
                   </Field>
                 );
               }}
@@ -246,7 +248,7 @@ function UsersTab() {
                       onChange={(e) => field.handleChange(e.target.value)}
                       onBlur={field.handleBlur}
                     />
-                    {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                    {isInvalid && <FieldError errors={toFieldErrors(field.state.meta.errors)} />}
                   </Field>
                 );
               }}
@@ -266,7 +268,7 @@ function UsersTab() {
                       onChange={(e) => field.handleChange(e.target.value)}
                       onBlur={field.handleBlur}
                     />
-                    {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                    {isInvalid && <FieldError errors={toFieldErrors(field.state.meta.errors)} />}
                   </Field>
                 );
               }}
@@ -287,7 +289,7 @@ function UsersTab() {
                       onChange={(e) => field.handleChange(e.target.value)}
                       onBlur={field.handleBlur}
                     />
-                    {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                    {isInvalid && <FieldError errors={toFieldErrors(field.state.meta.errors)} />}
                   </Field>
                 );
               }}
@@ -299,7 +301,7 @@ function UsersTab() {
                   <FieldLabel>Role</FieldLabel>
                   <Select
                     value={field.state.value}
-                    onValueChange={field.handleChange}
+                    onValueChange={(v) => v !== null && field.handleChange(v)}
                     items={[
                       { label: "User", value: "user" },
                       { label: "Admin", value: "admin" },

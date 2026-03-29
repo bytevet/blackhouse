@@ -45,7 +45,7 @@ function DockerTab() {
     null,
   );
   const [containers, setContainers] = useState<
-    { id: string; image: string; status: string; sessionName?: string; createdAt?: string }[]
+    Awaited<ReturnType<typeof listContainers>>
   >([]);
   const [loading, setLoading] = useState(true);
 
@@ -205,10 +205,10 @@ function DockerTab() {
                       <Badge variant="outline">{c.status}</Badge>
                     </TableCell>
                     <TableCell className="hidden sm:table-cell text-muted-foreground">
-                      {c.sessionName || "\u2014"}
+                      {c.session?.name || "\u2014"}
                     </TableCell>
                     <TableCell className="hidden sm:table-cell text-muted-foreground">
-                      {c.createdAt ? timeAgo(c.createdAt) : "\u2014"}
+                      {c.created ? timeAgo(new Date(c.created * 1000)) : "\u2014"}
                     </TableCell>
                   </TableRow>
                 ))

@@ -165,7 +165,6 @@ export function FileViewer({ sessionId, filePath, status }: FileViewerProps) {
     return () => clearInterval(id);
   }, [status, sessionId, filePath]);
 
-  // Syntax highlight content or diff when it changes
   useEffect(() => {
     const source = showDiff && diff ? diff : content;
     if (!source) {

@@ -80,10 +80,37 @@ npm test             # Run unit tests (vitest)
 npm run format       # Format code (prettier)
 npm run format:check # Check formatting
 npx playwright test  # Run e2e tests (requires dev server)
-npm run db:push      # Push schema to database
+npm run db:generate  # Generate migration from schema changes
+npm run db:push      # Push schema directly (dev only)
 npm run db:seed      # Seed default data (admin user + agent presets)
 npm run db:studio    # Open Drizzle Studio
 ```
+
+## Database Migrations
+
+Migrations run automatically on server startup via a Nitro plugin (`server/plugins/migrate.ts`).
+
+**Workflow for schema changes:**
+
+1. Edit `src/db/schema.ts`
+2. Run `npm run db:generate` to create a migration SQL file in `drizzle/`
+3. Commit the migration file — it's versioned and auditable
+4. On deploy, the server auto-runs pending migrations before accepting requests
+
+Migration files in `drizzle/` are committed to git. Do not use `db:push` in production.
+
+## Environment Variables
+
+| Variable                   | Purpose                                       | Default                            |
+| -------------------------- | --------------------------------------------- | ---------------------------------- |
+| `DATABASE_URL`             | PostgreSQL connection string                  | —                                  |
+| `BETTER_AUTH_SECRET`       | Auth session signing key                      | —                                  |
+| `BETTER_AUTH_URL`          | Public URL of the app (for auth callbacks)    | `http://localhost:3000`            |
+| `BLACKHOUSE_CONTAINER_URL` | URL agent containers use to reach this server | `http://host.docker.internal:3000` |
+| `GITHUB_CLIENT_ID`         | GitHub OAuth app ID                           | —                                  |
+| `GITHUB_CLIENT_SECRET`     | GitHub OAuth app secret                       | —                                  |
+
+For Docker Compose, set `BLACKHOUSE_CONTAINER_URL` to the app's service name (e.g., `http://blackhouse:3000`).
 
 ## Development Guidelines
 

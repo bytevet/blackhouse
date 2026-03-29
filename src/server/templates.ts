@@ -12,6 +12,7 @@ import { eq, and, or, desc } from "drizzle-orm";
 export const listTemplates = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .inputValidator(z.object({ mine: z.boolean().optional() }))
+
   .handler(async ({ data, context }) => {
     const session = context.session;
 
@@ -38,6 +39,7 @@ export const listTemplates = createServerFn({ method: "GET" })
 export const getTemplate = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .inputValidator(z.object({ id: z.string() }))
+
   .handler(async ({ data, context }) => {
     const session = context.session;
 
@@ -69,12 +71,13 @@ export const createTemplate = createServerFn({ method: "POST" })
       name: z.string(),
       description: z.string().optional(),
       systemPrompt: z.string().optional(),
-      skills: z.unknown().optional(),
-      mcpConfig: z.unknown().optional(),
+      skills: z.array(z.record(z.string(), z.unknown())).nullable().optional(),
+      mcpConfig: z.record(z.string(), z.unknown()).nullable().optional(),
       isPublic: z.boolean().optional(),
       gitRequired: z.boolean().optional(),
     }),
   )
+
   .handler(async ({ data, context }) => {
     const session = context.session;
 
@@ -107,12 +110,13 @@ export const updateTemplate = createServerFn({ method: "POST" })
       name: z.string().optional(),
       description: z.string().optional(),
       systemPrompt: z.string().optional(),
-      skills: z.unknown().optional(),
-      mcpConfig: z.unknown().optional(),
+      skills: z.array(z.record(z.string(), z.unknown())).nullable().optional(),
+      mcpConfig: z.record(z.string(), z.unknown()).nullable().optional(),
       isPublic: z.boolean().optional(),
       gitRequired: z.boolean().optional(),
     }),
   )
+
   .handler(async ({ data, context }) => {
     const session = context.session;
 

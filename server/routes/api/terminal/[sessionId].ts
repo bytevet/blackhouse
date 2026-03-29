@@ -1,13 +1,13 @@
 import { defineWebSocketHandler } from "h3";
-import { getDockerClient } from "../../../../src/lib/docker";
-import { db } from "../../../../src/db";
-import { codingSessions, session as authSession, user } from "../../../../src/db/schema";
+import { getDockerClient } from "@/lib/docker";
+import { db } from "@/db";
+import { codingSessions, session as authSession, user } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
 const SCROLLBACK_LIMIT = 256 * 1024; // 256KB of recent output
 
 interface TerminalState {
-  stream: NodeJS.ReadWriteStream;
+  stream: NodeJS.ReadWriteStream & { destroyed?: boolean };
   containerId: string;
   scrollback: Buffer[];
   scrollbackSize: number;
@@ -193,7 +193,7 @@ export default defineWebSocketHandler({
         // Flag to strip dockerode metadata from the very first chunk
         let isFirstChunk = true;
         terminal.stream.on("data", (rawChunk: Buffer) => {
-          let chunk = Buffer.from(rawChunk);
+          let chunk: Buffer = Buffer.from(rawChunk) as Buffer;
 
           // dockerode's attach() can leak a JSON metadata object as the first
           // data chunk (e.g. {"stream":true,"stdin":true,...}). Strip it once.
@@ -271,7 +271,7 @@ export default defineWebSocketHandler({
     } else if (message && typeof message === "object") {
       const msg = message as { rawData?: ArrayBuffer | Uint8Array; text?: () => string };
       if (msg.rawData) {
-        raw = Buffer.from(msg.rawData);
+        raw = Buffer.from(msg.rawData as ArrayBuffer);
       } else if (msg.text) {
         raw = Buffer.from(msg.text(), "utf-8");
       } else {

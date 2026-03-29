@@ -25,6 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Field, FieldLabel, FieldError, FieldGroup } from "@/components/ui/field";
+import { toFieldErrors } from "@/lib/form-errors";
 import { Plus, Edit, Trash2 } from "lucide-react";
 import { timeAgo } from "@/lib/time";
 import type { Template } from "@/db/schema";
@@ -35,7 +36,7 @@ export const Route = createFileRoute("/_authed/templates/mine")({
 });
 
 function MyTemplatesPage() {
-  const initialTemplates = Route.useLoaderData();
+  const initialTemplates = Route.useLoaderData() as Template[];
   const { data: session } = useSession();
 
   const [templates, setTemplates] = useState(initialTemplates);
@@ -94,7 +95,7 @@ function MyTemplatesPage() {
 
   const refreshTemplates = async () => {
     const mine = await listTemplates({ data: { mine: true } });
-    setTemplates(mine);
+    setTemplates(mine as Template[]);
   };
 
   const openCreate = () => {
@@ -211,7 +212,7 @@ function MyTemplatesPage() {
                       onChange={(e) => field.handleChange(e.target.value)}
                       onBlur={field.handleBlur}
                     />
-                    {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                    {isInvalid && <FieldError errors={toFieldErrors(field.state.meta.errors)} />}
                   </Field>
                 );
               }}

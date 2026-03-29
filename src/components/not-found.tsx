@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 
 export function NotFound() {
   return (
@@ -8,9 +8,9 @@ export function NotFound() {
       <p className="text-sm text-muted-foreground">
         The page you&apos;re looking for doesn&apos;t exist.
       </p>
-      <Button size="sm" asChild>
-        <Link to="/">Go home</Link>
-      </Button>
+      <Link to="/dashboard" className={buttonVariants({ size: "sm" })}>
+        Go to Dashboard
+      </Link>
     </div>
   );
 }

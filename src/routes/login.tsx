@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { toFieldErrors } from "@/lib/form-errors";
 
 const loginSearchSchema = z.object({
   redirect: z.string().optional(),
@@ -88,7 +89,7 @@ function LoginPage() {
                       aria-invalid={isInvalid}
                       placeholder="username"
                     />
-                    {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                    {isInvalid && <FieldError errors={toFieldErrors(field.state.meta.errors)} />}
                   </Field>
                 );
               }}
@@ -109,7 +110,7 @@ function LoginPage() {
                       aria-invalid={isInvalid}
                       placeholder="********"
                     />
-                    {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                    {isInvalid && <FieldError errors={toFieldErrors(field.state.meta.errors)} />}
                   </Field>
                 );
               }}

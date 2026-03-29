@@ -6,6 +6,7 @@ import { updateProfile } from "@/server/settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { toFieldErrors } from "@/lib/form-errors";
 import { Save } from "lucide-react";
 
 export const Route = createFileRoute("/_authed/settings/profile")({
@@ -82,7 +83,7 @@ function ProfileTab() {
                       aria-invalid={isInvalid}
                       placeholder="Your name"
                     />
-                    {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                    {isInvalid && <FieldError errors={toFieldErrors(field.state.meta.errors)} />}
                   </Field>
                 );
               }}
@@ -121,7 +122,7 @@ function ProfileTab() {
                       onBlur={field.handleBlur}
                       aria-invalid={isInvalid}
                     />
-                    {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                    {isInvalid && <FieldError errors={toFieldErrors(field.state.meta.errors)} />}
                   </Field>
                 );
               }}
@@ -141,7 +142,7 @@ function ProfileTab() {
                       onBlur={field.handleBlur}
                       aria-invalid={isInvalid}
                     />
-                    {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                    {isInvalid && <FieldError errors={toFieldErrors(field.state.meta.errors)} />}
                   </Field>
                 );
               }}
@@ -161,7 +162,7 @@ function ProfileTab() {
                       onBlur={field.handleBlur}
                       aria-invalid={isInvalid}
                     />
-                    {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                    {isInvalid && <FieldError errors={toFieldErrors(field.state.meta.errors)} />}
                   </Field>
                 );
               }}

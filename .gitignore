@@ -14,7 +14,7 @@ dist-ssr
 .env
 .output
 .vinxi
-drizzle/*.sql
+
 
 # Editor directories and files
 .vscode/*

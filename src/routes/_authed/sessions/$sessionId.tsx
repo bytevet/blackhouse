@@ -41,14 +41,40 @@ import { sessionStatusConfig } from "@/lib/session-status";
 
 export const Route = createFileRoute("/_authed/sessions/$sessionId")({
   loader: async ({ params }) => {
-    const session = await getSession({ data: { id: params.sessionId } });
-    return { session };
+    try {
+      const session = await getSession({ data: { id: params.sessionId } });
+      return { session };
+    } catch {
+      return { session: null };
+    }
   },
   component: SessionViewPage,
 });
 
 function SessionViewPage() {
   const { session: initialSession } = Route.useLoaderData();
+
+  if (!initialSession) {
+    return (
+      <div className="flex flex-1 items-center justify-center p-8">
+        <div className="text-center space-y-2">
+          <h2 className="text-lg font-semibold text-foreground">Session not found</h2>
+          <p className="text-sm text-muted-foreground">
+            This session may have been destroyed or does not exist.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return <SessionView initialSession={initialSession} />;
+}
+
+function SessionView({
+  initialSession,
+}: {
+  initialSession: NonNullable<ReturnType<typeof Route.useLoaderData>["session"]>;
+}) {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const [session, setSession] = useState(initialSession);
@@ -127,14 +153,6 @@ function SessionViewPage() {
       setActionLoading(false);
     }
   }, [session, navigate]);
-
-  if (!session) {
-    return (
-      <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-        Session not found
-      </div>
-    );
-  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -238,7 +256,6 @@ function SessionViewPage() {
         <ResizablePanelGroup
           orientation={isMobile ? "vertical" : "horizontal"}
           className="flex-1"
-          autoSaveId={isMobile ? "session-main-v" : "session-main-h"}
         >
           <ResizablePanel id="terminal" defaultSize={50} minSize={20}>
             <TerminalPanel sessionId={session.id} status={session.status} />
@@ -264,7 +281,6 @@ function SessionViewPage() {
                 <ResizablePanelGroup
                   orientation="horizontal"
                   className="h-full"
-                  autoSaveId="session-files"
                 >
                   <ResizablePanel id="file-tree" defaultSize={35} minSize={20}>
                     <div className="h-full overflow-auto">

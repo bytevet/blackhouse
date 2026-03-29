@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { listTemplates } from "@/server/templates";
+import type { Template } from "@/db/schema";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { timeAgo } from "@/lib/time";
@@ -10,7 +11,7 @@ export const Route = createFileRoute("/_authed/templates/public")({
 });
 
 function PublicTemplatesPage() {
-  const templates = Route.useLoaderData();
+  const templates = Route.useLoaderData() as Template[];
 
   return (
     <div className="space-y-4">
@@ -27,7 +28,7 @@ function PublicTemplatesPage() {
                 <CardTitle className="flex items-center justify-between gap-2">
                   <span className="truncate">{template.name}</span>
                   <span className="flex shrink-0 gap-1">
-                    {template.yoloMode && <Badge className="shrink-0">Yolo</Badge>}
+                    {template.gitRequired && <Badge className="shrink-0">Git Required</Badge>}
                     <Badge variant="outline" className="shrink-0">
                       Public
                     </Badge>
