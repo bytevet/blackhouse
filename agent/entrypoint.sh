@@ -33,46 +33,6 @@ if [ -n "$SESSION_ID" ] && [ -n "$BLACKHOUSE_URL" ]; then
     curl -sf "$BLACKHOUSE_URL/.well-known/agent-skills/blackhouse/SKILL.md" \
       -o "$HOME/.claude/skills/blackhouse/SKILL.md" 2>/dev/null || true
   fi
-
-  # Configure Claude Code permissions
-  if command -v claude &> /dev/null; then
-    mkdir -p "$HOME/.claude"
-    cat > "$HOME/.claude/settings.json" << MCPEOF
-{
-  "permissions": {
-    "allow": [
-      "Bash(curl:*)",
-      "Bash(git:*)",
-      "Bash(npm:*)",
-      "Bash(node:*)",
-      "Bash(npx:*)",
-      "Bash(python*:*)",
-      "Bash(pip*:*)",
-      "Bash(ls:*)",
-      "Bash(cat:*)",
-      "Bash(find:*)",
-      "Bash(grep:*)",
-      "Bash(mkdir:*)",
-      "Bash(cp:*)",
-      "Bash(mv:*)",
-      "Bash(rm:*)",
-      "Bash(chmod:*)",
-      "Bash(echo:*)",
-      "Bash(touch:*)",
-      "Bash(head:*)",
-      "Bash(tail:*)",
-      "Bash(wc:*)",
-      "Bash(sort:*)",
-      "Bash(sed:*)",
-      "Bash(awk:*)",
-      "Bash(tar:*)",
-      "Bash(unzip:*)",
-      "Bash(wget:*)"
-    ]
-  }
-}
-MCPEOF
-  fi
 fi
 
 # 3) Run agent command interactively (if set)
