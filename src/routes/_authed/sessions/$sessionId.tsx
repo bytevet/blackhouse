@@ -96,8 +96,10 @@ function SessionView({
           data: { id: session.id },
         });
         if (updated) {
+          const isNewResult =
+            updated.resultHtml && (!session.resultHtml || updated.updatedAt > session.updatedAt);
           setSession(updated);
-          if (updated.resultHtml && !session.resultHtml) {
+          if (isNewResult) {
             setExplorerOpen(true);
             setExplorerTab("result");
           }

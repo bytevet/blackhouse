@@ -17,5 +17,5 @@
     "noUncheckedSideEffectImports": true
   },
   "include": ["src", "server", "vite.config.ts", "drizzle.config.ts"],
-  "exclude": ["src/entry-client.tsx", "src/entry-server.tsx"]
+  "exclude": ["src/entry-client.tsx"]
 }

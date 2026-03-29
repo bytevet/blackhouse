@@ -1,23 +1,12 @@
 import { Link, useLocation } from "@tanstack/react-router";
 import { useState } from "react";
-import {
-  LayoutDashboard,
-  FileText,
-  Settings,
-  LogOut,
-  Sun,
-  Moon,
-  Monitor,
-  Menu,
-  X,
-} from "lucide-react";
+import { LayoutDashboard, FileText, Settings, LogOut, Sun, Moon, Menu, X } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { signOut, useSession } from "@/lib/auth-client";
@@ -28,12 +17,6 @@ const navItems = [
   { title: "Dashboard", to: "/dashboard" as const, icon: LayoutDashboard },
   { title: "Templates", to: "/templates" as const, icon: FileText },
   { title: "Settings", to: "/settings" as const, icon: Settings },
-];
-
-const themeOptions = [
-  { value: "light" as const, label: "Light", icon: Sun },
-  { value: "dark" as const, label: "Dark", icon: Moon },
-  { value: "system" as const, label: "System", icon: Monitor },
 ];
 
 export function AppHeader() {
@@ -53,8 +36,8 @@ export function AppHeader() {
     : "?";
 
   return (
-    <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="flex h-12 items-center gap-4 px-4 md:px-6">
+    <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur">
+      <div className="flex h-12 items-center gap-2 px-4 md:px-6">
         {/* Logo */}
         <Link to="/dashboard" className="flex shrink-0 items-center gap-2">
           <div className="flex size-7 items-center justify-center bg-primary text-primary-foreground text-xs font-bold">
@@ -87,38 +70,25 @@ export function AppHeader() {
 
         <div className="flex-1" />
 
+        {/* Theme toggle */}
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+        >
+          {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
+        </Button>
+
         {/* User menu */}
         <DropdownMenu>
-          <DropdownMenuTrigger className="flex items-center gap-2 rounded-md px-2 py-1 text-xs outline-hidden hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/30">
+          <DropdownMenuTrigger className="rounded-md p-0.5 outline-hidden hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/30">
             <Avatar className="size-6">
               <AvatarImage src={user?.image ?? undefined} />
               <AvatarFallback className="text-xs">{initials}</AvatarFallback>
             </Avatar>
-            <span className="hidden text-sm sm:inline">{user?.name ?? "User"}</span>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
-            <div className="px-2 py-1.5">
-              <p className="text-xs font-medium text-muted-foreground">Theme</p>
-              <div className="mt-1 flex gap-1">
-                {themeOptions.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => setTheme(opt.value)}
-                    className={cn(
-                      "flex flex-1 items-center justify-center gap-1 rounded-sm px-2 py-1 text-xs transition-colors",
-                      theme === opt.value
-                        ? "bg-accent text-accent-foreground"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                    )}
-                  >
-                    <opt.icon className="size-3" />
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <Separator />
+          <DropdownMenuContent align="end" className="w-auto">
+            <div className="px-2 py-1.5 text-xs text-muted-foreground">{user?.name ?? "User"}</div>
             <DropdownMenuItem
               onClick={() =>
                 signOut({
@@ -137,12 +107,7 @@ export function AppHeader() {
         </DropdownMenu>
 
         {/* Mobile hamburger */}
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="md:hidden"
-          onClick={() => setMobileOpen(!mobileOpen)}
-        >
+        <Button variant="ghost" className="md:hidden" onClick={() => setMobileOpen(!mobileOpen)}>
           {mobileOpen ? <X className="size-4" /> : <Menu className="size-4" />}
         </Button>
       </div>

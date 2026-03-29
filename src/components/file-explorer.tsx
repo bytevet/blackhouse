@@ -1,6 +1,12 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { ChevronRight, ChevronDown, File, Folder, FolderOpen } from "lucide-react";
+import { ChevronRight, ChevronDown, File, Folder, FolderOpen, ClipboardCopy, FileSymlink } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
 interface FileNode {
@@ -126,6 +132,7 @@ export function FileExplorer({
             key={node.path}
             node={node}
             depth={0}
+            rootPath={rootPath}
             expandedPaths={expandedPaths}
             selectedFile={selectedFile}
             onToggleDir={toggleDir}
@@ -140,6 +147,7 @@ export function FileExplorer({
 function FileTreeNode({
   node,
   depth,
+  rootPath,
   expandedPaths,
   selectedFile,
   onToggleDir,
@@ -147,6 +155,7 @@ function FileTreeNode({
 }: {
   node: FileNode;
   depth: number;
+  rootPath: string;
   expandedPaths: Set<string>;
   selectedFile?: string;
   onToggleDir: (path: string) => void;
@@ -154,6 +163,39 @@ function FileTreeNode({
 }) {
   const isExpanded = expandedPaths.has(node.path);
   const isSelected = selectedFile === node.path;
+  const relativePath = node.path.startsWith(rootPath + "/")
+    ? node.path.slice(rootPath.length + 1)
+    : node.path;
+
+  const rowContent = (
+    <>
+      {node.isDirectory ? (
+        <>
+          {isExpanded ? (
+            <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="size-3 shrink-0 text-muted-foreground" />
+          )}
+          {isExpanded ? (
+            <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" />
+          ) : (
+            <Folder className="size-3.5 shrink-0 text-muted-foreground" />
+          )}
+        </>
+      ) : (
+        <>
+          <span className="size-3 shrink-0" />
+          <File className={cn("size-3.5 shrink-0", fileIconColor(node.name))} />
+        </>
+      )}
+      <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+        <span className="truncate">{node.name}</span>
+        {node.gitStatus && <GitStatusBadge status={node.gitStatus} />}
+      </span>
+    </>
+  );
+
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
 
   return (
     <>
@@ -171,31 +213,50 @@ function FileTreeNode({
             onFileSelect(node.path);
           }
         }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setCtxMenu({ x: e.clientX, y: e.clientY });
+        }}
       >
-        {node.isDirectory ? (
-          <>
-            {isExpanded ? (
-              <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
-            ) : (
-              <ChevronRight className="size-3 shrink-0 text-muted-foreground" />
-            )}
-            {isExpanded ? (
-              <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" />
-            ) : (
-              <Folder className="size-3.5 shrink-0 text-muted-foreground" />
-            )}
-          </>
-        ) : (
-          <>
-            <span className="size-3 shrink-0" />
-            <File className={cn("size-3.5 shrink-0", fileIconColor(node.name))} />
-          </>
-        )}
-        <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
-          <span className="truncate">{node.name}</span>
-          {node.gitStatus && <GitStatusBadge status={node.gitStatus} />}
-        </span>
+        {rowContent}
       </button>
+      {ctxMenu && (
+        <DropdownMenu
+          open
+          onOpenChange={(open) => {
+            if (!open) setCtxMenu(null);
+          }}
+        >
+          <DropdownMenuTrigger
+            render={
+              <span
+                className="pointer-events-none fixed"
+                style={{ left: ctxMenu.x, top: ctxMenu.y }}
+              />
+            }
+          />
+          <DropdownMenuContent align="start" className="min-w-48">
+            <DropdownMenuItem
+              onClick={() => {
+                navigator.clipboard.writeText(relativePath);
+                setCtxMenu(null);
+              }}
+            >
+              <ClipboardCopy className="mr-1 size-3" />
+              Copy Relative Path
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                navigator.clipboard.writeText(node.path);
+                setCtxMenu(null);
+              }}
+            >
+              <FileSymlink className="mr-1 size-3" />
+              Copy Absolute Path
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
       {node.isDirectory && isExpanded && node.children && (
         <>
           {node.children.map((child) => (
@@ -203,6 +264,7 @@ function FileTreeNode({
               key={child.path}
               node={child}
               depth={depth + 1}
+              rootPath={rootPath}
               expandedPaths={expandedPaths}
               selectedFile={selectedFile}
               onToggleDir={onToggleDir}

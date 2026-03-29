@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Code, Eye, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { timeAgo } from "@/lib/time";
 import type { Highlighter, ShikiTransformer } from "shiki";
 
@@ -33,6 +32,7 @@ interface ResultViewerProps {
 
 export function ResultViewer({ html, updatedAt, onDelete }: ResultViewerProps) {
   const [showSource, setShowSource] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [highlightedHtml, setHighlightedHtml] = useState<string | null>(null);
 
   useEffect(() => {
@@ -83,21 +83,22 @@ export function ResultViewer({ html, updatedAt, onDelete }: ResultViewerProps) {
             )}
           </Button>
           {onDelete && (
-            <Popover>
-              <PopoverTrigger
-                render={
-                  <Button variant="destructive" size="xs">
-                    <Trash2 className="size-3" />
-                  </Button>
+            <Button
+              variant="destructive"
+              size="xs"
+              onClick={() => {
+                if (confirmDelete) {
+                  onDelete();
+                  setConfirmDelete(false);
+                } else {
+                  setConfirmDelete(true);
+                  setTimeout(() => setConfirmDelete(false), 3000);
                 }
-              />
-              <PopoverContent className="w-auto space-y-2 p-3">
-                <p className="text-xs text-muted-foreground">Delete this result?</p>
-                <Button variant="destructive" size="xs" onClick={onDelete}>
-                  Confirm
-                </Button>
-              </PopoverContent>
-            </Popover>
+              }}
+            >
+              <Trash2 className="size-3" />
+              {confirmDelete && "Confirm?"}
+            </Button>
           )}
         </div>
       </div>

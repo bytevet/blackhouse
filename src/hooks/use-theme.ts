@@ -3,21 +3,18 @@ import { useState, useEffect, useCallback } from "react";
 type Theme = "light" | "dark" | "system";
 
 function getSystemTheme(): "light" | "dark" {
-  if (typeof window === "undefined") return "light";
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
 function applyTheme(theme: Theme) {
-  if (typeof document === "undefined") return;
   const resolved = theme === "system" ? getSystemTheme() : theme;
   document.documentElement.classList.toggle("dark", resolved === "dark");
 }
 
 export function useTheme() {
-  const [theme, setThemeState] = useState<Theme>(() => {
-    if (typeof localStorage === "undefined") return "system";
-    return (localStorage.getItem("blackhouse-theme") as Theme) || "system";
-  });
+  const [theme, setThemeState] = useState<Theme>(
+    () => (localStorage.getItem("blackhouse-theme") as Theme) || "system",
+  );
 
   const setTheme = useCallback((t: Theme) => {
     setThemeState(t);

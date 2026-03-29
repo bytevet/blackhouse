@@ -15,16 +15,13 @@ export default defineConfig({
   },
   plugins: [
     tailwindcss(),
-    tanstackStart(),
+    tanstackStart({ spa: {} }),
     react(),
     nitro({
       features: { websocket: true },
       serverDir: "./server",
     }),
   ],
-  ssr: {
-    external: ["better-auth", "dockerode", "ssh2", "cpu-features"],
-  },
   optimizeDeps: {
     exclude: ["ssh2", "cpu-features"],
   },

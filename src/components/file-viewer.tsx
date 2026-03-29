@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import type { Highlighter, ShikiTransformer } from "shiki";
 import { FileCode, GitCompareArrows } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 let highlighterPromise: Promise<Highlighter> | null = null;
 
@@ -232,35 +233,51 @@ export function FileViewer({ sessionId, filePath, status }: FileViewerProps) {
       </div>
       {highlightedHtml ? (
         <div
-          className="flex-1 overflow-auto [&_pre]:bg-transparent [&_pre]:p-3 [&_pre]:text-xs [&_pre]:leading-relaxed [&_code]:text-xs"
+          className={cn(
+            "flex-1 overflow-auto [&_pre]:bg-transparent [&_pre]:leading-relaxed",
+            showDiff ? "p-2" : "line-numbers",
+          )}
           dangerouslySetInnerHTML={{ __html: highlightedHtml }}
         />
       ) : (
-        <pre className="flex-1 overflow-auto p-3 text-xs leading-relaxed text-foreground">
-          {displayContent && renderContent(displayContent, showDiff)}
-        </pre>
+        <div className="min-h-0 flex-1 overflow-auto text-xs leading-relaxed">
+          {displayContent && <LineNumberedContent content={displayContent} isDiff={showDiff} />}
+        </div>
       )}
     </div>
   );
 }
 
-function renderContent(content: string, isDiff: boolean) {
-  if (!isDiff) return content;
-
-  return content.split("\n").map((line, i) => {
-    let className = "";
-    if (line.startsWith("+") && !line.startsWith("+++")) {
-      className = "bg-green-500/10 text-green-600 dark:text-green-400";
-    } else if (line.startsWith("-") && !line.startsWith("---")) {
-      className = "bg-red-500/10 text-red-600 dark:text-red-400";
-    } else if (line.startsWith("@@")) {
-      className = "text-blue-500";
-    }
-
-    return (
-      <div key={i} className={className}>
-        {line}
-      </div>
-    );
-  });
+function LineNumberedContent({ content, isDiff }: { content: string; isDiff: boolean }) {
+  const lines = content.split("\n");
+  return (
+    <table className="w-full border-collapse">
+      <tbody>
+        {lines.map((line, i) => {
+          let lineClass = "text-foreground";
+          if (isDiff) {
+            if (line.startsWith("+") && !line.startsWith("+++")) {
+              lineClass = "bg-green-500/10 text-green-600 dark:text-green-400";
+            } else if (line.startsWith("-") && !line.startsWith("---")) {
+              lineClass = "bg-red-500/10 text-red-600 dark:text-red-400";
+            } else if (line.startsWith("@@")) {
+              lineClass = "text-blue-500";
+            }
+          }
+          return (
+            <tr key={i}>
+              {!isDiff && (
+                <td className="w-8 select-none text-right align-middle text-muted-foreground/50">
+                  {i + 1}
+                </td>
+              )}
+              <td className={cn("pl-2", lineClass)}>
+                <pre className="whitespace-pre-wrap">{line || "\n"}</pre>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
 }

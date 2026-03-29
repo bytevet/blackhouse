@@ -157,6 +157,22 @@
   background: transparent;
 }
 
+/* Shiki line numbers via CSS counters */
+.line-numbers .shiki code {
+  counter-reset: line;
+}
+
+.line-numbers .shiki code > .line::before {
+  counter-increment: line;
+  content: counter(line);
+  display: inline-block;
+  width: 1.5rem;
+  margin-right: 0.5rem;
+  text-align: right;
+  color: color-mix(in oklch, currentColor 25%, transparent);
+  user-select: none;
+}
+
 /* Shiki dual-theme: swap token colors in dark mode */
 .shiki,
 .shiki span {

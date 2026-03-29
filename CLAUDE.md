@@ -4,7 +4,7 @@ Coding agent management platform — spawn and manage Docker-containerized codin
 
 ## Tech Stack
 
-- **Framework**: TanStack Start (full-stack SSR, file-based routing, middleware, Zod validation)
+- **Framework**: TanStack Start (SPA mode, file-based routing, server functions, Zod validation)
 - **Forms**: TanStack Form + shadcn/ui Field components
 - **Database**: PostgreSQL + Drizzle ORM
 - **Auth**: Better Auth (admin plugin, username plugin, GitHub OAuth)
