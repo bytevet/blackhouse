@@ -90,6 +90,7 @@ export const codingSessions = pgTable("coding_sessions", {
     onDelete: "set null",
   }),
   preset: text("preset").notNull(),
+  agentConfigId: text("agent_config_id"),
   containerId: text("container_id"),
   containerImage: text("container_image").notNull(),
   resultHtml: text("result_html"),

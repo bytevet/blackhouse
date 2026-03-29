@@ -164,6 +164,10 @@ function UsersTab() {
                   <Select
                     value={u.role || "user"}
                     onValueChange={(val) => handleRoleChange(u.id, val)}
+                    items={[
+                      { label: "User", value: "user" },
+                      { label: "Admin", value: "admin" },
+                    ]}
                   >
                     <SelectTrigger className="h-6 w-24">
                       <SelectValue />
@@ -291,7 +295,14 @@ function UsersTab() {
               children={(field) => (
                 <Field>
                   <FieldLabel>Role</FieldLabel>
-                  <Select value={field.state.value} onValueChange={field.handleChange}>
+                  <Select
+                    value={field.state.value}
+                    onValueChange={field.handleChange}
+                    items={[
+                      { label: "User", value: "user" },
+                      { label: "Admin", value: "admin" },
+                    ]}
+                  >
                     <SelectTrigger className="w-full">
                       <SelectValue />
                     </SelectTrigger>

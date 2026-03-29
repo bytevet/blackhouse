@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useCallback, useEffect, useRef } from "react";
-import { Square, Play, Trash2, PanelRightOpen, PanelRightClose, Loader2 } from "lucide-react";
+import { Square, Play, Trash2, PanelRightOpen, PanelRightClose, Loader2, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
@@ -17,7 +17,14 @@ import { TerminalPanel } from "@/components/terminal";
 import { FileExplorer } from "@/components/file-explorer";
 import { FileViewer } from "@/components/file-viewer";
 import { ResultViewer } from "@/components/result-viewer";
-import { getSession, stopSession, destroySession, restartSession } from "@/server/sessions";
+import {
+  getSession,
+  stopSession,
+  destroySession,
+  restartSession,
+  createSession,
+  getSessionRecreateParams,
+} from "@/server/sessions";
 import type { SessionStatus } from "@/db/schema";
 import { sessionStatusConfig } from "@/lib/session-status";
 
@@ -83,6 +90,30 @@ function SessionViewPage() {
     [session, navigate],
   );
 
+  const handleRecreate = useCallback(async () => {
+    if (!session) return;
+    setActionLoading(true);
+    try {
+      const params = await getSessionRecreateParams({ data: { sessionId: session.id } });
+      const newSession = await createSession({
+        data: {
+          name: params.name,
+          agentConfigId: params.agentConfigId || undefined,
+          gitRepoUrl: params.gitRepoUrl || undefined,
+          gitBranch: params.gitBranch || undefined,
+          templateId: params.templateId || undefined,
+        },
+      });
+      if (newSession?.id) {
+        navigate({ to: "/sessions/$sessionId", params: { sessionId: newSession.id } });
+      }
+    } catch {
+      // ignored
+    } finally {
+      setActionLoading(false);
+    }
+  }, [session, navigate]);
+
   if (!session) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -145,6 +176,12 @@ function SessionViewPage() {
               <span className="hidden sm:inline">
                 {actionLoading ? "Restarting..." : "Restart"}
               </span>
+            </Button>
+          )}
+          {session.status === "stopped" && (
+            <Button variant="outline" size="xs" onClick={handleRecreate} disabled={actionLoading}>
+              <Copy className="size-3" />
+              <span className="hidden sm:inline">Re-create</span>
             </Button>
           )}
           {session.status === "stopped" && (

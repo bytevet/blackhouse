@@ -386,7 +386,11 @@ function AgentsTab() {
               children={(field) => (
                 <Field>
                   <FieldLabel>Preset</FieldLabel>
-                  <Select value={field.state.value} onValueChange={handlePresetChange}>
+                  <Select
+                    value={field.state.value}
+                    onValueChange={handlePresetChange}
+                    items={PRESET_OPTIONS.map((p) => ({ label: p.displayName, value: p.id }))}
+                  >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>

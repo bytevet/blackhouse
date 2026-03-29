@@ -164,6 +164,7 @@ export const createSession = createServerFn({ method: "POST" })
         gitBranch: data.gitBranch ?? "main",
         templateId: data.templateId ?? null,
         preset: agentConfig.preset,
+        agentConfigId: agentConfig.id,
         containerImage: imageName,
         status: "pending",
       })
@@ -435,4 +436,32 @@ export const restartSession = createServerFn({ method: "POST" })
       .returning();
 
     return updated[0];
+  });
+
+// ---------------------------------------------------------------------------
+// getSessionRecreateParams
+// ---------------------------------------------------------------------------
+
+export const getSessionRecreateParams = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .inputValidator(z.object({ sessionId: z.string() }))
+  .handler(async ({ data, context }) => {
+    const session = context.session;
+    const [original] = await db
+      .select()
+      .from(schema.codingSessions)
+      .where(eq(schema.codingSessions.id, data.sessionId))
+      .limit(1);
+    if (!original) throw new Error("Session not found");
+    if (original.userId !== session.user.id && session.user.role !== "admin") {
+      throw new Error("Forbidden");
+    }
+    return {
+      name: original.name,
+      gitRepoUrl: original.gitRepoUrl,
+      gitBranch: original.gitBranch,
+      templateId: original.templateId,
+      agentConfigId: original.agentConfigId,
+      preset: original.preset,
+    };
   });

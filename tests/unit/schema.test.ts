@@ -164,6 +164,7 @@ describe("Database Schema", () => {
         gitBranch: "main",
         templateId: null,
         preset: "claude-code",
+        agentConfigId: null,
         containerId: null,
         containerImage: "ubuntu:latest",
         resultHtml: null,

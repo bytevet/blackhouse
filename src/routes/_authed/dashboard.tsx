@@ -8,6 +8,7 @@ import {
   stopSession,
   destroySession,
   restartSession,
+  getSessionRecreateParams,
 } from "@/server/sessions";
 import { listTemplates } from "@/server/templates";
 import { listAgentConfigs } from "@/server/settings";
@@ -41,7 +42,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Field, FieldLabel, FieldError, FieldGroup } from "@/components/ui/field";
-import { Plus, Eye, Square, Trash2, RotateCcw, GitBranch, Bot, FileText } from "lucide-react";
+import { Plus, Eye, Square, Trash2, RotateCcw, GitBranch, Bot, FileText, Copy } from "lucide-react";
 import { timeAgo } from "@/lib/time";
 import type { CodingSession, Template, AgentConfig, SessionStatus } from "@/db/schema";
 import { sessionStatusConfig } from "@/lib/session-status";
@@ -135,6 +136,21 @@ function DashboardPage() {
     await refreshSessions();
   };
 
+  const handleRecreate = async (sessionId: string) => {
+    try {
+      const params = await getSessionRecreateParams({ data: { sessionId } });
+      form.reset();
+      form.setFieldValue("name", params.name);
+      form.setFieldValue("agentConfigId", params.agentConfigId);
+      form.setFieldValue("gitRepoUrl", params.gitRepoUrl);
+      form.setFieldValue("gitBranch", params.gitBranch);
+      form.setFieldValue("templateId", params.templateId);
+      setDialogOpen(true);
+    } catch {
+      // ignore errors
+    }
+  };
+
   const filteredSessions =
     isAdmin && showAll
       ? sessions
@@ -153,178 +169,241 @@ function DashboardPage() {
               </Button>
             }
           />
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Create New Session</DialogTitle>
-              <DialogDescription>Start a new coding agent session.</DialogDescription>
-            </DialogHeader>
-            <FieldGroup>
-              <form.Field
-                name="name"
-                validators={{
-                  onBlur: ({ value }) => (!value.trim() ? "Name is required" : undefined),
-                }}
-                children={(field) => {
-                  const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
-                  return (
-                    <Field data-invalid={isInvalid || undefined}>
-                      <FieldLabel>Name</FieldLabel>
-                      <Input
-                        placeholder="My session"
-                        value={field.state.value}
-                        onChange={(e) => field.handleChange(e.target.value)}
-                        onBlur={field.handleBlur}
-                      />
-                      {isInvalid && <FieldError errors={field.state.meta.errors} />}
-                    </Field>
-                  );
-                }}
-              />
-              <form.Field
-                name="agentConfigId"
-                validators={{
-                  onBlur: ({ value }) => (!value ? "Agent is required" : undefined),
-                }}
-                children={(field) => {
-                  const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
-                  return (
-                    <Field data-invalid={isInvalid || undefined}>
-                      <FieldLabel>Coding Agent</FieldLabel>
-                      <Select value={field.state.value} onValueChange={field.handleChange}>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Select an agent" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {agentConfigs.map((ac: AgentConfig) => (
-                            <SelectItem
-                              key={ac.id}
-                              value={ac.id}
-                              disabled={ac.imageBuildStatus !== "built"}
-                            >
-                              <span className="flex items-center gap-1.5">
-                                {ac.displayName}
-                                <Badge variant="outline" className="text-[10px] px-1 py-0">
-                                  {ac.preset}
-                                </Badge>
-                              </span>
-                              {ac.imageBuildStatus !== "built" && (
-                                <span className="ml-1 text-muted-foreground">(not built)</span>
-                              )}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {isInvalid && <FieldError errors={field.state.meta.errors} />}
-                    </Field>
-                  );
-                }}
-              />
-              <form.Field
-                name="templateId"
-                children={(field) => (
-                  <Field>
-                    <FieldLabel>Template</FieldLabel>
-                    <Select
-                      value={field.state.value || "__none__"}
-                      onValueChange={(v) => field.handleChange(v === "__none__" ? "" : v)}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="None" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">None</SelectItem>
-                        {templates.map((t: Template) => (
-                          <SelectItem key={t.id} value={t.id}>
-                            {t.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                )}
-              />
-              <form.Subscribe
-                selector={(state) => state.values.templateId}
-                children={(templateId) => {
-                  const selectedTemplate = templates.find((t: Template) => t.id === templateId);
-                  const gitRequired = selectedTemplate?.gitRequired ?? false;
-                  return (
-                    <>
-                      <form.Field
-                        name="gitRepoUrl"
-                        validators={{
-                          onBlur: ({ value }) =>
-                            gitRequired && !value.trim()
-                              ? "Git URL is required for this template"
-                              : undefined,
-                        }}
-                        children={(field) => {
-                          const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
-                          return (
-                            <Field data-invalid={isInvalid || undefined}>
-                              <FieldLabel>
-                                Git Repo URL{" "}
-                                {gitRequired && <span className="text-destructive">*</span>}
-                              </FieldLabel>
+          <form.Subscribe
+            selector={(state) => state.values.templateId}
+            children={(templateId) => {
+              const previewTemplate = templates.find((t: Template) => t.id === templateId);
+              return (
+                <DialogContent className={previewTemplate ? "sm:max-w-3xl" : "sm:max-w-md"}>
+                  <DialogHeader>
+                    <DialogTitle>Create New Session</DialogTitle>
+                    <DialogDescription>Start a new coding agent session.</DialogDescription>
+                  </DialogHeader>
+                  <div className={previewTemplate ? "grid grid-cols-2 gap-6" : ""}>
+                    <div>
+                      <FieldGroup>
+                        <form.Field
+                          name="name"
+                          validators={{
+                            onBlur: ({ value }) => (!value.trim() ? "Name is required" : undefined),
+                          }}
+                          children={(field) => {
+                            const isInvalid =
+                              field.state.meta.isTouched && !field.state.meta.isValid;
+                            return (
+                              <Field data-invalid={isInvalid || undefined}>
+                                <FieldLabel>Name</FieldLabel>
+                                <Input
+                                  placeholder="My session"
+                                  value={field.state.value}
+                                  onChange={(e) => field.handleChange(e.target.value)}
+                                  onBlur={field.handleBlur}
+                                />
+                                {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                              </Field>
+                            );
+                          }}
+                        />
+                        <form.Field
+                          name="agentConfigId"
+                          validators={{
+                            onBlur: ({ value }) => (!value ? "Agent is required" : undefined),
+                          }}
+                          children={(field) => {
+                            const isInvalid =
+                              field.state.meta.isTouched && !field.state.meta.isValid;
+                            return (
+                              <Field data-invalid={isInvalid || undefined}>
+                                <FieldLabel>Coding Agent</FieldLabel>
+                                <Select
+                                  value={field.state.value}
+                                  onValueChange={field.handleChange}
+                                  items={[
+                                    { label: "Select an agent", value: null },
+                                    ...agentConfigs.map((ac: AgentConfig) => ({
+                                      label:
+                                        ac.displayName +
+                                        (ac.imageBuildStatus !== "built" ? " (not built)" : ""),
+                                      value: ac.id,
+                                      disabled: ac.imageBuildStatus !== "built",
+                                    })),
+                                  ]}
+                                >
+                                  <SelectTrigger className="w-full">
+                                    <SelectValue placeholder="Select an agent" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {agentConfigs.map((ac: AgentConfig) => (
+                                      <SelectItem
+                                        key={ac.id}
+                                        value={ac.id}
+                                        disabled={ac.imageBuildStatus !== "built"}
+                                      >
+                                        {ac.displayName}
+                                        {ac.imageBuildStatus !== "built" ? " (not built)" : ""}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                              </Field>
+                            );
+                          }}
+                        />
+                        <form.Field
+                          name="templateId"
+                          children={(field) => (
+                            <Field>
+                              <FieldLabel>Template</FieldLabel>
+                              <Select
+                                value={field.state.value || "__none__"}
+                                onValueChange={(v) => field.handleChange(v === "__none__" ? "" : v)}
+                                items={[
+                                  { label: "None", value: "__none__" },
+                                  ...templates.map((t: Template) => ({
+                                    label: t.name,
+                                    value: t.id,
+                                  })),
+                                ]}
+                              >
+                                <SelectTrigger className="w-full">
+                                  <SelectValue placeholder="None" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__none__">None</SelectItem>
+                                  {templates.map((t: Template) => (
+                                    <SelectItem key={t.id} value={t.id}>
+                                      {t.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </Field>
+                          )}
+                        />
+                        <form.Subscribe
+                          selector={(state) => state.values.templateId}
+                          children={(innerTemplateId) => {
+                            const selectedTemplate = templates.find(
+                              (t: Template) => t.id === innerTemplateId,
+                            );
+                            const gitRequired = selectedTemplate?.gitRequired ?? false;
+                            return (
+                              <>
+                                <form.Field
+                                  name="gitRepoUrl"
+                                  validators={{
+                                    onBlur: ({ value }) =>
+                                      gitRequired && !value.trim()
+                                        ? "Git URL is required for this template"
+                                        : undefined,
+                                  }}
+                                  children={(field) => {
+                                    const isInvalid =
+                                      field.state.meta.isTouched && !field.state.meta.isValid;
+                                    return (
+                                      <Field data-invalid={isInvalid || undefined}>
+                                        <FieldLabel>
+                                          Git Repo URL{" "}
+                                          {gitRequired && (
+                                            <span className="text-destructive">*</span>
+                                          )}
+                                        </FieldLabel>
+                                        <Input
+                                          placeholder="https://github.com/user/repo"
+                                          value={field.state.value}
+                                          onChange={(e) => field.handleChange(e.target.value)}
+                                          onBlur={field.handleBlur}
+                                        />
+                                        {isInvalid && (
+                                          <FieldError errors={field.state.meta.errors} />
+                                        )}
+                                      </Field>
+                                    );
+                                  }}
+                                />
+                              </>
+                            );
+                          }}
+                        />
+                        <form.Field
+                          name="gitBranch"
+                          children={(field) => (
+                            <Field>
+                              <FieldLabel>Git Branch</FieldLabel>
                               <Input
-                                placeholder="https://github.com/user/repo"
+                                placeholder="main"
                                 value={field.state.value}
                                 onChange={(e) => field.handleChange(e.target.value)}
-                                onBlur={field.handleBlur}
                               />
-                              {isInvalid && <FieldError errors={field.state.meta.errors} />}
                             </Field>
-                          );
-                        }}
-                      />
-                    </>
-                  );
-                }}
-              />
-              <form.Field
-                name="gitBranch"
-                children={(field) => (
-                  <Field>
-                    <FieldLabel>Git Branch</FieldLabel>
-                    <Input
-                      placeholder="main"
-                      value={field.state.value}
-                      onChange={(e) => field.handleChange(e.target.value)}
+                          )}
+                        />
+                      </FieldGroup>
+                    </div>
+                    {previewTemplate && (
+                      <div className="space-y-3 border-l pl-6">
+                        <h3 className="text-sm font-medium">Template Preview</h3>
+                        <div className="space-y-2 text-xs">
+                          <p className="font-medium">{previewTemplate.name}</p>
+                          {previewTemplate.description && (
+                            <p className="text-muted-foreground">{previewTemplate.description}</p>
+                          )}
+                          <div className="flex gap-1">
+                            {previewTemplate.gitRequired && (
+                              <Badge variant="outline">Git Required</Badge>
+                            )}
+                            <Badge variant="outline">
+                              {previewTemplate.isPublic ? "Public" : "Private"}
+                            </Badge>
+                          </div>
+                          {previewTemplate.systemPrompt && (
+                            <div>
+                              <p className="font-medium mb-1">System Prompt</p>
+                              <pre className="max-h-48 overflow-auto rounded border bg-muted p-2 text-xs whitespace-pre-wrap">
+                                {previewTemplate.systemPrompt}
+                              </pre>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <DialogFooter>
+                    <form.Subscribe
+                      selector={(state) => [state.canSubmit, state.isSubmitting, state.values]}
+                      children={([canSubmit, isSubmitting, values]) => {
+                        const v = values as {
+                          name: string;
+                          agentConfigId: string;
+                          templateId: string;
+                          gitRepoUrl: string;
+                        };
+                        const selectedTemplate = templates.find(
+                          (t: Template) => t.id === v.templateId,
+                        );
+                        const gitMissing = selectedTemplate?.gitRequired && !v.gitRepoUrl.trim();
+                        return (
+                          <Button
+                            onClick={() => form.handleSubmit()}
+                            disabled={
+                              !v.name.trim() ||
+                              !v.agentConfigId ||
+                              !!gitMissing ||
+                              (isSubmitting as boolean) ||
+                              creating
+                            }
+                          >
+                            {creating ? "Creating..." : "Create Session"}
+                          </Button>
+                        );
+                      }}
                     />
-                  </Field>
-                )}
-              />
-            </FieldGroup>
-            <DialogFooter>
-              <form.Subscribe
-                selector={(state) => [state.canSubmit, state.isSubmitting, state.values]}
-                children={([canSubmit, isSubmitting, values]) => {
-                  const v = values as {
-                    name: string;
-                    agentConfigId: string;
-                    templateId: string;
-                    gitRepoUrl: string;
-                  };
-                  const selectedTemplate = templates.find((t: Template) => t.id === v.templateId);
-                  const gitMissing = selectedTemplate?.gitRequired && !v.gitRepoUrl.trim();
-                  return (
-                    <Button
-                      onClick={() => form.handleSubmit()}
-                      disabled={
-                        !v.name.trim() ||
-                        !v.agentConfigId ||
-                        !!gitMissing ||
-                        (isSubmitting as boolean) ||
-                        creating
-                      }
-                    >
-                      {creating ? "Creating..." : "Create Session"}
-                    </Button>
-                  );
-                }}
-              />
-            </DialogFooter>
-          </DialogContent>
+                  </DialogFooter>
+                </DialogContent>
+              );
+            }}
+          />
         </Dialog>
       </div>
 
@@ -400,6 +479,12 @@ function DashboardPage() {
                     >
                       <RotateCcw className="size-3" />
                       Restart
+                    </Button>
+                  )}
+                  {status === "stopped" && (
+                    <Button variant="outline" size="sm" onClick={() => handleRecreate(s.id)}>
+                      <Copy className="size-3" />
+                      Re-create
                     </Button>
                   )}
                   {status === "stopped" && (
