@@ -18,7 +18,7 @@ async function seed() {
   const existingAdmin = await db
     .select()
     .from(schema.user)
-    .where(eq(schema.user.role, "admin"))
+    .where(eq(schema.user.username, "admin"))
     .limit(1);
 
   if (existingAdmin.length === 0) {
@@ -48,10 +48,10 @@ async function seed() {
         const { nanoid } = await import("nanoid").catch(() => ({
           nanoid: () => crypto.randomUUID(),
         }));
-        const bcrypt = await import("bcryptjs").catch(() => null);
+        const { hashPassword } = await import("better-auth/crypto");
 
         const userId = nanoid();
-        const hashedPassword = bcrypt ? await bcrypt.hash("admin123", 10) : "admin123";
+        const hashedPassword = await hashPassword("admin123");
 
         await db
           .insert(schema.user)
