@@ -12,7 +12,7 @@ const tabs = [
 
 function TemplatesLayout() {
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 overflow-auto p-4 md:p-6">
       <h1 className="text-lg font-semibold text-foreground">Templates</h1>
       <nav className="inline-flex h-9 items-center justify-center rounded-lg bg-muted p-1 text-muted-foreground">
         {tabs.map((tab) => (

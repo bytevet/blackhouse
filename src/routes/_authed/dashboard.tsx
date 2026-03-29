@@ -157,7 +157,7 @@ function DashboardPage() {
       : sessions.filter((s: CodingSession) => s.userId === session?.user?.id);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 overflow-auto p-4 md:p-6">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold text-foreground">Dashboard</h1>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

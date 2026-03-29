@@ -116,14 +116,14 @@ function SessionViewPage() {
 
   if (!session) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+      <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
         Session not found
       </div>
     );
   }
 
   return (
-    <div className="flex h-[calc(100dvh-5rem)] flex-col -m-4 md:-m-6">
+    <div className="flex min-h-0 flex-1 flex-col">
       {/* Meta section */}
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2 md:gap-3 md:px-4">
         <h1 className="text-sm font-semibold text-foreground">{session.name}</h1>
