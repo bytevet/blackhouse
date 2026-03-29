@@ -135,7 +135,7 @@ export function AgentsPage() {
       return;
     }
     api
-      .get<AgentConfig[]>("/settings/agents")
+      .get<AgentConfig[]>("/settings/agent-configs")
       .then(setConfigs)
       .finally(() => setLoading(false));
   }, [isAdmin, session, navigate]);
@@ -155,7 +155,7 @@ export function AgentsPage() {
             imageBuildStatus: string;
             imageBuildLog: string | null;
             lastBuiltAt: string | null;
-          }>(`/settings/agents/${bc.id}/build-status`);
+          }>(`/settings/agent-configs/${bc.id}/build-status`);
           const idx = updatedConfigs.findIndex((c) => c.id === bc.id);
           if (idx !== -1) {
             updatedConfigs[idx] = {
@@ -178,7 +178,7 @@ export function AgentsPage() {
 
       setConfigs(updatedConfigs);
       if (hasChanges) {
-        const refreshed = await api.get<AgentConfig[]>("/settings/agents");
+        const refreshed = await api.get<AgentConfig[]>("/settings/agent-configs");
         setConfigs(refreshed);
       }
     }, 3000);
@@ -187,7 +187,7 @@ export function AgentsPage() {
   }, [configs, buildLogAgentId]);
 
   const refresh = async () => {
-    const updated = await api.get<AgentConfig[]>("/settings/agents");
+    const updated = await api.get<AgentConfig[]>("/settings/agent-configs");
     setConfigs(updated);
   };
 
@@ -203,7 +203,9 @@ export function AgentsPage() {
       }));
       setVolumeMounts(p.volumeMounts.map((v) => ({ ...v })));
       try {
-        const content = await api.get<string>(`/settings/agents/default-dockerfile?preset=${value}`);
+        const content = await api.get<string>(
+          `/settings/agent-configs/default-dockerfile?preset=${value}`,
+        );
         setFormData((prev) => ({ ...prev, dockerfileContent: content }));
       } catch {
         /* ignore */
@@ -248,7 +250,7 @@ export function AgentsPage() {
     setSaving(true);
     try {
       if (editing) {
-        await api.put(`/settings/agents/${editing.id}`, {
+        await api.put(`/settings/agent-configs/${editing.id}`, {
           preset: formData.preset,
           displayName: formData.displayName.trim(),
           agentCommand: formData.agentCommand.trim() || undefined,
@@ -257,7 +259,7 @@ export function AgentsPage() {
           dockerfileContent: formData.dockerfileContent.trim() || null,
         });
       } else {
-        await api.post("/settings/agents", {
+        await api.post("/settings/agent-configs", {
           preset: formData.preset,
           displayName: formData.displayName.trim(),
           agentCommand: formData.agentCommand.trim() || undefined,
@@ -274,13 +276,13 @@ export function AgentsPage() {
   };
 
   const handleDelete = async (id: string) => {
-    await api.delete(`/settings/agents/${id}`);
+    await api.delete(`/settings/agent-configs/${id}`);
     await refresh();
   };
 
   const handleBuild = async (agentConfigId: string) => {
     const config = configs.find((c) => c.id === agentConfigId);
-    await api.post(`/settings/agents/${agentConfigId}/build`);
+    await api.post(`/settings/agent-configs/${agentConfigId}/build`);
     setConfigs((prev) =>
       prev.map((c) =>
         c.id === agentConfigId ? { ...c, imageBuildStatus: "building", imageBuildLog: null } : c,
@@ -295,7 +297,7 @@ export function AgentsPage() {
   const handleResetDockerfile = async () => {
     try {
       const content = await api.get<string>(
-        `/settings/agents/default-dockerfile?preset=${formData.preset}`,
+        `/settings/agent-configs/default-dockerfile?preset=${formData.preset}`,
       );
       setFormData((prev) => ({ ...prev, dockerfileContent: content }));
     } catch {

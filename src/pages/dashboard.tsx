@@ -63,7 +63,7 @@ export function DashboardPage() {
           api.get<CodingSession[]>("/sessions"),
           api.get<Template[]>("/templates?mine=true"),
           api.get<Template[]>("/templates?mine=false"),
-          api.get<AgentConfig[]>("/settings/agents"),
+          api.get<AgentConfig[]>("/settings/agent-configs"),
         ]);
         setSessions(sessionsData);
         setAgentConfigs(configs);
@@ -101,7 +101,13 @@ export function DashboardPage() {
         templateId: formData.templateId || undefined,
       });
       setDialogOpen(false);
-      setFormData({ name: "", agentConfigId: "", gitRepoUrl: "", gitBranch: "main", templateId: "" });
+      setFormData({
+        name: "",
+        agentConfigId: "",
+        gitRepoUrl: "",
+        gitBranch: "main",
+        templateId: "",
+      });
       if (newSession?.id) {
         navigate(`/sessions/${newSession.id}`);
       } else {
@@ -142,9 +148,7 @@ export function DashboardPage() {
   };
 
   const filteredSessions =
-    isAdmin && showAll
-      ? sessions
-      : sessions.filter((s) => s.userId === session?.user?.id);
+    isAdmin && showAll ? sessions : sessions.filter((s) => s.userId === session?.user?.id);
 
   const previewTemplate = templates.find((t) => t.id === formData.templateId);
   const selectedTemplate = templates.find((t) => t.id === formData.templateId);
@@ -188,9 +192,7 @@ export function DashboardPage() {
                       <Input
                         placeholder="My session"
                         value={formData.name}
-                        onChange={(e) =>
-                          setFormData((prev) => ({ ...prev, name: e.target.value }))
-                        }
+                        onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
                       />
                     </Field>
                     <Field>
@@ -198,8 +200,7 @@ export function DashboardPage() {
                       <Select
                         value={formData.agentConfigId}
                         onValueChange={(v) =>
-                          v !== null &&
-                          setFormData((prev) => ({ ...prev, agentConfigId: v }))
+                          v !== null && setFormData((prev) => ({ ...prev, agentConfigId: v }))
                         }
                         items={[
                           { label: "Select an agent", value: null },
@@ -263,8 +264,7 @@ export function DashboardPage() {
                     </Field>
                     <Field>
                       <FieldLabel>
-                        Git Repo URL{" "}
-                        {gitRequired && <span className="text-destructive">*</span>}
+                        Git Repo URL {gitRequired && <span className="text-destructive">*</span>}
                       </FieldLabel>
                       <Input
                         placeholder="https://github.com/user/repo"
