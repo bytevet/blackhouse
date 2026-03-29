@@ -8,7 +8,7 @@ Coding agent management platform — spawn and manage Docker-containerized codin
 - **Forms**: TanStack Form + shadcn/ui Field components
 - **Database**: PostgreSQL + Drizzle ORM
 - **Auth**: Better Auth (admin plugin, username plugin, GitHub OAuth)
-- **UI**: shadcn/ui (base-mira style, mist color) + Tailwind CSS v4
+- **UI**: shadcn/ui (base-mira style, mist color, **base-ui primitives** — NOT Radix) + Tailwind CSS v4
 - **Docker**: dockerode for container lifecycle + per-agent preset Dockerfiles
 - **Terminal**: xterm.js + binary WebSocket protocol via Nitro
 - **Testing**: Vitest (unit) + Playwright (e2e)
@@ -96,6 +96,7 @@ npm run db:studio    # Open Drizzle Studio
 - CSS variables for theming are in `src/index.css`
 - All pages must be responsive
 - Dangerous actions (stop, destroy, delete) must have confirmation dialogs
+- **Base-UI Select requires `items` prop** — `<Select items={[{label, value}]}>` is mandatory for `<SelectValue>` to display the label instead of the raw value. This is NOT Radix — base-ui has a different API. Always read the base-ui variant docs at https://ui.shadcn.com/docs/components/base/select
 
 ## Terminal WebSocket Protocol
 
