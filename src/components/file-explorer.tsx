@@ -1,5 +1,13 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { ChevronRight, ChevronDown, File, Folder, FolderOpen, ClipboardCopy, FileSymlink } from "lucide-react";
+import {
+  ChevronRight,
+  ChevronDown,
+  File,
+  Folder,
+  FolderOpen,
+  ClipboardCopy,
+  FileSymlink,
+} from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -48,7 +56,7 @@ export function FileExplorer({
       try {
         const { api } = await import("@/lib/api");
         const files = await api.get<FileNode[]>(
-          `/files?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}`,
+          `/files/list?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}`,
         );
         return files;
       } catch {
