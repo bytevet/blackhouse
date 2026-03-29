@@ -17,7 +17,7 @@ if [ -z "$HTML" ]; then
   exit 1
 fi
 
-curl -sf -X POST "$BLACKHOUSE_URL/api/sessions/result" \
+curl -sf -X POST "$BLACKHOUSE_URL/api/container/result" \
   -H "Content-Type: application/json" \
   -d "$(jq -n --arg sid "$SESSION_ID" --arg tok "$SESSION_TOKEN" --arg html "$HTML" \
     '{sessionId: $sid, token: $tok, html: $html}')" \

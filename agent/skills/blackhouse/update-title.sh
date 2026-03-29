@@ -12,7 +12,7 @@ fi
 
 TITLE="${1:?Usage: update-title.sh \"your status here\"}"
 
-curl -sf -X POST "$BLACKHOUSE_URL/api/sessions/title" \
+curl -sf -X POST "$BLACKHOUSE_URL/api/container/title" \
   -H "Content-Type: application/json" \
   -d "$(jq -n --arg sid "$SESSION_ID" --arg tok "$SESSION_TOKEN" --arg title "$TITLE" \
     '{sessionId: $sid, token: $tok, title: $title}')" \

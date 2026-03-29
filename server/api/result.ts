@@ -13,16 +13,20 @@ const tokenBody = z.object({
 });
 
 async function validateToken(sessionId: string, token: string) {
-  const [session] = await db
-    .select()
-    .from(codingSessions)
-    .where(eq(codingSessions.id, sessionId))
-    .limit(1);
-  if (!session) return { error: "Session not found" as const, status: 404 as const };
-  if (!session.sessionToken || session.sessionToken !== token) {
-    return { error: "Invalid token" as const, status: 403 as const };
+  try {
+    const [session] = await db
+      .select()
+      .from(codingSessions)
+      .where(eq(codingSessions.id, sessionId))
+      .limit(1);
+    if (!session) return { error: "Session not found" as const, status: 404 as const };
+    if (!session.sessionToken || session.sessionToken !== token) {
+      return { error: "Invalid token" as const, status: 403 as const };
+    }
+    return { session };
+  } catch {
+    return { error: "Session not found" as const, status: 404 as const };
   }
-  return { session };
 }
 
 app.post("/result", zValidator("json", tokenBody.extend({ html: z.string() })), async (c) => {

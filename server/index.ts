@@ -31,11 +31,11 @@ app.get("/api/health", (c) => c.json({ status: "ok", timestamp: new Date().toISO
 
 // API routes
 app.route("/api/auth", authRoutes);
+app.route("/api/container", resultRoutes);
 app.route("/api/sessions", sessionsRoutes);
 app.route("/api/templates", templatesRoutes);
 app.route("/api/settings", settingsRoutes);
 app.route("/api/files", filesRoutes);
-app.route("/api/sessions", resultRoutes);
 app.route("/.well-known/agent-skills", skillsRoutes);
 
 // WebSocket terminal
