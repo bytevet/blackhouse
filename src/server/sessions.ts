@@ -469,3 +469,27 @@ export const getSessionRecreateParams = createServerFn({ method: "GET" })
       preset: original.preset,
     };
   });
+
+// ---------------------------------------------------------------------------
+// clearSessionResult
+// ---------------------------------------------------------------------------
+
+export const clearSessionResult = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator(z.object({ id: z.string() }))
+  .handler(async ({ data, context }) => {
+    const session = context.session;
+    const [codingSession] = await db
+      .select()
+      .from(schema.codingSessions)
+      .where(eq(schema.codingSessions.id, data.id))
+      .limit(1);
+    if (!codingSession) throw new Error("Session not found");
+    if (codingSession.userId !== session.user.id && session.user.role !== "admin") {
+      throw new Error("Forbidden");
+    }
+    await db
+      .update(schema.codingSessions)
+      .set({ resultHtml: null, updatedAt: new Date() })
+      .where(eq(schema.codingSessions.id, data.id));
+  });

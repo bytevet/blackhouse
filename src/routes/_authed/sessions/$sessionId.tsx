@@ -35,6 +35,7 @@ import {
   restartSession,
   createSession,
   getSessionRecreateParams,
+  clearSessionResult,
 } from "@/server/sessions";
 import type { SessionStatus } from "@/db/schema";
 import { sessionStatusConfig } from "@/lib/session-status";
@@ -315,7 +316,15 @@ function SessionView({
 
               <TabsContent value="result" className="m-0 flex-1 overflow-hidden">
                 {session.resultHtml ? (
-                  <ResultViewer html={session.resultHtml} />
+                  <ResultViewer
+                    html={session.resultHtml}
+                    updatedAt={session.updatedAt}
+                    onDelete={async () => {
+                      await clearSessionResult({ data: { id: session.id } });
+                      const updated = await getSession({ data: { id: session.id } });
+                      if (updated) setSession(updated);
+                    }}
+                  />
                 ) : (
                   <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
                     No result yet. The coding agent can submit results via MCP.
