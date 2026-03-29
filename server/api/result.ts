@@ -1,80 +1,52 @@
 import { Hono } from "hono";
+import { zValidator } from "@hono/zod-validator";
+import { z } from "zod";
 import { db } from "../db/index.js";
 import { codingSessions } from "../db/schema.js";
 import { eq } from "drizzle-orm";
 
 const app = new Hono();
 
-// ---------------------------------------------------------------------------
-// POST /api/sessions/result — submit HTML result (token auth, not cookie)
-// ---------------------------------------------------------------------------
+const tokenBody = z.object({
+  sessionId: z.string(),
+  token: z.string(),
+});
 
-app.post("/result", async (c) => {
-  const body = (await c.req.json()) as {
-    sessionId: string;
-    html: string;
-    token: string;
-  };
-
-  if (!body.sessionId || !body.html || !body.token) {
-    return c.json({ error: "Missing fields" }, 400);
-  }
-
+async function validateToken(sessionId: string, token: string) {
   const [session] = await db
     .select()
     .from(codingSessions)
-    .where(eq(codingSessions.id, body.sessionId))
+    .where(eq(codingSessions.id, sessionId))
     .limit(1);
-
-  if (!session) {
-    return c.json({ error: "Session not found" }, 404);
+  if (!session) return { error: "Session not found" as const, status: 404 as const };
+  if (!session.sessionToken || session.sessionToken !== token) {
+    return { error: "Invalid token" as const, status: 403 as const };
   }
+  return { session };
+}
 
-  if (!session.sessionToken || session.sessionToken !== body.token) {
-    return c.json({ error: "Invalid token" }, 403);
-  }
+app.post("/result", zValidator("json", tokenBody.extend({ html: z.string() })), async (c) => {
+  const { sessionId, token, html } = c.req.valid("json");
+  const result = await validateToken(sessionId, token);
+  if ("error" in result) return c.json({ error: result.error }, result.status);
 
   await db
     .update(codingSessions)
-    .set({ resultHtml: body.html, updatedAt: new Date() })
-    .where(eq(codingSessions.id, body.sessionId));
+    .set({ resultHtml: html, updatedAt: new Date() })
+    .where(eq(codingSessions.id, sessionId));
 
   return c.text("OK", 200);
 });
 
-// ---------------------------------------------------------------------------
-// POST /api/sessions/title — update session title (token auth, not cookie)
-// ---------------------------------------------------------------------------
-
-app.post("/title", async (c) => {
-  const body = (await c.req.json()) as {
-    sessionId: string;
-    title: string;
-    token: string;
-  };
-
-  if (!body.sessionId || !body.title || !body.token) {
-    return c.json({ error: "Missing fields" }, 400);
-  }
-
-  const [session] = await db
-    .select()
-    .from(codingSessions)
-    .where(eq(codingSessions.id, body.sessionId))
-    .limit(1);
-
-  if (!session) {
-    return c.json({ error: "Session not found" }, 404);
-  }
-
-  if (!session.sessionToken || session.sessionToken !== body.token) {
-    return c.json({ error: "Invalid token" }, 403);
-  }
+app.post("/title", zValidator("json", tokenBody.extend({ title: z.string() })), async (c) => {
+  const { sessionId, token, title } = c.req.valid("json");
+  const result = await validateToken(sessionId, token);
+  if ("error" in result) return c.json({ error: result.error }, result.status);
 
   await db
     .update(codingSessions)
-    .set({ agentTitle: body.title, updatedAt: new Date() })
-    .where(eq(codingSessions.id, body.sessionId));
+    .set({ agentTitle: title, updatedAt: new Date() })
+    .where(eq(codingSessions.id, sessionId));
 
   return c.text("OK", 200);
 });

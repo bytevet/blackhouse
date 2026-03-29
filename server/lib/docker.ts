@@ -3,6 +3,7 @@ import { db } from "../db/index.js";
 import * as schema from "../db/schema.js";
 
 let dockerInstance: Docker | null = null;
+let dockerPromise: Promise<Docker> | null = null;
 
 async function createDockerClient(): Promise<Docker> {
   // Try loading config from database first
@@ -60,13 +61,19 @@ async function createDockerClient(): Promise<Docker> {
 }
 
 export async function getDockerClient(): Promise<Docker> {
-  if (!dockerInstance) {
-    dockerInstance = await createDockerClient();
+  if (dockerInstance) return dockerInstance;
+  if (!dockerPromise) {
+    dockerPromise = createDockerClient().then((client) => {
+      dockerInstance = client;
+      dockerPromise = null;
+      return client;
+    });
   }
-  return dockerInstance;
+  return dockerPromise;
 }
 
 /** Reset the cached client so the next call re-reads config */
 export function resetDockerClient(): void {
   dockerInstance = null;
+  dockerPromise = null;
 }
