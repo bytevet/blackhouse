@@ -22,6 +22,7 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
   const wsRef = useRef<WebSocket | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
 
   const sendResize = useCallback((cols: number, rows: number) => {
     // Debounce: only send the last resize after 50ms of no changes
@@ -48,6 +49,7 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
     ws.binaryType = "arraybuffer";
 
     ws.onopen = () => {
+      terminalRef.current?.focus();
       const fitAddon = fitAddonRef.current;
       if (fitAddon) {
         const dims = fitAddon.proposeDimensions();
@@ -155,6 +157,7 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
       fitAddonRef.current = fitAddon;
 
       fitAddon.fit();
+      terminal.focus();
 
       // Terminal input → WebSocket (binary frame with 0x00 prefix)
       terminal.onData((data) => {
@@ -177,19 +180,17 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
         fitAddon.fit();
       });
       resizeObserver.observe(containerRef.current!);
+      resizeObserverRef.current = resizeObserver;
 
       connect();
-
-      return () => {
-        resizeObserver.disconnect();
-        terminal?.dispose();
-      };
     })();
 
     return () => {
       disposed = true;
       if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
+      resizeObserverRef.current?.disconnect();
       wsRef.current?.close();
+      wsRef.current = null;
       terminal?.dispose();
     };
   }, [connect, sendResize]);
