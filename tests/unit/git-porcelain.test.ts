@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseGitPorcelain } from "@/server/files";
+import { parseGitPorcelain } from "../../server/api/files";
 
 const ROOT = "/workspace/myrepo";
 

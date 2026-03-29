@@ -4,62 +4,53 @@ Coding agent management platform — spawn and manage Docker-containerized codin
 
 ## Tech Stack
 
-- **Framework**: TanStack Start (SPA mode, file-based routing, server functions, Zod validation)
-- **Forms**: TanStack Form + shadcn/ui Field components
+- **Server**: Hono (API routes, WebSocket, static file serving)
+- **Client**: React SPA + React Router v7
+- **Forms**: Native HTML forms + Zod validation
 - **Database**: PostgreSQL + Drizzle ORM
 - **Auth**: Better Auth (admin plugin, username plugin, GitHub OAuth)
 - **UI**: shadcn/ui (base-mira style, mist color, **base-ui primitives** — NOT Radix) + Tailwind CSS v4
 - **Docker**: dockerode for container lifecycle + per-agent preset Dockerfiles
-- **Terminal**: xterm.js + binary WebSocket protocol via Nitro
+- **Terminal**: xterm.js + binary WebSocket protocol via Hono
+- **Build**: Vite (client) + tsx (server)
 - **Testing**: Vitest (unit) + Playwright (e2e)
 
 ## Project Structure
 
 ```
-src/
-├── components/        # React components
-│   ├── ui/            # shadcn/ui components — DO NOT modify
-│   ├── app-header.tsx # Header nav bar
-│   ├── terminal.tsx   # xterm.js terminal (dynamic import, binary protocol)
-│   ├── file-explorer.tsx
-│   ├── file-viewer.tsx
-│   └── result-viewer.tsx
-├── db/                # Drizzle schema (schema.ts) and connection (index.ts)
-├── lib/               # Shared utilities
-│   ├── agent-presets.ts  # Preset configs (Claude Code, Gemini, Codex, Custom)
-│   ├── auth-server.ts    # getServerSession (createServerFn for route guards)
-│   ├── auth-client.ts    # Client-side auth hooks
-│   ├── session-status.ts # Status badge colors
-│   ├── time.ts           # timeAgo() — NOT in utils.ts (shadcn overwrites it)
-│   └── docker.ts         # Docker client singleton
-├── routes/
-│   ├── __root.tsx     # Root route (auth context, error/notFound components)
-│   ├── _authed.tsx    # Auth guard layout (redirects to /login?redirect=)
-│   ├── _authed/
-│   │   ├── dashboard.tsx
-│   │   ├── sessions/$sessionId.tsx  # Terminal + resizable file explorer
-│   │   ├── settings.tsx             # Layout with sub-route nav
-│   │   ├── settings/{profile,agents,docker,users}.tsx
-│   │   ├── templates.tsx            # Layout with sub-route nav
-│   │   └── templates/{mine,public}.tsx
+server/                # Hono API server
+├── index.ts           # App entry — mounts routes, serves SPA
+├── api/               # REST API route handlers
+│   ├── auth.ts        # Better Auth mount
+│   ├── sessions.ts    # Session CRUD + Docker lifecycle
+│   ├── templates.ts   # Template CRUD
+│   ├── settings.ts    # Agent configs, Docker, users, profile
+│   ├── files.ts       # File explorer + viewer
+│   ├── result.ts      # Agent result/title submission (token auth)
+│   └── skills.ts      # .well-known/agent-skills endpoint
+├── ws/terminal.ts     # WebSocket terminal (binary protocol, multi-peer)
+├── middleware/auth.ts  # Auth + admin Hono middleware
+├── db/                # Drizzle schema, connection, migrations
+└── lib/               # Docker client, Better Auth instance
+src/                   # React SPA
+├── main.tsx           # Entry point (createRoot + BrowserRouter)
+├── App.tsx            # React Router route definitions
+├── pages/             # Page components
 │   ├── login.tsx
-│   └── api/           # API routes (auth, health, sessions/result)
-├── server/
-│   ├── middleware.ts   # authMiddleware + adminMiddleware (createMiddleware)
-│   ├── sessions.ts     # Session CRUD + Docker container lifecycle
-│   ├── templates.ts    # Template CRUD
-│   ├── settings.ts     # Agent configs, Docker config, user management
-│   └── files.ts        # File explorer via Docker exec
-server/
-└── routes/
-    ├── api/terminal/[sessionId].ts      # WebSocket terminal (binary protocol, multi-peer)
-    └── .well-known/agent-skills/        # Skills API for `npx skills add`
-agent/                 # Everything injected into coding agent containers
-├── dockerfiles/       # Per-agent preset Dockerfiles (claude-code, gemini, codex)
-├── entrypoint.sh      # Container entrypoint (git clone, skills install, agent start)
-└── skills/blackhouse/ # SKILL.md served via .well-known/agent-skills/ endpoint
-scripts/
-└── seed.ts            # DB seed (admin user + agent presets)
+│   ├── dashboard.tsx
+│   ├── session.tsx
+│   └── settings/, templates/
+├── layouts/           # Route layouts (auth guard, tabbed nav)
+├── components/        # UI components
+│   ├── ui/            # shadcn/ui — DO NOT modify
+│   ├── terminal.tsx, file-explorer.tsx, file-viewer.tsx, etc.
+├── hooks/             # useTheme, useIsMobile
+└── lib/               # api.ts (fetch wrapper), utils, time, auth-client
+agent/                 # Injected into coding agent containers
+├── dockerfiles/       # Per-agent Dockerfiles
+├── entrypoint.sh      # Container entrypoint
+└── skills/blackhouse/ # SKILL.md served via .well-known
+scripts/seed.ts        # DB seed
 ```
 
 ## Pre-Commit Requirements
@@ -74,25 +65,28 @@ If formatting fails, run `npm run format` to auto-fix, then re-stage.
 ## Commands
 
 ```bash
-npm run dev          # Start dev server (port 3000)
-npm run build        # Production build
-npm test             # Run unit tests (vitest)
-npm run format       # Format code (prettier)
-npm run format:check # Check formatting
-npx playwright test  # Run e2e tests (requires dev server)
-npm run db:generate  # Generate migration from schema changes
-npm run db:push      # Push schema directly (dev only)
-npm run db:seed      # Seed default data (admin user + agent presets)
-npm run db:studio    # Open Drizzle Studio
+npm run dev            # Start Vite (5173) + Hono (3000) concurrently
+npm run dev:client     # Vite dev server only
+npm run dev:server     # Hono server only (tsx watch)
+npm run build          # Build client + server
+npm run start          # Run production server
+npm test               # Run unit tests (vitest)
+npm run format         # Format code (prettier)
+npm run format:check   # Check formatting
+npx playwright test    # Run e2e tests
+npm run db:generate    # Generate migration from schema changes
+npm run db:push        # Push schema directly (dev only)
+npm run db:seed        # Seed default data
+npm run db:studio      # Open Drizzle Studio
 ```
 
 ## Database Migrations
 
-Migrations run automatically on server startup via a Nitro plugin (`server/plugins/migrate.ts`).
+Migrations run automatically on Hono server startup (`server/index.ts`).
 
 **Workflow for schema changes:**
 
-1. Edit `src/db/schema.ts`
+1. Edit `server/db/schema.ts`
 2. Run `npm run db:generate` to create a migration SQL file in `drizzle/`
 3. Commit the migration file — it's versioned and auditable
 4. On deploy, the server auto-runs pending migrations before accepting requests
@@ -114,19 +108,16 @@ For Docker Compose, set `BLACKHOUSE_CONTAINER_URL` to the app's service name (e.
 
 ## Development Guidelines
 
-- Use shadcn/ui components exclusively — never create custom UI primitives
-- Use `@/` path alias for all imports (maps to `src/`)
-- Server functions use `createServerFn` with `.middleware([authMiddleware])` and `.inputValidator(zodSchema)`
-- Auth middleware is in `src/server/middleware.ts` — use `authMiddleware` or `adminMiddleware`
-- Each server function handler receives `{ data, context }` where `context.session` comes from middleware
-- Forms use `useForm` from `@tanstack/react-form` with `Field`/`FieldLabel`/`FieldError` from shadcn
-- Use types from `src/db/schema.ts` (`CodingSession`, `Template`, `AgentConfig`, `User`)
-- Agent presets are in `src/lib/agent-presets.ts` (Claude Code, Gemini, Codex, Custom)
-- `timeAgo()` is in `src/lib/time.ts` (NOT in utils.ts — shadcn init overwrites utils.ts)
-- CSS variables for theming are in `src/index.css`
+- **Server**: Hono routes in `server/api/`. Use `authMiddleware` or `adminMiddleware` from `server/middleware/auth.ts`
+- **Client**: React pages in `src/pages/`. Use `api.get/post/put/delete` from `src/lib/api.ts` for server calls
+- **Forms**: Native `<form onSubmit>` + `useState` for state + `z.safeParse()` for validation. No form libraries.
+- **Routing**: React Router v7 — `Link`, `useNavigate`, `useParams`, `useLocation` from `react-router`
+- **UI**: shadcn/ui components exclusively — never create custom UI primitives
+- **Imports**: `@/` alias maps to `src/` (client only). Server uses relative imports.
+- **Types**: `server/db/schema.ts` exports `CodingSession`, `Template`, `AgentConfig`, `User`
 - All pages must be responsive
-- Dangerous actions (stop, destroy, delete) must have confirmation dialogs
-- **Base-UI Select requires `items` prop** — `<Select items={[{label, value}]}>` is mandatory for `<SelectValue>` to display the label instead of the raw value. This is NOT Radix — base-ui has a different API. Always read the base-ui variant docs at https://ui.shadcn.com/docs/components/base/select
+- Dangerous actions (stop, destroy, delete) must have confirmation
+- **Base-UI Select requires `items` prop** — NOT Radix. Read docs at https://ui.shadcn.com/docs/components/base/select
 
 ## Terminal WebSocket Protocol
 

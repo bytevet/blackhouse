@@ -105,18 +105,24 @@ export function FileViewer({ sessionId, filePath, status }: FileViewerProps) {
       diffRef.current = null;
 
       try {
-        const { readFile, getFileDiff } = await import("@/server/files");
+        const { api } = await import("@/lib/api");
 
         const [fileContent, fileDiff] = await Promise.all([
-          readFile({ data: { sessionId, path: filePath } }),
-          getFileDiff({ data: { sessionId, path: filePath } }).catch(() => null),
+          api.get<string>(
+            `/files/read?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(filePath)}`,
+          ),
+          api
+            .get<string>(
+              `/files/diff?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(filePath)}`,
+            )
+            .catch(() => null),
         ]);
 
         if (!cancelled) {
-          contentRef.current = fileContent as string;
-          diffRef.current = fileDiff as string | null;
-          setContent(fileContent as string);
-          setDiff(fileDiff as string | null);
+          contentRef.current = fileContent;
+          diffRef.current = fileDiff;
+          setContent(fileContent);
+          setDiff(fileDiff);
           setShowDiff(!!fileDiff);
         }
       } catch {
@@ -142,14 +148,20 @@ export function FileViewer({ sessionId, filePath, status }: FileViewerProps) {
 
     const poll = async () => {
       try {
-        const { readFile, getFileDiff } = await import("@/server/files");
+        const { api } = await import("@/lib/api");
         const [newContent, newDiff] = await Promise.all([
-          readFile({ data: { sessionId, path: filePath } }),
-          getFileDiff({ data: { sessionId, path: filePath } }).catch(() => null),
+          api.get<string>(
+            `/files/read?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(filePath)}`,
+          ),
+          api
+            .get<string>(
+              `/files/diff?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(filePath)}`,
+            )
+            .catch(() => null),
         ]);
 
-        const nc = newContent as string;
-        const nd = newDiff as string | null;
+        const nc = newContent;
+        const nd = newDiff;
 
         if (nc !== contentRef.current) {
           contentRef.current = nc;

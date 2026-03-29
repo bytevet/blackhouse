@@ -1,6 +1,6 @@
 import Docker from "dockerode";
-import { db } from "@/db";
-import * as schema from "@/db/schema";
+import { db } from "../db/index.js";
+import * as schema from "../db/schema.js";
 
 let dockerInstance: Docker | null = null;
 

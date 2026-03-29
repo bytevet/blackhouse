@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
-import { Outlet, useLocation, useNavigate } from "@tanstack/react-router";
+import { Outlet, useLocation, useNavigate } from "react-router";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export interface TabItem {
@@ -25,7 +25,7 @@ export function TabbedLayout({ title, tabs, actions }: TabbedLayoutProps) {
     <div className="flex flex-1 flex-col overflow-auto p-4 md:p-6">
       <div className="flex items-center gap-4">
         <h1 className="text-lg font-semibold text-foreground">{title}</h1>
-        <Tabs value={activeTab} onValueChange={(val) => navigate({ to: val })}>
+        <Tabs value={activeTab} onValueChange={(val) => navigate(val)}>
           <TabsList variant="line">
             {tabs.map((tab) => (
               <TabsTrigger key={tab.to} value={tab.to}>

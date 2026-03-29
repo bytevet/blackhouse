@@ -1,9 +1,13 @@
-import type { ErrorComponentProps } from "@tanstack/react-router";
-import { useRouter } from "@tanstack/react-router";
+import { useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
 
-export function DefaultErrorComponent({ error, reset }: ErrorComponentProps) {
-  const router = useRouter();
+interface DefaultErrorComponentProps {
+  error: unknown;
+  reset?: () => void;
+}
+
+export function DefaultErrorComponent({ error, reset }: DefaultErrorComponentProps) {
+  const navigate = useNavigate();
 
   return (
     <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 p-8">
@@ -12,17 +16,12 @@ export function DefaultErrorComponent({ error, reset }: ErrorComponentProps) {
         {error instanceof Error ? error.message : "An unexpected error occurred."}
       </p>
       <div className="flex gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            reset();
-            router.invalidate();
-          }}
-        >
-          Try again
-        </Button>
-        <Button size="sm" onClick={() => router.navigate({ to: "/" })}>
+        {reset && (
+          <Button variant="outline" size="sm" onClick={reset}>
+            Try again
+          </Button>
+        )}
+        <Button size="sm" onClick={() => navigate("/")}>
           Go home
         </Button>
       </div>

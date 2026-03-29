@@ -1,4 +1,4 @@
-import { Link, useLocation } from "@tanstack/react-router";
+import { Link, useLocation } from "react-router";
 import { useState } from "react";
 import { LayoutDashboard, FileText, Settings, LogOut, Sun, Moon, Menu, X } from "lucide-react";
 import {
@@ -14,9 +14,9 @@ import { useTheme } from "@/hooks/use-theme";
 import { cn } from "@/lib/utils";
 
 const navItems = [
-  { title: "Dashboard", to: "/dashboard" as const, icon: LayoutDashboard },
-  { title: "Templates", to: "/templates" as const, icon: FileText },
-  { title: "Settings", to: "/settings" as const, icon: Settings },
+  { title: "Dashboard", to: "/dashboard", icon: LayoutDashboard },
+  { title: "Templates", to: "/templates", icon: FileText },
+  { title: "Settings", to: "/settings", icon: Settings },
 ];
 
 export function AppHeader() {

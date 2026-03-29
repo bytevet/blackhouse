@@ -46,9 +46,11 @@ export function FileExplorer({
   const loadDirectory = useCallback(
     async (path: string) => {
       try {
-        const { listFiles } = await import("@/server/files");
-        const files = await listFiles({ data: { sessionId, path } });
-        return files as FileNode[];
+        const { api } = await import("@/lib/api");
+        const files = await api.get<FileNode[]>(
+          `/files?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}`,
+        );
+        return files;
       } catch {
         setError("Failed to load files");
         return [];
