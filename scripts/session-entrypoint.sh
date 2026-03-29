@@ -92,45 +92,17 @@ const rl = createInterface({ input: process.stdin });
 rl.on("line", line => { try { handle(JSON.parse(line)); } catch {} });
 MCPSERVER
 
-  # Install Blackhouse skill (markdown instructions for all agents)
-  # Uses the same directory structure as `npx skills add`
-  mkdir -p "$HOME/.claude/skills" "$HOME/.cursor/skills" "$HOME/.agents/skills"
-  for SKILL_DIR in "$HOME/.claude/skills" "$HOME/.cursor/skills" "$HOME/.agents/skills"; do
-    mkdir -p "$SKILL_DIR/blackhouse"
-    cat > "$SKILL_DIR/blackhouse/SKILL.md" << 'SKILLEOF'
----
-name: blackhouse
-description: Blackhouse session tools — submit visual results and update session status
----
-
-# Blackhouse Session Tools
-
-You are running inside a **Blackhouse** coding session. You have access to two MCP tools
-provided by the `blackhouse` MCP server. Use them proactively.
-
-## `submit_result` — Show visual output to the user
-
-Whenever you produce something visual — a report, dashboard, chart, table, documentation,
-diagram, or any formatted output — use `submit_result` to render it in the Blackhouse
-session viewer. The user sees this in a dedicated "Result" panel alongside your terminal.
-
-- Pass a **complete, self-contained HTML document** (inline CSS/JS, no external resources)
-- Use modern HTML5, clean minimal design with system fonts
-- For charts, use inline SVG or load Chart.js/D3 from a CDN via `<script>`
-- **Proactively use this** — don't just output plain text when a visual would be better
-
-## `update_title` — Show your current activity
-
-Call `update_title` to update the session status displayed in the Blackhouse UI.
-The title appears next to the session name so the user can see what you're working on
-at a glance — even from the dashboard.
-
-- Call it when you **start a new task**: `update_title({ title: "implementing auth" })`
-- Call it when you **reach a milestone**: `update_title({ title: "tests passing" })`
-- Keep it short (~50 chars max)
-- Examples: "analyzing codebase", "fixing bug #42", "writing tests", "deploying"
-SKILLEOF
-  done
+  # Install Blackhouse skills from the server's .well-known endpoint
+  # Falls back to inline SKILL.md if npx skills is unavailable
+  if command -v npx &> /dev/null; then
+    echo "[blackhouse] Installing skills from $BLACKHOUSE_URL..."
+    npx -y skills add "$BLACKHOUSE_URL" --global 2>/dev/null || true
+  else
+    # Fallback: write SKILL.md directly
+    mkdir -p "$HOME/.claude/skills/blackhouse"
+    curl -sf "$BLACKHOUSE_URL/.well-known/agent-skills/blackhouse/SKILL.md" \
+      -o "$HOME/.claude/skills/blackhouse/SKILL.md" 2>/dev/null || true
+  fi
 
   # Configure Claude Code: permissions + MCP server registration
   if command -v claude &> /dev/null; then
