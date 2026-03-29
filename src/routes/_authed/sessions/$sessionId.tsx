@@ -139,6 +139,9 @@ function SessionViewPage() {
       {/* Meta section */}
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2 md:gap-3 md:px-4">
         <h1 className="text-sm font-semibold text-foreground">{session.name}</h1>
+        {session.agentTitle && (
+          <span className="text-xs text-muted-foreground">— {session.agentTitle}</span>
+        )}
         <Badge variant="outline" className="text-[10px]">
           {session.preset}
         </Badge>

@@ -94,6 +94,7 @@ export const codingSessions = pgTable("coding_sessions", {
   containerId: text("container_id"),
   containerImage: text("container_image").notNull(),
   resultHtml: text("result_html"),
+  agentTitle: text("agent_title"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

@@ -435,13 +435,20 @@ function DashboardPage() {
               <Card key={s.id} size="sm">
                 <CardHeader>
                   <CardTitle className="flex items-center justify-between gap-2">
-                    <Link
-                      to="/sessions/$sessionId"
-                      params={{ sessionId: s.id }}
-                      className="truncate hover:underline"
-                    >
-                      {s.name}
-                    </Link>
+                    <span className="flex min-w-0 items-baseline gap-1">
+                      <Link
+                        to="/sessions/$sessionId"
+                        params={{ sessionId: s.id }}
+                        className="truncate hover:underline"
+                      >
+                        {s.name}
+                      </Link>
+                      {s.agentTitle && (
+                        <span className="truncate text-[10px] font-normal text-muted-foreground">
+                          — {s.agentTitle}
+                        </span>
+                      )}
+                    </span>
                     <Badge variant="outline" className={config.className}>
                       {config.label}
                     </Badge>

@@ -71,6 +71,27 @@ function handleRequest(req: JsonRpcRequest) {
                 required: ["html"],
               },
             },
+            {
+              name: "update_title",
+              description:
+                "Update the session title to show what you are currently working on. " +
+                "The title is displayed next to the session name in the Blackhouse UI. " +
+                "Use this to keep the user informed of your progress — e.g. " +
+                "'implementing auth', 'running tests', 'debugging issue #42'. " +
+                "Call this whenever you start a new task or reach a milestone.",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  title: {
+                    type: "string",
+                    description:
+                      "Short status text describing current activity (max ~50 chars). " +
+                      "Examples: 'implementing auth module', 'fixing test failures', 'refactoring API'",
+                  },
+                },
+                required: ["title"],
+              },
+            },
           ],
         },
       });
@@ -81,31 +102,51 @@ function handleRequest(req: JsonRpcRequest) {
       const args = (req.params as { arguments: Record<string, string> })?.arguments;
 
       if (toolName === "submit_result" && args?.html) {
-        submitResult(args.html)
-          .then(() => {
+        callApi("/api/sessions/result", {
+          sessionId: SESSION_ID,
+          html: args.html,
+          token: CONTAINER_TOKEN,
+        })
+          .then(() =>
+            send({
+              jsonrpc: "2.0",
+              id: req.id,
+              result: { content: [{ type: "text", text: "Result submitted successfully." }] },
+            }),
+          )
+          .catch((err: Error) =>
             send({
               jsonrpc: "2.0",
               id: req.id,
               result: {
-                content: [{ type: "text", text: "Result submitted successfully." }],
-              },
-            });
-          })
-          .catch((err: Error) => {
-            send({
-              jsonrpc: "2.0",
-              id: req.id,
-              result: {
-                content: [
-                  {
-                    type: "text",
-                    text: `Failed to submit result: ${err.message}`,
-                  },
-                ],
+                content: [{ type: "text", text: `Failed to submit result: ${err.message}` }],
                 isError: true,
               },
-            });
-          });
+            }),
+          );
+      } else if (toolName === "update_title" && args?.title) {
+        callApi("/api/sessions/title", {
+          sessionId: SESSION_ID,
+          title: args.title,
+          token: CONTAINER_TOKEN,
+        })
+          .then(() =>
+            send({
+              jsonrpc: "2.0",
+              id: req.id,
+              result: { content: [{ type: "text", text: `Title updated to: ${args.title}` }] },
+            }),
+          )
+          .catch((err: Error) =>
+            send({
+              jsonrpc: "2.0",
+              id: req.id,
+              result: {
+                content: [{ type: "text", text: `Failed to update title: ${err.message}` }],
+                isError: true,
+              },
+            }),
+          );
       } else {
         send({
           jsonrpc: "2.0",
@@ -129,15 +170,11 @@ function handleRequest(req: JsonRpcRequest) {
   }
 }
 
-async function submitResult(html: string) {
-  const response = await fetch(`${BLACKHOUSE_URL}/api/sessions/result`, {
+async function callApi(path: string, body: Record<string, string>) {
+  const response = await fetch(`${BLACKHOUSE_URL}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      sessionId: SESSION_ID,
-      html,
-      token: CONTAINER_TOKEN,
-    }),
+    body: JSON.stringify(body),
   });
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}: ${await response.text()}`);

@@ -22,21 +22,77 @@ if [ -n "$GIT_REPO_URL" ]; then
   cd "$REPO_DIR"
 fi
 
-# 2) Install Blackhouse skill for result submission (works across all agents)
+# 2) Install Blackhouse MCP server (provides submit_result + update_title tools)
 if [ -n "$SESSION_ID" ] && [ -n "$BLACKHOUSE_URL" ]; then
-  # Create skill config that any agent can discover
-  mkdir -p "$HOME/.skills"
-  cat > "$HOME/.skills/blackhouse-result.json" << EOF
-{
-  "name": "blackhouse-result",
-  "description": "Display rich HTML content to the user in the Blackhouse session viewer. Use this to show dashboards, charts, reports, tables, previews, or any formatted output. Proactively use this for visual results instead of plain text.",
-  "endpoint": "${BLACKHOUSE_URL}/api/sessions/result",
-  "session_id": "${SESSION_ID}",
-  "container_token": "${CONTAINER_TOKEN}"
-}
-EOF
+  mkdir -p /opt/blackhouse
+  cat > /opt/blackhouse/mcp-server.mjs << 'MCPSERVER'
+import { createInterface } from "node:readline";
 
-  # Also configure Claude Code MCP if this is a Claude session
+const BLACKHOUSE_URL = process.env.BLACKHOUSE_URL ?? "http://host.docker.internal:3000";
+const SESSION_ID = process.env.SESSION_ID ?? "";
+const CONTAINER_TOKEN = process.env.CONTAINER_TOKEN ?? "";
+
+function send(r) { process.stdout.write(JSON.stringify(r) + "\n"); }
+
+async function callApi(path, body) {
+  const res = await fetch(`${BLACKHOUSE_URL}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+}
+
+function handle(req) {
+  switch (req.method) {
+    case "initialize":
+      send({ jsonrpc: "2.0", id: req.id, result: {
+        protocolVersion: "2024-11-05",
+        capabilities: { tools: {} },
+        serverInfo: { name: "blackhouse", version: "1.0.0" },
+      }});
+      break;
+    case "tools/list":
+      send({ jsonrpc: "2.0", id: req.id, result: { tools: [
+        {
+          name: "submit_result",
+          description: "Display rich HTML content to the user in the Blackhouse session viewer. Use this to show dashboards, charts, reports, tables, previews, or any formatted output. The HTML is rendered in a sandboxed iframe. Proactively use this for visual results.",
+          inputSchema: { type: "object", properties: { html: { type: "string", description: "A complete, self-contained HTML document with inline CSS/JS." } }, required: ["html"] },
+        },
+        {
+          name: "update_title",
+          description: "Update the session title to show what you are currently working on. Displayed next to the session name in the UI. Call this when you start a new task or reach a milestone.",
+          inputSchema: { type: "object", properties: { title: { type: "string", description: "Short status text (~50 chars max), e.g. 'implementing auth', 'running tests'" } }, required: ["title"] },
+        },
+      ]}});
+      break;
+    case "tools/call": {
+      const name = req.params?.name;
+      const args = req.params?.arguments ?? {};
+      if (name === "submit_result" && args.html) {
+        callApi("/api/sessions/result", { sessionId: SESSION_ID, html: args.html, token: CONTAINER_TOKEN })
+          .then(() => send({ jsonrpc: "2.0", id: req.id, result: { content: [{ type: "text", text: "Result submitted." }] } }))
+          .catch(e => send({ jsonrpc: "2.0", id: req.id, result: { content: [{ type: "text", text: `Failed: ${e.message}` }], isError: true } }));
+      } else if (name === "update_title" && args.title) {
+        callApi("/api/sessions/title", { sessionId: SESSION_ID, title: args.title, token: CONTAINER_TOKEN })
+          .then(() => send({ jsonrpc: "2.0", id: req.id, result: { content: [{ type: "text", text: `Title updated: ${args.title}` }] } }))
+          .catch(e => send({ jsonrpc: "2.0", id: req.id, result: { content: [{ type: "text", text: `Failed: ${e.message}` }], isError: true } }));
+      } else {
+        send({ jsonrpc: "2.0", id: req.id, error: { code: -32601, message: `Unknown tool: ${name}` } });
+      }
+      break;
+    }
+    case "notifications/initialized": break;
+    default:
+      send({ jsonrpc: "2.0", id: req.id, error: { code: -32601, message: `Method not found: ${req.method}` } });
+  }
+}
+
+const rl = createInterface({ input: process.stdin });
+rl.on("line", line => { try { handle(JSON.parse(line)); } catch {} });
+MCPSERVER
+
+  # Configure Claude Code: permissions + MCP server registration
   if command -v claude &> /dev/null; then
     mkdir -p "$HOME/.claude"
     cat > "$HOME/.claude/settings.json" << MCPEOF
@@ -71,6 +127,12 @@ EOF
       "Bash(unzip:*)",
       "Bash(wget:*)"
     ]
+  },
+  "mcpServers": {
+    "blackhouse": {
+      "command": "node",
+      "args": ["/opt/blackhouse/mcp-server.mjs"]
+    }
   }
 }
 MCPEOF
