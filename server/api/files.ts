@@ -8,11 +8,6 @@ import { getDockerClient } from "../lib/docker.js";
 import type { AuthEnv } from "../middleware/auth.js";
 import { authMiddleware } from "../middleware/auth.js";
 
-const app = new Hono<AuthEnv>();
-
-// All routes require auth
-app.use("*", authMiddleware);
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -122,138 +117,136 @@ const pathParam = z.object({
 });
 
 // ---------------------------------------------------------------------------
-// GET /api/files/list — list files in directory
+// Routes
 // ---------------------------------------------------------------------------
 
-app.get("/list", zValidator("query", pathParam), async (c) => {
-  const { sessionId, path: dirPath } = c.req.valid("query");
-  const session = c.get("session");
+const app = new Hono<AuthEnv>()
+  // GET /api/files/list — list files in directory
+  .get("/list", authMiddleware, zValidator("query", pathParam), async (c) => {
+    const { sessionId, path: dirPath } = c.req.valid("query");
+    const session = c.get("session");
 
-  const codingSession = await requireSessionOwnership(sessionId, session);
-  const output = await execInContainer(codingSession.containerId, [
-    "ls",
-    "-la",
-    "--group-directories-first",
-    dirPath,
-  ]);
+    const codingSession = await requireSessionOwnership(sessionId, session);
+    const output = await execInContainer(codingSession.containerId, [
+      "ls",
+      "-la",
+      "--group-directories-first",
+      dirPath,
+    ]);
 
-  const lines = output.trim().split("\n").slice(1); // skip "total" line
-  const files = [];
+    const lines = output.trim().split("\n").slice(1); // skip "total" line
+    const files = [];
 
-  // Get git status
-  let gitStatusMap: Record<string, string> = {};
-  try {
-    const gitRoot = (
-      await execInContainer(
+    // Get git status
+    let gitStatusMap: Record<string, string> = {};
+    try {
+      const gitRoot = (
+        await execInContainer(
+          codingSession.containerId,
+          ["git", "-C", dirPath, "rev-parse", "--show-toplevel"],
+          { stdoutOnly: true },
+        )
+      ).trim();
+      const gitOutput = await execInContainer(
         codingSession.containerId,
-        ["git", "-C", dirPath, "rev-parse", "--show-toplevel"],
+        ["git", "-C", gitRoot, "status", "--porcelain"],
         { stdoutOnly: true },
-      )
-    ).trim();
-    const gitOutput = await execInContainer(
-      codingSession.containerId,
-      ["git", "-C", gitRoot, "status", "--porcelain"],
-      { stdoutOnly: true },
-    );
-    gitStatusMap = parseGitPorcelain(gitOutput, gitRoot, dirPath);
-  } catch {
-    // not a git repo
-  }
-
-  for (const line of lines) {
-    const parts = line.split(/\s+/);
-    if (parts.length < 9) continue;
-    const name = parts.slice(8).join(" ");
-    if (name === "." || name === "..") continue;
-
-    const isDirectory = line.startsWith("d");
-    const absPath = dirPath.endsWith("/") ? `${dirPath}${name}` : `${dirPath}/${name}`;
-
-    const status = gitStatusMap[absPath] || gitStatusMap[name];
-    let gitStatus: string | undefined;
-    if (status) {
-      if (status === "??" || status === "A") gitStatus = "U";
-      else if (status === "D") gitStatus = "D";
-      else gitStatus = "M";
+      );
+      gitStatusMap = parseGitPorcelain(gitOutput, gitRoot, dirPath);
+    } catch {
+      // not a git repo
     }
 
-    files.push({
-      name,
-      path: absPath,
-      isDirectory,
-      gitStatus,
-    });
-  }
+    for (const line of lines) {
+      const parts = line.split(/\s+/);
+      if (parts.length < 9) continue;
+      const name = parts.slice(8).join(" ");
+      if (name === "." || name === "..") continue;
 
-  return c.json(files);
-});
+      const isDirectory = line.startsWith("d");
+      const absPath = dirPath.endsWith("/") ? `${dirPath}${name}` : `${dirPath}/${name}`;
 
-// ---------------------------------------------------------------------------
-// GET /api/files/read — read file content
-// ---------------------------------------------------------------------------
+      const status = gitStatusMap[absPath] || gitStatusMap[name];
+      let gitStatus: string | undefined;
+      if (status) {
+        if (status === "??" || status === "A") gitStatus = "U";
+        else if (status === "D") gitStatus = "D";
+        else gitStatus = "M";
+      }
 
-app.get("/read", zValidator("query", pathParam), async (c) => {
-  const { sessionId, path: filePath } = c.req.valid("query");
-  const session = c.get("session");
+      files.push({
+        name,
+        path: absPath,
+        isDirectory,
+        gitStatus,
+      });
+    }
 
-  const codingSession = await requireSessionOwnership(sessionId, session);
-  const content = await execInContainer(codingSession.containerId, ["cat", filePath]);
-  return c.text(content);
-});
+    return c.json(files);
+  })
 
-// ---------------------------------------------------------------------------
-// GET /api/files/git-status — git diff stat
-// ---------------------------------------------------------------------------
+  // GET /api/files/read — read file content
+  .get("/read", authMiddleware, zValidator("query", pathParam), async (c) => {
+    const { sessionId, path: filePath } = c.req.valid("query");
+    const session = c.get("session");
 
-app.get("/git-status", zValidator("query", z.object({ sessionId: z.string() })), async (c) => {
-  const { sessionId } = c.req.valid("query");
-  const session = c.get("session");
+    const codingSession = await requireSessionOwnership(sessionId, session);
+    const content = await execInContainer(codingSession.containerId, ["cat", filePath]);
+    return c.text(content);
+  })
 
-  const codingSession = await requireSessionOwnership(sessionId, session);
-  const output = await execInContainer(
-    codingSession.containerId,
-    ["git", "-C", "/workspace", "diff", "--stat"],
-    { stdoutOnly: true },
-  );
-  return c.text(output);
-});
+  // GET /api/files/git-status — git diff stat
+  .get(
+    "/git-status",
+    authMiddleware,
+    zValidator("query", z.object({ sessionId: z.string() })),
+    async (c) => {
+      const { sessionId } = c.req.valid("query");
+      const session = c.get("session");
 
-// ---------------------------------------------------------------------------
-// GET /api/files/diff — file diff
-// ---------------------------------------------------------------------------
-
-app.get("/diff", zValidator("query", pathParam), async (c) => {
-  const { sessionId, path: filePath } = c.req.valid("query");
-  const session = c.get("session");
-
-  const codingSession = await requireSessionOwnership(sessionId, session);
-
-  let gitRoot: string;
-  try {
-    gitRoot = (
-      await execInContainer(
+      const codingSession = await requireSessionOwnership(sessionId, session);
+      const output = await execInContainer(
         codingSession.containerId,
-        [
-          "git",
-          "-C",
-          filePath.substring(0, filePath.lastIndexOf("/")),
-          "rev-parse",
-          "--show-toplevel",
-        ],
+        ["git", "-C", "/workspace", "diff", "--stat"],
         { stdoutOnly: true },
-      )
-    ).trim();
-  } catch {
-    return c.json(null); // not a git repo
-  }
+      );
+      return c.text(output);
+    },
+  )
 
-  const output = await execInContainer(
-    codingSession.containerId,
-    ["git", "-C", gitRoot, "diff", "--", filePath],
-    { stdoutOnly: true },
-  );
+  // GET /api/files/diff — file diff
+  .get("/diff", authMiddleware, zValidator("query", pathParam), async (c) => {
+    const { sessionId, path: filePath } = c.req.valid("query");
+    const session = c.get("session");
 
-  return c.json(output || null);
-});
+    const codingSession = await requireSessionOwnership(sessionId, session);
+
+    let gitRoot: string;
+    try {
+      gitRoot = (
+        await execInContainer(
+          codingSession.containerId,
+          [
+            "git",
+            "-C",
+            filePath.substring(0, filePath.lastIndexOf("/")),
+            "rev-parse",
+            "--show-toplevel",
+          ],
+          { stdoutOnly: true },
+        )
+      ).trim();
+    } catch {
+      return c.json(null); // not a git repo
+    }
+
+    const output = await execInContainer(
+      codingSession.containerId,
+      ["git", "-C", gitRoot, "diff", "--", filePath],
+      { stdoutOnly: true },
+    );
+
+    return c.json(output || null);
+  });
 
 export default app;

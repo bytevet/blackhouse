@@ -9,7 +9,8 @@
     "noEmit": true,
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@server/*": ["./server/*"]
     },
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",

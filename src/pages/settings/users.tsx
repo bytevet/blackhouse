@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { z } from "zod";
 import { useSession } from "@/lib/auth-client";
-import { api } from "@/lib/api";
+import { client, unwrap } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -74,15 +74,16 @@ export function UsersPage() {
       navigate("/settings/profile", { replace: true });
       return;
     }
-    api
-      .get<UserRow[]>("/settings/users")
+    client.api.settings.users
+      .$get()
+      .then((r) => unwrap<UserRow[]>(r))
       .then(setUsers)
       .finally(() => setLoading(false));
   }, [isAdmin, session, navigate]);
 
   const refresh = async () => {
-    const userList = await api.get<UserRow[]>("/settings/users");
-    setUsers(userList);
+    const res = await client.api.settings.users.$get();
+    setUsers(await unwrap<UserRow[]>(res));
   };
 
   const openCreate = () => {
@@ -104,12 +105,14 @@ export function UsersPage() {
     }
     setCreating(true);
     try {
-      await api.post("/settings/users", {
-        name: result.data.name.trim(),
-        email: result.data.email.trim(),
-        username: result.data.username.trim(),
-        password: result.data.password,
-        role: result.data.role,
+      await client.api.settings.users.$post({
+        json: {
+          name: result.data.name.trim(),
+          email: result.data.email.trim(),
+          username: result.data.username.trim(),
+          password: result.data.password,
+          role: result.data.role,
+        },
       });
       setDialogOpen(false);
       await refresh();
@@ -119,13 +122,16 @@ export function UsersPage() {
   };
 
   const handleRoleChange = async (userId: string, newRole: string) => {
-    await api.put(`/settings/users/${userId}/role`, { role: newRole });
+    await client.api.settings.users[":id"].role.$put({
+      param: { id: userId },
+      json: { role: newRole },
+    });
     await refresh();
   };
 
   const handleDelete = async () => {
     if (!deletingUser) return;
-    await api.delete(`/settings/users/${deletingUser.id}`);
+    await client.api.settings.users[":id"].$delete({ param: { id: deletingUser.id } });
     setDeleteDialogOpen(false);
     setDeletingUser(null);
     await refresh();

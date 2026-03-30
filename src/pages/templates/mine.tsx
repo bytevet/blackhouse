@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useSession } from "@/lib/auth-client";
-import { api } from "@/lib/api";
+import { client, unwrap } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -22,7 +22,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { Field, FieldLabel, FieldError, FieldGroup } from "@/components/ui/field";
+import { Field, FieldLabel, FieldGroup } from "@/components/ui/field";
 import { Plus, Edit, Trash2 } from "lucide-react";
 import { timeAgo } from "@/lib/time";
 import type { Template } from "@/db/schema";
@@ -47,15 +47,16 @@ export function MyTemplatesPage() {
   });
 
   useEffect(() => {
-    api
-      .get<Template[]>("/templates?mine=true")
+    client.api.templates
+      .$get({ query: { mine: "true" } })
+      .then((r) => unwrap<Template[]>(r))
       .then(setTemplates)
       .finally(() => setLoading(false));
   }, []);
 
   const refreshTemplates = async () => {
-    const mine = await api.get<Template[]>("/templates?mine=true");
-    setTemplates(mine);
+    const res = await client.api.templates.$get({ query: { mine: "true" } });
+    setTemplates(await unwrap<Template[]>(res));
   };
 
   const openCreate = () => {
@@ -91,22 +92,20 @@ export function MyTemplatesPage() {
     if (!formData.name.trim()) return;
     setSaving(true);
     try {
+      const body = {
+        name: formData.name.trim(),
+        description: formData.description.trim(),
+        systemPrompt: formData.systemPrompt.trim(),
+        isPublic: formData.isPublic,
+        gitRequired: formData.gitRequired,
+      };
       if (editingTemplate) {
-        await api.put(`/templates/${editingTemplate.id}`, {
-          name: formData.name.trim(),
-          description: formData.description.trim(),
-          systemPrompt: formData.systemPrompt.trim(),
-          isPublic: formData.isPublic,
-          gitRequired: formData.gitRequired,
+        await client.api.templates[":id"].$put({
+          param: { id: editingTemplate.id },
+          json: body,
         });
       } else {
-        await api.post("/templates", {
-          name: formData.name.trim(),
-          description: formData.description.trim(),
-          systemPrompt: formData.systemPrompt.trim(),
-          isPublic: formData.isPublic,
-          gitRequired: formData.gitRequired,
-        });
+        await client.api.templates.$post({ json: body });
       }
       setDialogOpen(false);
       await refreshTemplates();
@@ -117,7 +116,9 @@ export function MyTemplatesPage() {
 
   const handleDelete = async () => {
     if (!deletingTemplate) return;
-    await api.delete(`/templates/${deletingTemplate.id}`);
+    await client.api.templates[":id"].$delete({
+      param: { id: deletingTemplate.id },
+    });
     setDeleteDialogOpen(false);
     setDeletingTemplate(null);
     await refreshTemplates();

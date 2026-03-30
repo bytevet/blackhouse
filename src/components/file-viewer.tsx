@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { FileCode, GitCompareArrows } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { api } from "@/lib/api";
+import { client } from "@/lib/api";
 import { getHighlighter } from "@/lib/shiki";
 
 const EXT_LANG: Record<string, string> = {
@@ -69,13 +69,12 @@ export function FileViewer({ sessionId, filePath, status }: FileViewerProps) {
 
       try {
         const [fileContent, fileDiff] = await Promise.all([
-          api.get<string>(
-            `/files/read?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(filePath)}`,
-          ),
-          api
-            .get<string>(
-              `/files/diff?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(filePath)}`,
-            )
+          client.api.files.read
+            .$get({ query: { sessionId, path: filePath } })
+            .then((r) => r.text()),
+          client.api.files.diff
+            .$get({ query: { sessionId, path: filePath } })
+            .then((r) => r.json() as Promise<string | null>)
             .catch(() => null),
         ]);
 
@@ -110,13 +109,12 @@ export function FileViewer({ sessionId, filePath, status }: FileViewerProps) {
     const poll = async () => {
       try {
         const [newContent, newDiff] = await Promise.all([
-          api.get<string>(
-            `/files/read?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(filePath)}`,
-          ),
-          api
-            .get<string>(
-              `/files/diff?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(filePath)}`,
-            )
+          client.api.files.read
+            .$get({ query: { sessionId, path: filePath } })
+            .then((r) => r.text()),
+          client.api.files.diff
+            .$get({ query: { sessionId, path: filePath } })
+            .then((r) => r.json() as Promise<string | null>)
             .catch(() => null),
         ]);
 

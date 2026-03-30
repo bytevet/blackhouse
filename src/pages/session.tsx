@@ -12,7 +12,7 @@ import {
   Copy,
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { api } from "@/lib/api";
+import { client, unwrap } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
@@ -40,8 +40,9 @@ export function SessionPage() {
   useEffect(() => {
     if (!sessionId) return;
     setLoading(true);
-    api
-      .get<CodingSession>(`/sessions/${sessionId}`)
+    client.api.sessions[":id"]
+      .$get({ param: { id: sessionId } })
+      .then((r) => unwrap<CodingSession>(r))
       .then(setSession)
       .catch(() => setSession(null))
       .finally(() => setLoading(false));
@@ -88,7 +89,9 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
 
     const interval = setInterval(async () => {
       try {
-        const updated = await api.get<CodingSession>(`/sessions/${session.id}`);
+        const updated = await client.api.sessions[":id"]
+          .$get({ param: { id: session.id } })
+          .then((r) => unwrap<CodingSession>(r));
         if (updated) {
           const isNewResult =
             updated.resultHtml && (!session.resultHtml || updated.updatedAt > session.updatedAt);
@@ -111,9 +114,19 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
       if (!session) return;
       setActionLoading(true);
       try {
-        await api.post(`/sessions/${session.id}/${action}`);
-        const updated = await api.get<CodingSession>(`/sessions/${session.id}`);
-        if (updated) setSession(updated);
+        if (action === "destroy") {
+          await client.api.sessions[":id"].$delete({ param: { id: session.id } });
+        } else if (action === "stop") {
+          await client.api.sessions[":id"].stop.$put({ param: { id: session.id } });
+        } else {
+          await client.api.sessions[":id"].restart.$put({ param: { id: session.id } });
+        }
+        if (action !== "destroy") {
+          const updated = await client.api.sessions[":id"]
+            .$get({ param: { id: session.id } })
+            .then((r) => unwrap<CodingSession>(r));
+          if (updated) setSession(updated);
+        }
         if (action === "destroy") {
           navigate("/dashboard");
         }
@@ -130,20 +143,28 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
     if (!session) return;
     setActionLoading(true);
     try {
-      const params = await api.get<{
-        name: string;
-        agentConfigId: string | null;
-        gitRepoUrl: string | null;
-        gitBranch: string | null;
-        templateId: string | null;
-      }>(`/sessions/${session.id}/recreate-params`);
-      const newSession = await api.post<CodingSession>("/sessions", {
-        name: params.name,
-        agentConfigId: params.agentConfigId || undefined,
-        gitRepoUrl: params.gitRepoUrl || undefined,
-        gitBranch: params.gitBranch || undefined,
-        templateId: params.templateId || undefined,
-      });
+      const params = await client.api.sessions[":id"]["recreate-params"]
+        .$get({ param: { id: session.id } })
+        .then((r) =>
+          unwrap<{
+            name: string;
+            agentConfigId: string | null;
+            gitRepoUrl: string | null;
+            gitBranch: string | null;
+            templateId: string | null;
+          }>(r),
+        );
+      const newSession = await client.api.sessions
+        .$post({
+          json: {
+            name: params.name,
+            agentConfigId: params.agentConfigId || undefined,
+            gitRepoUrl: params.gitRepoUrl || undefined,
+            gitBranch: params.gitBranch || undefined,
+            templateId: params.templateId || undefined,
+          },
+        })
+        .then((r) => unwrap<CodingSession>(r));
       if (newSession?.id) {
         navigate(`/sessions/${newSession.id}`);
       }
@@ -319,8 +340,12 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
                     html={session.resultHtml}
                     updatedAt={session.updatedAt}
                     onDelete={async () => {
-                      await api.delete(`/sessions/${session.id}/result`);
-                      const updated = await api.get<CodingSession>(`/sessions/${session.id}`);
+                      await client.api.sessions[":id"].result.$delete({
+                        param: { id: session.id },
+                      });
+                      const updated = await client.api.sessions[":id"]
+                        .$get({ param: { id: session.id } })
+                        .then((r) => unwrap<CodingSession>(r));
                       if (updated) setSession(updated);
                     }}
                   />

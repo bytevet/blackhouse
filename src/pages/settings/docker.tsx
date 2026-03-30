@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
-import { z } from "zod";
 import { useSession } from "@/lib/auth-client";
-import { api } from "@/lib/api";
+import { client, unwrap } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -52,9 +51,13 @@ export function DockerPage() {
     const load = async () => {
       try {
         const [status, config, containerList] = await Promise.all([
-          api.get<{ connected: boolean; version?: string }>("/settings/docker/status"),
-          api.get<{ socketPath?: string; host?: string; port?: number }>("/settings/docker"),
-          api.get<ContainerInfo[]>("/settings/docker/containers"),
+          client.api.settings.docker.status
+            .$get()
+            .then((r) => unwrap<{ connected: boolean; version?: string }>(r)),
+          client.api.settings.docker
+            .$get()
+            .then((r) => unwrap<{ socketPath?: string; host?: string; port?: number }>(r)),
+          client.api.settings.containers.$get().then((r) => unwrap<ContainerInfo[]>(r)),
         ]);
         setDockerStatus(status);
         setContainers(containerList);
@@ -74,14 +77,16 @@ export function DockerPage() {
     e.preventDefault();
     setSaving(true);
     try {
-      await api.put("/settings/docker", {
-        socketPath: formData.socketPath.trim() || undefined,
-        host: formData.host.trim() || undefined,
-        port: formData.port ? parseInt(formData.port, 10) : undefined,
+      await client.api.settings.docker.$put({
+        json: {
+          socketPath: formData.socketPath.trim() || undefined,
+          host: formData.host.trim() || undefined,
+          port: formData.port ? parseInt(formData.port, 10) : undefined,
+        },
       });
-      const status = await api.get<{ connected: boolean; version?: string }>(
-        "/settings/docker/status",
-      );
+      const status = await client.api.settings.docker.status
+        .$get()
+        .then((r) => unwrap<{ connected: boolean; version?: string }>(r));
       setDockerStatus(status);
     } finally {
       setSaving(false);

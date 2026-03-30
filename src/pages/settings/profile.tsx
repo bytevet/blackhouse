@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { z } from "zod";
 import { useSession } from "@/lib/auth-client";
-import { api } from "@/lib/api";
+import { client } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -54,7 +54,7 @@ export function ProfilePage() {
     }
     setNameSaving(true);
     try {
-      await api.put("/settings/profile", { name: result.data.displayName });
+      await client.api.settings.profile.$put({ json: { name: result.data.displayName } });
     } finally {
       setNameSaving(false);
     }
@@ -74,9 +74,11 @@ export function ProfilePage() {
     }
     setPasswordSaving(true);
     try {
-      await api.put("/settings/profile", {
-        currentPassword: result.data.currentPassword,
-        newPassword: result.data.newPassword,
+      await client.api.settings.profile.$put({
+        json: {
+          currentPassword: result.data.currentPassword,
+          newPassword: result.data.newPassword,
+        },
       });
       setPasswordData({ currentPassword: "", newPassword: "", confirmPassword: "" });
     } finally {

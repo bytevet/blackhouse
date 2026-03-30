@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router";
 import { useSession } from "@/lib/auth-client";
-import { api } from "@/lib/api";
+import { client, unwrap } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -134,8 +134,9 @@ export function AgentsPage() {
       navigate("/settings/profile", { replace: true });
       return;
     }
-    api
-      .get<AgentConfig[]>("/settings/agent-configs")
+    client.api.settings["agent-configs"]
+      .$get()
+      .then((r) => unwrap<AgentConfig[]>(r))
       .then(setConfigs)
       .finally(() => setLoading(false));
   }, [isAdmin, session, navigate]);
@@ -151,11 +152,15 @@ export function AgentsPage() {
 
       for (const bc of buildingConfigs) {
         try {
-          const status = await api.get<{
-            imageBuildStatus: string;
-            imageBuildLog: string | null;
-            lastBuiltAt: string | null;
-          }>(`/settings/agent-configs/${bc.id}/build-status`);
+          const status = await client.api.settings["agent-configs"][":id"]["build-status"]
+            .$get({ param: { id: bc.id } })
+            .then((r) =>
+              unwrap<{
+                imageBuildStatus: string;
+                imageBuildLog: string | null;
+                lastBuiltAt: string | null;
+              }>(r),
+            );
           const idx = updatedConfigs.findIndex((c) => c.id === bc.id);
           if (idx !== -1) {
             updatedConfigs[idx] = {
@@ -178,8 +183,8 @@ export function AgentsPage() {
 
       setConfigs(updatedConfigs);
       if (hasChanges) {
-        const refreshed = await api.get<AgentConfig[]>("/settings/agent-configs");
-        setConfigs(refreshed);
+        const res = await client.api.settings["agent-configs"].$get();
+        setConfigs(await unwrap<AgentConfig[]>(res));
       }
     }, 3000);
 
@@ -187,8 +192,8 @@ export function AgentsPage() {
   }, [configs, buildLogAgentId]);
 
   const refresh = async () => {
-    const updated = await api.get<AgentConfig[]>("/settings/agent-configs");
-    setConfigs(updated);
+    const res = await client.api.settings["agent-configs"].$get();
+    setConfigs(await unwrap<AgentConfig[]>(res));
   };
 
   const handlePresetChange = async (value: string) => {
@@ -203,9 +208,10 @@ export function AgentsPage() {
       }));
       setVolumeMounts(p.volumeMounts.map((v) => ({ ...v })));
       try {
-        const content = await api.get<string>(
-          `/settings/agent-configs/default-dockerfile?preset=${value}`,
-        );
+        const res = await client.api.settings["default-dockerfile"].$get({
+          query: { preset: value },
+        });
+        const content = await res.text();
         setFormData((prev) => ({ ...prev, dockerfileContent: content }));
       } catch {
         /* ignore */
@@ -249,24 +255,21 @@ export function AgentsPage() {
     if (!formData.displayName.trim()) return;
     setSaving(true);
     try {
+      const body = {
+        preset: formData.preset,
+        displayName: formData.displayName.trim(),
+        agentCommand: formData.agentCommand.trim() || undefined,
+        envVars: envVars.filter((e) => e.key.trim()),
+        volumeMounts: volumeMounts.filter((v) => v.name.trim() && v.mountPath.trim()),
+        dockerfileContent: formData.dockerfileContent.trim() || null,
+      };
       if (editing) {
-        await api.put(`/settings/agent-configs/${editing.id}`, {
-          preset: formData.preset,
-          displayName: formData.displayName.trim(),
-          agentCommand: formData.agentCommand.trim() || undefined,
-          envVars: envVars.filter((e) => e.key.trim()),
-          volumeMounts: volumeMounts.filter((v) => v.name.trim() && v.mountPath.trim()),
-          dockerfileContent: formData.dockerfileContent.trim() || null,
+        await client.api.settings["agent-configs"][":id"].$put({
+          param: { id: editing.id },
+          json: body,
         });
       } else {
-        await api.post("/settings/agent-configs", {
-          preset: formData.preset,
-          displayName: formData.displayName.trim(),
-          agentCommand: formData.agentCommand.trim() || undefined,
-          envVars: envVars.filter((e) => e.key.trim()),
-          volumeMounts: volumeMounts.filter((v) => v.name.trim() && v.mountPath.trim()),
-          dockerfileContent: formData.dockerfileContent.trim() || null,
-        });
+        await client.api.settings["agent-configs"].$post({ json: body });
       }
       setDialogOpen(false);
       await refresh();
@@ -276,13 +279,13 @@ export function AgentsPage() {
   };
 
   const handleDelete = async (id: string) => {
-    await api.delete(`/settings/agent-configs/${id}`);
+    await client.api.settings["agent-configs"][":id"].$delete({ param: { id } });
     await refresh();
   };
 
   const handleBuild = async (agentConfigId: string) => {
     const config = configs.find((c) => c.id === agentConfigId);
-    await api.post(`/settings/agent-configs/${agentConfigId}/build`);
+    await client.api.settings["agent-configs"][":id"].build.$post({ param: { id: agentConfigId } });
     setConfigs((prev) =>
       prev.map((c) =>
         c.id === agentConfigId ? { ...c, imageBuildStatus: "building", imageBuildLog: null } : c,
@@ -296,9 +299,10 @@ export function AgentsPage() {
 
   const handleResetDockerfile = async () => {
     try {
-      const content = await api.get<string>(
-        `/settings/agent-configs/default-dockerfile?preset=${formData.preset}`,
-      );
+      const res = await client.api.settings["default-dockerfile"].$get({
+        query: { preset: formData.preset },
+      });
+      const content = await res.text();
       setFormData((prev) => ({ ...prev, dockerfileContent: content }));
     } catch {
       /* ignore */

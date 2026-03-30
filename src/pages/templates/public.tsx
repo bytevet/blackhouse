@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { api } from "@/lib/api";
+import { client, unwrap } from "@/lib/api";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { timeAgo } from "@/lib/time";
@@ -10,8 +10,9 @@ export function PublicTemplatesPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api
-      .get<Template[]>("/templates?mine=false")
+    client.api.templates
+      .$get({ query: { mine: "false" } })
+      .then((r) => unwrap<Template[]>(r))
       .then(setTemplates)
       .finally(() => setLoading(false));
   }, []);

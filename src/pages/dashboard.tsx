@@ -1,7 +1,7 @@
 import { Link, useNavigate } from "react-router";
 import { useState, useEffect } from "react";
 import { useSession } from "@/lib/auth-client";
-import { api } from "@/lib/api";
+import { client, unwrap } from "@/lib/api";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -60,10 +60,12 @@ export function DashboardPage() {
     const load = async () => {
       try {
         const [sessionsData, myTemplates, publicTemplates, configs] = await Promise.all([
-          api.get<CodingSession[]>("/sessions"),
-          api.get<Template[]>("/templates?mine=true"),
-          api.get<Template[]>("/templates?mine=false"),
-          api.get<AgentConfig[]>("/settings/agent-configs"),
+          client.api.sessions.$get().then((r) => unwrap<CodingSession[]>(r)),
+          client.api.templates.$get({ query: { mine: "true" } }).then((r) => unwrap<Template[]>(r)),
+          client.api.templates
+            .$get({ query: { mine: "false" } })
+            .then((r) => unwrap<Template[]>(r)),
+          client.api.settings["agent-configs"].$get().then((r) => unwrap<AgentConfig[]>(r)),
         ]);
         setSessions(sessionsData);
         setAgentConfigs(configs);
@@ -82,8 +84,8 @@ export function DashboardPage() {
   }, []);
 
   const refreshSessions = async () => {
-    const updated = await api.get<CodingSession[]>("/sessions");
-    setSessions(updated);
+    const res = await client.api.sessions.$get();
+    setSessions(await unwrap<CodingSession[]>(res));
   };
 
   const handleCreateSession = async (e: React.FormEvent) => {
@@ -93,13 +95,17 @@ export function DashboardPage() {
     if (selectedTemplate?.gitRequired && !formData.gitRepoUrl.trim()) return;
     setCreating(true);
     try {
-      const newSession = await api.post<CodingSession>("/sessions", {
-        name: formData.name.trim(),
-        agentConfigId: formData.agentConfigId,
-        gitRepoUrl: formData.gitRepoUrl.trim() || undefined,
-        gitBranch: formData.gitBranch.trim() || undefined,
-        templateId: formData.templateId || undefined,
-      });
+      const newSession = await client.api.sessions
+        .$post({
+          json: {
+            name: formData.name.trim(),
+            agentConfigId: formData.agentConfigId,
+            gitRepoUrl: formData.gitRepoUrl.trim() || undefined,
+            gitBranch: formData.gitBranch.trim() || undefined,
+            templateId: formData.templateId || undefined,
+          },
+        })
+        .then((r) => unwrap<CodingSession>(r));
       setDialogOpen(false);
       setFormData({
         name: "",
@@ -119,26 +125,40 @@ export function DashboardPage() {
   };
 
   const handleSessionAction = async (id: string, action: "stop" | "destroy" | "restart") => {
-    await api.post(`/sessions/${id}/${action}`);
+    if (action === "destroy") {
+      await client.api.sessions[":id"].$delete({ param: { id } });
+    } else if (action === "stop") {
+      await client.api.sessions[":id"].stop.$put({ param: { id } });
+    } else {
+      await client.api.sessions[":id"].restart.$put({ param: { id } });
+    }
     await refreshSessions();
   };
 
   const handleRecreate = async (sessionId: string) => {
     try {
-      const params = await api.get<{
-        name: string;
-        agentConfigId: string | null;
-        gitRepoUrl: string | null;
-        gitBranch: string | null;
-        templateId: string | null;
-      }>(`/sessions/${sessionId}/recreate-params`);
-      const newSession = await api.post<CodingSession>("/sessions", {
-        name: params.name,
-        agentConfigId: params.agentConfigId || undefined,
-        gitRepoUrl: params.gitRepoUrl || undefined,
-        gitBranch: params.gitBranch || undefined,
-        templateId: params.templateId || undefined,
-      });
+      const params = await client.api.sessions[":id"]["recreate-params"]
+        .$get({ param: { id: sessionId } })
+        .then((r) =>
+          unwrap<{
+            name: string;
+            agentConfigId: string | null;
+            gitRepoUrl: string | null;
+            gitBranch: string | null;
+            templateId: string | null;
+          }>(r),
+        );
+      const newSession = await client.api.sessions
+        .$post({
+          json: {
+            name: params.name,
+            agentConfigId: params.agentConfigId || undefined,
+            gitRepoUrl: params.gitRepoUrl || undefined,
+            gitBranch: params.gitBranch || undefined,
+            templateId: params.templateId || undefined,
+          },
+        })
+        .then((r) => unwrap<CodingSession>(r));
       if (newSession?.id) {
         navigate(`/sessions/${newSession.id}`);
       }

@@ -16,7 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { api } from "@/lib/api";
+import { client, unwrap } from "@/lib/api";
 
 interface FileNode {
   name: string;
@@ -55,9 +55,10 @@ export function FileExplorer({
   const loadDirectory = useCallback(
     async (path: string) => {
       try {
-        const files = await api.get<FileNode[]>(
-          `/files/list?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}`,
-        );
+        const res = await client.api.files.list.$get({
+          query: { sessionId, path },
+        });
+        const files = await unwrap<FileNode[]>(res);
         return files;
       } catch {
         setError("Failed to load files");

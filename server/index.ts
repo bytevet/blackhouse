@@ -29,14 +29,15 @@ app.use("/api/*", cors());
 // Health check
 app.get("/api/health", (c) => c.json({ status: "ok", timestamp: new Date().toISOString() }));
 
-// API routes
-app.route("/api/auth", authRoutes);
-app.route("/api/container", resultRoutes);
-app.route("/api/sessions", sessionsRoutes);
-app.route("/api/templates", templatesRoutes);
-app.route("/api/settings", settingsRoutes);
-app.route("/api/files", filesRoutes);
-app.route("/.well-known/agent-skills", skillsRoutes);
+// API routes (chained for RPC type inference)
+const routes = app
+  .route("/api/auth", authRoutes)
+  .route("/api/container", resultRoutes)
+  .route("/api/sessions", sessionsRoutes)
+  .route("/api/templates", templatesRoutes)
+  .route("/api/settings", settingsRoutes)
+  .route("/api/files", filesRoutes)
+  .route("/.well-known/agent-skills", skillsRoutes);
 
 // WebSocket terminal
 app.route("/api/terminal", createTerminalRoute(upgradeWebSocket));
@@ -62,3 +63,4 @@ async function start() {
 start();
 
 export default app;
+export type AppType = typeof routes;

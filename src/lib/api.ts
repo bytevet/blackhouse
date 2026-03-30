@@ -1,6 +1,12 @@
-const BASE = "/api";
+import { hc } from "hono/client";
+import type { AppType } from "@server/index";
 
-class ApiError extends Error {
+export const client = hc<AppType>("/", {
+  fetch: (input: RequestInfo | URL, init?: RequestInit) =>
+    fetch(input, { ...init, credentials: "include" }),
+});
+
+export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
@@ -9,32 +15,14 @@ class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    credentials: "include",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers,
-    },
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText);
-    throw new ApiError(res.status, text);
+/** Unwrap a hono client response — throws ApiError on non-2xx */
+export async function unwrap<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    const text = await response.text().catch(() => response.statusText);
+    throw new ApiError(response.status, text);
   }
-  if (res.headers.get("content-type")?.includes("application/json")) {
-    return res.json();
+  if (response.headers.get("content-type")?.includes("application/json")) {
+    return response.json();
   }
-  return res.text() as T;
+  return response.text() as T;
 }
-
-export const api = {
-  get: <T>(path: string) => request<T>(path),
-  post: <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: "POST", body: body ? JSON.stringify(body) : undefined }),
-  put: <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: "PUT", body: body ? JSON.stringify(body) : undefined }),
-  delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
-};
-
-export { ApiError };
