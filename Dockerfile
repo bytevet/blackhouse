@@ -1,4 +1,4 @@
-FROM node:22-slim AS base
+FROM node:24-slim AS base
 
 # Build stage
 FROM base AS builder
@@ -14,7 +14,7 @@ RUN npm run build
 FROM base AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+RUN npm ci && npm prune --omit=dev
 
 # Runtime stage
 FROM base AS runner
@@ -23,23 +23,25 @@ FROM base AS runner
 RUN apt-get update && apt-get install -y --no-install-recommends dumb-init curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
-RUN groupadd --gid 1001 appuser \
-    && useradd --uid 1001 --gid 1001 --shell /bin/false --create-home appuser
-
 WORKDIR /app
 
 ENV NODE_ENV=production
 
-# Copy built output and production dependencies
-COPY --from=builder --chown=appuser:appuser /app/.output .output
-COPY --from=builder --chown=appuser:appuser /app/package.json package.json
-COPY --from=builder --chown=appuser:appuser /app/drizzle drizzle
-COPY --from=builder --chown=appuser:appuser /app/drizzle.config.ts drizzle.config.ts
-COPY --from=builder --chown=appuser:appuser /app/src/db src/db
-COPY --from=deps --chown=appuser:appuser /app/node_modules node_modules
+# Copy production dependencies
+COPY --from=deps /app/node_modules node_modules
 
-USER appuser
+# Copy built client assets
+COPY --from=builder /app/dist/client dist/client
+
+# Copy server source (runs via tsx at runtime)
+COPY --from=builder /app/server server
+COPY --from=builder /app/src/db src/db
+
+# Copy migrations, agent assets, and config
+COPY --from=builder /app/drizzle drizzle
+COPY --from=builder /app/agent agent
+COPY --from=builder /app/package.json package.json
+COPY --from=builder /app/tsconfig.json tsconfig.json
 
 EXPOSE 3000
 
@@ -47,4 +49,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:3000/api/health || exit 1
 
 ENTRYPOINT ["dumb-init", "--"]
-CMD ["node", ".output/server/index.mjs"]
+CMD ["npx", "tsx", "server/index.ts"]

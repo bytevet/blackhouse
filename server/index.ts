@@ -6,6 +6,7 @@ import { logger } from "hono/logger";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { createNodeWebSocket } from "@hono/node-ws";
 import { runMigrations } from "./db/migrate.js";
+import { runSeed } from "./db/seed.js";
 
 // API route modules
 import authRoutes from "./api/auth.js";
@@ -51,6 +52,10 @@ async function start() {
   console.log("[blackhouse] Running database migrations...");
   await runMigrations();
   console.log("[blackhouse] Migrations complete.");
+
+  console.log("[blackhouse] Running seed...");
+  await runSeed();
+  console.log("[blackhouse] Seed complete.");
 
   const port = Number(process.env.PORT || 3000);
   console.log(`[blackhouse] Server running on http://localhost:${port}`);

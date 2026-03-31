@@ -7,7 +7,7 @@ export default defineConfig({
   timeout: 30000,
   expect: { timeout: 10000 },
   use: {
-    baseURL: "http://localhost:5173", // Vite dev server (proxies /api to Hono on 3000)
+    baseURL: process.env.E2E_BASE_URL || "http://localhost:5173",
     trace: "on-first-retry",
   },
   projects: [
@@ -16,10 +16,12 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
   ],
-  webServer: {
-    command: "npm run dev",
-    url: "http://localhost:5173",
-    reuseExistingServer: true,
-    timeout: 60000,
-  },
+  ...(!process.env.E2E_BASE_URL && {
+    webServer: {
+      command: "npm run dev",
+      url: "http://localhost:5173",
+      reuseExistingServer: true,
+      timeout: 60000,
+    },
+  }),
 });

@@ -4,15 +4,19 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "3000:3000"
+      - "${PORT:-3000}:3000"
     environment:
-      - DATABASE_URL=postgresql://blackhouse:blackhouse@db:5432/blackhouse
-      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-dev-secret-key-not-for-production}
+      - DATABASE_URL=postgresql://blackhouse:${POSTGRES_PASSWORD:-blackhouse}@db:5432/blackhouse
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:?Set BETTER_AUTH_SECRET in .env or environment}
       - BETTER_AUTH_URL=${BETTER_AUTH_URL:-http://localhost:3000}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - BLACKHOUSE_CONTAINER_URL=${BLACKHOUSE_CONTAINER_URL:-http://host.docker.internal:3000}
       - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
       - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - ${DOCKER_HOST_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+    security_opt:
+      - label=disable
     depends_on:
       db:
         condition: service_healthy
@@ -40,11 +44,9 @@ services:
 
   db:
     image: postgres:17-alpine
-    ports:
-      - "5432:5432"
     environment:
       - POSTGRES_USER=blackhouse
-      - POSTGRES_PASSWORD=blackhouse
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-blackhouse}
       - POSTGRES_DB=blackhouse
     volumes:
       - postgres_data:/var/lib/postgresql/data

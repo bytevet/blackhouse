@@ -47,9 +47,11 @@ export function DockerPage() {
   const navigate = useNavigate();
   const isAdmin = session?.user?.role === "admin";
 
-  const [dockerStatus, setDockerStatus] = useState<{ connected: boolean; version?: string } | null>(
-    null,
-  );
+  const [dockerStatus, setDockerStatus] = useState<{
+    connected: boolean;
+    version?: string;
+    error?: string;
+  } | null>(null);
   const [containers, setContainers] = useState<ContainerInfo[]>([]);
   const [containersTotal, setContainersTotal] = useState(0);
   const [containersPage, setContainersPage] = useState(1);
@@ -74,7 +76,7 @@ export function DockerPage() {
         const [status, config, containerList, volumeList] = await Promise.all([
           client.api.settings.docker.status
             .$get()
-            .then((r) => unwrap<{ connected: boolean; version?: string }>(r)),
+            .then((r) => unwrap<{ connected: boolean; version?: string; error?: string }>(r)),
           client.api.settings.docker
             .$get()
             .then((r) => unwrap<{ socketPath?: string; host?: string; port?: number }>(r)),
@@ -112,7 +114,7 @@ export function DockerPage() {
       });
       const status = await client.api.settings.docker.status
         .$get()
-        .then((r) => unwrap<{ connected: boolean; version?: string }>(r));
+        .then((r) => unwrap<{ connected: boolean; version?: string; error?: string }>(r));
       setDockerStatus(status);
     } finally {
       setSaving(false);
@@ -140,7 +142,13 @@ export function DockerPage() {
               </span>
             )}
           </CardTitle>
-          <CardDescription>Configure how Blackhouse connects to the Docker daemon.</CardDescription>
+          <CardDescription>
+            {!isConnected && dockerStatus?.error ? (
+              <span className="text-destructive">{dockerStatus.error}</span>
+            ) : (
+              "Configure how Blackhouse connects to the Docker daemon."
+            )}
+          </CardDescription>
         </CardHeader>
         <CardContent className="max-w-md">
           <form onSubmit={handleSubmit}>

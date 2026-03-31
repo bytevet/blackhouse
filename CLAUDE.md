@@ -97,19 +97,20 @@ Migration files in `drizzle/` are committed to git. Do not use `db:push` in prod
 
 | Variable                   | Purpose                                       | Default                            |
 | -------------------------- | --------------------------------------------- | ---------------------------------- |
-| `DATABASE_URL`             | PostgreSQL connection string                  | —                                  |
-| `BETTER_AUTH_SECRET`       | Auth session signing key                      | —                                  |
+| `BETTER_AUTH_SECRET`       | Auth session signing key (**required**)       | —                                  |
 | `BETTER_AUTH_URL`          | Public URL of the app (for auth callbacks)    | `http://localhost:3000`            |
+| `ADMIN_PASSWORD`           | Initial admin password (random if omitted)    | —                                  |
+| `POSTGRES_PASSWORD`        | Database password                             | `blackhouse`                       |
+| `DATABASE_URL`             | PostgreSQL connection string (local dev)      | —                                  |
 | `BLACKHOUSE_CONTAINER_URL` | URL agent containers use to reach this server | `http://host.docker.internal:3000` |
-| `GITHUB_CLIENT_ID`         | GitHub OAuth app ID                           | —                                  |
-| `GITHUB_CLIENT_SECRET`     | GitHub OAuth app secret                       | —                                  |
-
-For Docker Compose, set `BLACKHOUSE_CONTAINER_URL` to the app's service name (e.g., `http://blackhouse:3000`).
+| `DOCKER_HOST_SOCKET`       | Docker/Podman socket path                     | `/var/run/docker.sock`             |
+| `GITHUB_CLIENT_ID`         | GitHub OAuth app ID (optional)                | —                                  |
+| `GITHUB_CLIENT_SECRET`     | GitHub OAuth app secret (optional)            | —                                  |
 
 ## Development Guidelines
 
 - **Server**: Hono routes in `server/api/`. Use `authMiddleware` or `adminMiddleware` from `server/middleware/auth.ts`
-- **Client**: React pages in `src/pages/`. Use `api.get/post/put/delete` from `src/lib/api.ts` for server calls
+- **Client**: React pages in `src/pages/`. Use `client` from `src/lib/api.ts` (hono/client RPC) for type-safe server calls
 - **Forms**: Native `<form onSubmit>` + `useState` for state + `z.safeParse()` for validation. No form libraries.
 - **Routing**: React Router v7 — `Link`, `useNavigate`, `useParams`, `useLocation` from `react-router`
 - **UI**: shadcn/ui components exclusively — never create custom UI primitives
