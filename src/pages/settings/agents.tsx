@@ -31,7 +31,7 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
-import { Field, FieldLabel, FieldError, FieldGroup } from "@/components/ui/field";
+import { Field, FieldLabel, FieldGroup } from "@/components/ui/field";
 import { Plus, Trash2, Edit, Hammer, FileText } from "lucide-react";
 import { timeAgo } from "@/lib/time";
 import { AGENT_PRESETS, PRESET_OPTIONS, type PresetId } from "@/lib/agent-presets";

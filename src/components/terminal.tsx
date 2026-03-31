@@ -14,12 +14,12 @@ function RunningCat() {
   return <img src="/nyancat.svg" alt="" className="h-4" draggable={false} />;
 }
 
-function encodeResize(cols: number, rows: number): Uint8Array {
+function encodeResize(cols: number, rows: number): ArrayBuffer {
   const payload = `${cols}:${rows}`;
   const buf = new Uint8Array(1 + payload.length);
   buf[0] = RESIZE_PREFIX;
   for (let i = 0; i < payload.length; i++) buf[i + 1] = payload.charCodeAt(i);
-  return buf;
+  return buf.buffer as ArrayBuffer;
 }
 
 export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {

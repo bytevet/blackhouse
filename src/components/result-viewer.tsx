@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Code, Eye, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { timeAgo } from "@/lib/time";
