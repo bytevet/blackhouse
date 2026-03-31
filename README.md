@@ -1,5 +1,9 @@
 # Blackhouse
 
+[![CI](https://github.com/bytevet/blackhouse/actions/workflows/ci.yml/badge.svg)](https://github.com/bytevet/blackhouse/actions/workflows/ci.yml)
+[![Docker](https://github.com/bytevet/blackhouse/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/bytevet/blackhouse/actions/workflows/docker-publish.yml)
+[![Docker Image](https://ghcr-badge.egpl.dev/bytevet/blackhouse/latest_tag?trim=major&label=image)](https://github.com/bytevet/blackhouse/pkgs/container/blackhouse)
+
 Coding agent management platform — spawn and manage Docker-containerized coding agents (Claude Code, Gemini, Codex) with real-time terminal access, file explorers, and result viewers.
 
 ## Features
