@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import { useSession } from "@/lib/auth-client";
 import { client, unwrap } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -322,72 +323,76 @@ export function AgentsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-muted-foreground">
-          Configure coding agents with custom commands, Dockerfiles, and environment variables.
-        </p>
-        <Button size="sm" onClick={openCreate}>
-          <Plus className="size-3" />
-          Add Agent
-        </Button>
-      </div>
-
-      <div className="overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Display Name</TableHead>
-              <TableHead>Preset</TableHead>
-              <TableHead>Build Status</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {configs.length === 0 ? (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between">
+            Coding Agents
+            <Button size="sm" onClick={openCreate}>
+              <Plus className="size-3" />
+              Add Agent
+            </Button>
+          </CardTitle>
+          <CardDescription>
+            Configure coding agents with custom commands, Dockerfiles, and environment variables.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={4} className="text-center text-muted-foreground">
-                  No agent configurations yet.
-                </TableCell>
+                <TableHead>Display Name</TableHead>
+                <TableHead>Preset</TableHead>
+                <TableHead>Build Status</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
-            ) : (
-              configs.map((c) => (
-                <TableRow key={c.id}>
-                  <TableCell>{c.displayName}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{c.preset}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    <BuildStatusBadge
-                      status={c.imageBuildStatus}
-                      lastBuiltAt={c.lastBuiltAt}
-                      onClick={c.imageBuildStatus !== "none" ? () => openBuildLog(c) : undefined}
-                    />
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => handleBuild(c.id)}
-                        disabled={c.imageBuildStatus === "building"}
-                        title={c.imageBuildStatus === "built" ? "Rebuild" : "Build"}
-                      >
-                        <Hammer className="size-3" />
-                      </Button>
-                      <Button variant="ghost" size="icon-sm" onClick={() => openEdit(c)}>
-                        <Edit className="size-3" />
-                      </Button>
-                      <Button variant="ghost" size="icon-sm" onClick={() => setDeletingAgent(c)}>
-                        <Trash2 className="size-3" />
-                      </Button>
-                    </div>
+            </TableHeader>
+            <TableBody>
+              {configs.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={4} className="text-center text-muted-foreground">
+                    No agent configurations yet.
                   </TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+              ) : (
+                configs.map((c) => (
+                  <TableRow key={c.id}>
+                    <TableCell>{c.displayName}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{c.preset}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <BuildStatusBadge
+                        status={c.imageBuildStatus}
+                        lastBuiltAt={c.lastBuiltAt}
+                        onClick={c.imageBuildStatus !== "none" ? () => openBuildLog(c) : undefined}
+                      />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => handleBuild(c.id)}
+                          disabled={c.imageBuildStatus === "building"}
+                          title={c.imageBuildStatus === "built" ? "Rebuild" : "Build"}
+                        >
+                          <Hammer className="size-3" />
+                        </Button>
+                        <Button variant="ghost" size="icon-sm" onClick={() => openEdit(c)}>
+                          <Edit className="size-3" />
+                        </Button>
+                        <Button variant="ghost" size="icon-sm" onClick={() => setDeletingAgent(c)}>
+                          <Trash2 className="size-3" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
 
       {/* Create / Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

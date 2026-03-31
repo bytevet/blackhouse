@@ -2,8 +2,9 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { z } from "zod";
 import { useSession } from "@/lib/auth-client";
-import { client, unwrap } from "@/lib/api";
+import { client, unwrap, type Paginated } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -30,7 +31,7 @@ import {
   SelectItem,
 } from "@/components/ui/select";
 import { Field, FieldLabel, FieldError, FieldGroup } from "@/components/ui/field";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
 
 interface UserRow {
   id: string;
@@ -54,6 +55,9 @@ export function UsersPage() {
   const isAdmin = session?.user?.role === "admin";
 
   const [users, setUsers] = useState<UserRow[]>([]);
+  const [usersTotal, setUsersTotal] = useState(0);
+  const [usersPage, setUsersPage] = useState(1);
+  const usersPerPage = 20;
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -75,15 +79,22 @@ export function UsersPage() {
       return;
     }
     client.api.settings.users
-      .$get()
-      .then((r) => unwrap<UserRow[]>(r))
-      .then(setUsers)
+      .$get({ query: { page: String(usersPage), perPage: String(usersPerPage) } })
+      .then((r) => unwrap<Paginated<UserRow>>(r))
+      .then((result) => {
+        setUsers(result.data);
+        setUsersTotal(result.total);
+      })
       .finally(() => setLoading(false));
-  }, [isAdmin, session, navigate]);
+  }, [isAdmin, session, navigate, usersPage]);
 
   const refresh = async () => {
-    const res = await client.api.settings.users.$get();
-    setUsers(await unwrap<UserRow[]>(res));
+    const res = await client.api.settings.users.$get({
+      query: { page: String(usersPage), perPage: String(usersPerPage) },
+    });
+    const result = await unwrap<Paginated<UserRow>>(res);
+    setUsers(result.data);
+    setUsersTotal(result.total);
   };
 
   const openCreate = () => {
@@ -143,72 +154,100 @@ export function UsersPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-muted-foreground">
-          Manage platform users and their roles. Only admins can access this page.
-        </p>
-        <Button size="sm" onClick={openCreate}>
-          <Plus className="size-3" />
-          Add User
-        </Button>
-      </div>
-
-      <div className="overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead className="hidden sm:table-cell">Email</TableHead>
-              <TableHead className="hidden sm:table-cell">Username</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {users.map((u) => (
-              <TableRow key={u.id}>
-                <TableCell>{u.name}</TableCell>
-                <TableCell className="hidden text-muted-foreground sm:table-cell">
-                  {u.email}
-                </TableCell>
-                <TableCell className="hidden text-muted-foreground sm:table-cell">
-                  {u.username || "\u2014"}
-                </TableCell>
-                <TableCell>
-                  <Select
-                    value={u.role || "user"}
-                    onValueChange={(val) => val !== null && handleRoleChange(u.id, val)}
-                    items={[
-                      { label: "User", value: "user" },
-                      { label: "Admin", value: "admin" },
-                    ]}
-                  >
-                    <SelectTrigger className="h-6 w-24">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="user">User</SelectItem>
-                      <SelectItem value="admin">Admin</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </TableCell>
-                <TableCell className="text-right">
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={() => {
-                      setDeletingUser(u);
-                      setDeleteDialogOpen(true);
-                    }}
-                  >
-                    <Trash2 className="size-3" />
-                  </Button>
-                </TableCell>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between">
+            Users
+            <Button size="sm" onClick={openCreate}>
+              <Plus className="size-3" />
+              Add User
+            </Button>
+          </CardTitle>
+          <CardDescription>
+            Manage platform users and their roles. Only admins can access this page.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead className="hidden sm:table-cell">Email</TableHead>
+                <TableHead className="hidden sm:table-cell">Username</TableHead>
+                <TableHead>Role</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+            </TableHeader>
+            <TableBody>
+              {users.map((u) => (
+                <TableRow key={u.id}>
+                  <TableCell>{u.name}</TableCell>
+                  <TableCell className="hidden text-muted-foreground sm:table-cell">
+                    {u.email}
+                  </TableCell>
+                  <TableCell className="hidden text-muted-foreground sm:table-cell">
+                    {u.username || "\u2014"}
+                  </TableCell>
+                  <TableCell>
+                    <Select
+                      value={u.role || "user"}
+                      onValueChange={(val) => val !== null && handleRoleChange(u.id, val)}
+                      items={[
+                        { label: "User", value: "user" },
+                        { label: "Admin", value: "admin" },
+                      ]}
+                    >
+                      <SelectTrigger className="h-6 w-24">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="user">User</SelectItem>
+                        <SelectItem value="admin">Admin</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() => {
+                        setDeletingUser(u);
+                        setDeleteDialogOpen(true);
+                      }}
+                    >
+                      <Trash2 className="size-3" />
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {Math.ceil(usersTotal / usersPerPage) > 1 && (
+        <div className="flex items-center justify-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={usersPage <= 1}
+            onClick={() => setUsersPage((p) => p - 1)}
+          >
+            <ChevronLeft className="size-3" /> Prev
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            Page {usersPage} of {Math.ceil(usersTotal / usersPerPage)}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={usersPage >= Math.ceil(usersTotal / usersPerPage)}
+            onClick={() => setUsersPage((p) => p + 1)}
+          >
+            Next <ChevronRight className="size-3" />
+          </Button>
+        </div>
+      )}
 
       {/* Add User Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

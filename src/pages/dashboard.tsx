@@ -1,7 +1,7 @@
 import { Link, useNavigate } from "react-router";
 import { useState, useEffect } from "react";
 import { useSession } from "@/lib/auth-client";
-import { client, unwrap } from "@/lib/api";
+import { client, unwrap, type Paginated } from "@/lib/api";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -25,7 +25,17 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Field, FieldLabel, FieldGroup } from "@/components/ui/field";
-import { Plus, Eye, Square, Trash2, RotateCcw, GitBranch, Bot } from "lucide-react";
+import {
+  Plus,
+  Eye,
+  Square,
+  Trash2,
+  RotateCcw,
+  GitBranch,
+  Bot,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 import { timeAgo } from "@/lib/time";
 import type { CodingSession, Template, AgentConfig, SessionStatus } from "@/db/schema";
 import { sessionStatusConfig } from "@/lib/session-status";
@@ -36,6 +46,9 @@ export function DashboardPage() {
   const isAdmin = session?.user?.role === "admin";
 
   const [sessions, setSessions] = useState<CodingSession[]>([]);
+  const [sessionsTotal, setSessionsTotal] = useState(0);
+  const [sessionsPage, setSessionsPage] = useState(1);
+  const sessionsPerPage = 12;
   const [templates, setTemplates] = useState<Template[]>([]);
   const [agentConfigs, setAgentConfigs] = useState<AgentConfig[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,18 +72,29 @@ export function DashboardPage() {
   useEffect(() => {
     const load = async () => {
       try {
-        const [sessionsData, myTemplates, publicTemplates, configs] = await Promise.all([
-          client.api.sessions.$get().then((r) => unwrap<CodingSession[]>(r)),
-          client.api.templates.$get({ query: { mine: "true" } }).then((r) => unwrap<Template[]>(r)),
+        const [sessionsResult, myTemplates, publicTemplates, configs] = await Promise.all([
+          client.api.sessions
+            .$get({
+              query: {
+                page: String(sessionsPage),
+                perPage: String(sessionsPerPage),
+                ...(isAdmin && showAll ? { all: "true" } : {}),
+              },
+            })
+            .then((r) => unwrap<Paginated<CodingSession>>(r)),
           client.api.templates
-            .$get({ query: { mine: "false" } })
-            .then((r) => unwrap<Template[]>(r)),
+            .$get({ query: { mine: "true", perPage: "100" } })
+            .then((r) => unwrap<Paginated<Template>>(r)),
+          client.api.templates
+            .$get({ query: { mine: "false", perPage: "100" } })
+            .then((r) => unwrap<Paginated<Template>>(r)),
           client.api.settings["agent-configs"].$get().then((r) => unwrap<AgentConfig[]>(r)),
         ]);
-        setSessions(sessionsData);
+        setSessions(sessionsResult.data);
+        setSessionsTotal(sessionsResult.total);
         setAgentConfigs(configs);
         const seen = new Set<string>();
-        const merged = [...myTemplates, ...publicTemplates].filter((t) => {
+        const merged = [...myTemplates.data, ...publicTemplates.data].filter((t) => {
           if (seen.has(t.id)) return false;
           seen.add(t.id);
           return true;
@@ -81,11 +105,15 @@ export function DashboardPage() {
       }
     };
     load();
-  }, []);
+  }, [sessionsPage, showAll]);
 
-  const refreshSessions = async () => {
-    const res = await client.api.sessions.$get();
-    setSessions(await unwrap<CodingSession[]>(res));
+  const refreshSessions = async (page = sessionsPage) => {
+    const res = await client.api.sessions.$get({
+      query: { page: String(page), perPage: String(sessionsPerPage) },
+    });
+    const result = await unwrap<Paginated<CodingSession>>(res);
+    setSessions(result.data);
+    setSessionsTotal(result.total);
   };
 
   const handleCreateSession = async (e: React.FormEvent) => {
@@ -167,8 +195,7 @@ export function DashboardPage() {
     }
   };
 
-  const filteredSessions =
-    isAdmin && showAll ? sessions : sessions.filter((s) => s.userId === session?.user?.id);
+  const totalPages = Math.ceil(sessionsTotal / sessionsPerPage);
 
   const previewTemplate = templates.find((t) => t.id === formData.templateId);
   const selectedTemplate = templates.find((t) => t.id === formData.templateId);
@@ -361,11 +388,11 @@ export function DashboardPage() {
         </div>
       )}
 
-      {filteredSessions.length === 0 ? (
+      {sessions.length === 0 ? (
         <p className="text-sm text-muted-foreground">No sessions yet. Create one to get started.</p>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {filteredSessions.map((s) => {
+          {sessions.map((s) => {
             const status = (s.status as SessionStatus) || "pending";
             const config = sessionStatusConfig[status] || sessionStatusConfig.pending;
             return (
@@ -454,6 +481,32 @@ export function DashboardPage() {
               </Card>
             );
           })}
+        </div>
+      )}
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={sessionsPage <= 1}
+            onClick={() => setSessionsPage((p) => p - 1)}
+          >
+            <ChevronLeft className="size-3" />
+            Prev
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            Page {sessionsPage} of {totalPages}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={sessionsPage >= totalPages}
+            onClick={() => setSessionsPage((p) => p + 1)}
+          >
+            Next
+            <ChevronRight className="size-3" />
+          </Button>
         </div>
       )}
 

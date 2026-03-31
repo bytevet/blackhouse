@@ -3,9 +3,10 @@ import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 import { db } from "../db/index.js";
 import * as schema from "../db/schema.js";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, count } from "drizzle-orm";
 import type { AuthEnv } from "../middleware/auth.js";
 import { authMiddleware } from "../middleware/auth.js";
+import { paginationQuery } from "../lib/pagination.js";
 
 const app = new Hono<AuthEnv>()
   // ---------------------------------------------------------------------------
@@ -14,28 +15,49 @@ const app = new Hono<AuthEnv>()
   .get(
     "/",
     authMiddleware,
-    zValidator("query", z.object({ mine: z.coerce.boolean().optional() }).optional()),
+    zValidator(
+      "query",
+      z.object({ mine: z.coerce.boolean().optional() }).merge(paginationQuery).optional(),
+    ),
     async (c) => {
       const session = c.get("session");
       const query = c.req.valid("query");
+      const page = query?.page ?? 1;
+      const perPage = query?.perPage ?? 20;
+      const offset = (page - 1) * perPage;
 
       if (query?.mine) {
+        const [{ total }] = await db
+          .select({ total: count() })
+          .from(schema.templates)
+          .where(eq(schema.templates.userId, session.user.id));
+
         const rows = await db
           .select()
           .from(schema.templates)
           .where(eq(schema.templates.userId, session.user.id))
-          .orderBy(desc(schema.templates.createdAt));
-        return c.json(rows);
+          .orderBy(desc(schema.templates.createdAt))
+          .limit(perPage)
+          .offset(offset);
+
+        return c.json({ data: rows, total, page, perPage });
       }
 
       // Public templates (visible to everyone)
+      const [{ total }] = await db
+        .select({ total: count() })
+        .from(schema.templates)
+        .where(eq(schema.templates.isPublic, true));
+
       const rows = await db
         .select()
         .from(schema.templates)
         .where(eq(schema.templates.isPublic, true))
-        .orderBy(desc(schema.templates.createdAt));
+        .orderBy(desc(schema.templates.createdAt))
+        .limit(perPage)
+        .offset(offset);
 
-      return c.json(rows);
+      return c.json({ data: rows, total, page, perPage });
     },
   )
 

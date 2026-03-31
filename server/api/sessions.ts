@@ -4,10 +4,11 @@ import { zValidator } from "@hono/zod-validator";
 import { randomBytes } from "node:crypto";
 import { db } from "../db/index.js";
 import * as schema from "../db/schema.js";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, count } from "drizzle-orm";
 import { getDockerClient } from "../lib/docker.js";
 import type { AuthEnv } from "../middleware/auth.js";
 import { authMiddleware } from "../middleware/auth.js";
+import { paginationQuery } from "../lib/pagination.js";
 
 const app = new Hono<AuthEnv>()
   // ---------------------------------------------------------------------------
@@ -16,12 +17,20 @@ const app = new Hono<AuthEnv>()
   .get(
     "/",
     authMiddleware,
-    zValidator("query", z.object({ all: z.coerce.boolean().optional() }).optional()),
+    zValidator(
+      "query",
+      z.object({ all: z.coerce.boolean().optional() }).merge(paginationQuery).optional(),
+    ),
     async (c) => {
       const session = c.get("session");
       const query = c.req.valid("query");
+      const page = query?.page ?? 1;
+      const perPage = query?.perPage ?? 20;
+      const offset = (page - 1) * perPage;
 
       if (query?.all && session.user.role === "admin") {
+        const [{ total }] = await db.select({ total: count() }).from(schema.codingSessions);
+
         const rows = await db
           .select({
             session: schema.codingSessions,
@@ -30,23 +39,35 @@ const app = new Hono<AuthEnv>()
           })
           .from(schema.codingSessions)
           .leftJoin(schema.user, eq(schema.codingSessions.userId, schema.user.id))
-          .orderBy(desc(schema.codingSessions.createdAt));
+          .orderBy(desc(schema.codingSessions.createdAt))
+          .limit(perPage)
+          .offset(offset);
 
-        return c.json(
-          rows.map((r) => ({
+        return c.json({
+          data: rows.map((r) => ({
             ...r.session,
             user: { name: r.userName, email: r.userEmail },
           })),
-        );
+          total,
+          page,
+          perPage,
+        });
       }
+
+      const [{ total }] = await db
+        .select({ total: count() })
+        .from(schema.codingSessions)
+        .where(eq(schema.codingSessions.userId, session.user.id));
 
       const rows = await db
         .select()
         .from(schema.codingSessions)
         .where(eq(schema.codingSessions.userId, session.user.id))
-        .orderBy(desc(schema.codingSessions.createdAt));
+        .orderBy(desc(schema.codingSessions.createdAt))
+        .limit(perPage)
+        .offset(offset);
 
-      return c.json(rows);
+      return c.json({ data: rows, total, page, perPage });
     },
   )
 

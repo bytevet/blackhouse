@@ -6,11 +6,12 @@ import * as path from "node:path";
 import * as tar from "tar-stream";
 import { db } from "../db/index.js";
 import * as schema from "../db/schema.js";
-import { eq, desc, inArray } from "drizzle-orm";
+import { eq, desc, inArray, count } from "drizzle-orm";
 import { getDockerClient, resetDockerClient } from "../lib/docker.js";
 import { auth } from "../lib/auth.js";
 import type { AuthEnv } from "../middleware/auth.js";
 import { authMiddleware, adminMiddleware } from "../middleware/auth.js";
+import { paginationQuery, paginate } from "../lib/pagination.js";
 
 const app = new Hono<AuthEnv>()
   // ---------------------------------------------------------------------------
@@ -396,34 +397,41 @@ const app = new Hono<AuthEnv>()
   // ---------------------------------------------------------------------------
   // List Containers (admin only)
   // ---------------------------------------------------------------------------
-  .get("/containers", adminMiddleware, async (c) => {
-    try {
-      const docker = await getDockerClient();
-      const containers = await docker.listContainers({
-        all: true,
-        filters: { label: ["blackhouse.managed=true"] },
-      });
+  .get(
+    "/containers",
+    adminMiddleware,
+    zValidator("query", paginationQuery.optional()),
+    async (c) => {
+      const query = c.req.valid("query");
+      const page = query?.page ?? 1;
+      const perPage = query?.perPage ?? 20;
 
-      // Enrich with session info from DB
-      const sessionIds = containers
-        .map((ct) => ct.Labels?.["blackhouse.session_id"])
-        .filter(Boolean) as string[];
+      try {
+        const docker = await getDockerClient();
+        const containers = await docker.listContainers({
+          all: true,
+          filters: { label: ["blackhouse.managed=true"] },
+        });
 
-      const sessionsMap = new Map<string, typeof schema.codingSessions.$inferSelect>();
+        // Enrich with session info from DB
+        const sessionIds = containers
+          .map((ct) => ct.Labels?.["blackhouse.session_id"])
+          .filter(Boolean) as string[];
 
-      if (sessionIds.length > 0) {
-        const sessions = await db
-          .select()
-          .from(schema.codingSessions)
-          .where(inArray(schema.codingSessions.id, sessionIds));
+        const sessionsMap = new Map<string, typeof schema.codingSessions.$inferSelect>();
 
-        for (const s of sessions) {
-          sessionsMap.set(s.id, s);
+        if (sessionIds.length > 0) {
+          const sessions = await db
+            .select()
+            .from(schema.codingSessions)
+            .where(inArray(schema.codingSessions.id, sessionIds));
+
+          for (const s of sessions) {
+            sessionsMap.set(s.id, s);
+          }
         }
-      }
 
-      return c.json(
-        containers.map((ct) => {
+        const allItems = containers.map((ct) => {
           const sessionId = ct.Labels?.["blackhouse.session_id"];
           return {
             containerId: ct.Id,
@@ -434,11 +442,53 @@ const app = new Hono<AuthEnv>()
             sessionId,
             session: sessionId ? (sessionsMap.get(sessionId) ?? null) : null,
           };
-        }),
+        });
+
+        return c.json(paginate(allItems, page, perPage));
+      } catch (err) {
+        return c.json(
+          {
+            error: `Failed to list containers: ${err instanceof Error ? err.message : String(err)}`,
+          },
+          500,
+        );
+      }
+    },
+  )
+
+  // ---------------------------------------------------------------------------
+  // List Volumes (admin only)
+  // ---------------------------------------------------------------------------
+  .get("/volumes", adminMiddleware, async (c) => {
+    try {
+      // Collect volume names referenced by agent configs
+      const configs = await db.select().from(schema.agentConfigs);
+      const managedNames = new Set<string>();
+      for (const cfg of configs) {
+        if (Array.isArray(cfg.volumeMounts)) {
+          for (const m of cfg.volumeMounts as Array<{ name: string; mountPath: string }>) {
+            if (m.name) managedNames.add(m.name);
+          }
+        }
+      }
+
+      const docker = await getDockerClient();
+      const { Volumes } = await docker.listVolumes();
+      return c.json(
+        (Volumes ?? [])
+          .filter((v) => managedNames.has(v.Name))
+          .map((v) => ({
+            name: v.Name,
+            driver: v.Driver,
+            mountpoint: v.Mountpoint,
+            scope: v.Scope,
+            size: v.UsageData?.Size ?? null,
+            refCount: v.UsageData?.RefCount ?? null,
+          })),
       );
     } catch (err) {
       return c.json(
-        { error: `Failed to list containers: ${err instanceof Error ? err.message : String(err)}` },
+        { error: `Failed to list volumes: ${err instanceof Error ? err.message : String(err)}` },
         500,
       );
     }
@@ -447,7 +497,14 @@ const app = new Hono<AuthEnv>()
   // ---------------------------------------------------------------------------
   // User Management (admin only)
   // ---------------------------------------------------------------------------
-  .get("/users", adminMiddleware, async (c) => {
+  .get("/users", adminMiddleware, zValidator("query", paginationQuery.optional()), async (c) => {
+    const query = c.req.valid("query");
+    const page = query?.page ?? 1;
+    const perPage = query?.perPage ?? 20;
+    const offset = (page - 1) * perPage;
+
+    const [{ total }] = await db.select({ total: count() }).from(schema.user);
+
     const rows = await db
       .select({
         id: schema.user.id,
@@ -459,9 +516,11 @@ const app = new Hono<AuthEnv>()
         createdAt: schema.user.createdAt,
       })
       .from(schema.user)
-      .orderBy(desc(schema.user.createdAt));
+      .orderBy(desc(schema.user.createdAt))
+      .limit(perPage)
+      .offset(offset);
 
-    return c.json(rows);
+    return c.json({ data: rows, total, page, perPage });
   })
 
   .post(

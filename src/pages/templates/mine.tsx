@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useSession } from "@/lib/auth-client";
-import { client, unwrap } from "@/lib/api";
+import { client, unwrap, type Paginated } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -23,7 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Field, FieldLabel, FieldGroup } from "@/components/ui/field";
-import { Plus, Edit, Trash2 } from "lucide-react";
+import { Plus, Edit, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
 import { timeAgo } from "@/lib/time";
 import type { Template } from "@/db/schema";
 
@@ -31,6 +31,9 @@ export function MyTemplatesPage() {
   const { data: session } = useSession();
 
   const [templates, setTemplates] = useState<Template[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const perPage = 12;
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -46,18 +49,20 @@ export function MyTemplatesPage() {
     gitRequired: false,
   });
 
-  useEffect(() => {
-    client.api.templates
-      .$get({ query: { mine: "true" } })
-      .then((r) => unwrap<Template[]>(r))
-      .then(setTemplates)
-      .finally(() => setLoading(false));
-  }, []);
-
-  const refreshTemplates = async () => {
-    const res = await client.api.templates.$get({ query: { mine: "true" } });
-    setTemplates(await unwrap<Template[]>(res));
+  const fetchTemplates = async (p = page) => {
+    const res = await client.api.templates.$get({
+      query: { mine: "true", page: String(p), perPage: String(perPage) },
+    });
+    const result = await unwrap<Paginated<Template>>(res);
+    setTemplates(result.data);
+    setTotal(result.total);
   };
+
+  useEffect(() => {
+    fetchTemplates().finally(() => setLoading(false));
+  }, [page]);
+
+  const refreshTemplates = () => fetchTemplates();
 
   const openCreate = () => {
     setEditingTemplate(null);
@@ -183,6 +188,30 @@ export function MyTemplatesPage() {
               )}
             </Card>
           ))}
+        </div>
+      )}
+
+      {Math.ceil(total / perPage) > 1 && (
+        <div className="flex items-center justify-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={page <= 1}
+            onClick={() => setPage((p) => p - 1)}
+          >
+            <ChevronLeft className="size-3" /> Prev
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            Page {page} of {Math.ceil(total / perPage)}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={page >= Math.ceil(total / perPage)}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            Next <ChevronRight className="size-3" />
+          </Button>
         </div>
       )}
 

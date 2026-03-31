@@ -6,6 +6,13 @@ export const client = hc<AppType>("/", {
     fetch(input, { ...init, credentials: "include" }),
 });
 
+export interface Paginated<T> {
+  data: T[];
+  total: number;
+  page: number;
+  perPage: number;
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
