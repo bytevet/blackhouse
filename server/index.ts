@@ -30,6 +30,13 @@ app.use("/api/*", cors());
 // Health check
 app.get("/api/health", (c) => c.json({ status: "ok", timestamp: new Date().toISOString() }));
 
+// Public config (no auth required)
+app.get("/api/config", (c) =>
+  c.json({
+    githubOAuth: !!(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET),
+  }),
+);
+
 // API routes (chained for RPC type inference)
 const routes = app
   .route("/api/auth", authRoutes)

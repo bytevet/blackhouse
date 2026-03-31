@@ -22,7 +22,7 @@ const navItems = [
 export function AppHeader() {
   const { data: session } = useSession();
   const location = useLocation();
-  const { theme, setTheme } = useTheme();
+  const { resolved, toggle } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
   const user = session?.user;
 
@@ -71,12 +71,8 @@ export function AppHeader() {
         <div className="flex-1" />
 
         {/* Theme toggle */}
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-        >
-          {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
+        <Button variant="ghost" size="icon-sm" onClick={toggle}>
+          {resolved === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
         </Button>
 
         {/* User menu */}

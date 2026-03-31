@@ -474,18 +474,35 @@ const app = new Hono<AuthEnv>()
 
       const docker = await getDockerClient();
       const { Volumes } = await docker.listVolumes();
-      return c.json(
-        (Volumes ?? [])
-          .filter((v) => managedNames.has(v.Name))
-          .map((v) => ({
-            name: v.Name,
-            driver: v.Driver,
-            mountpoint: v.Mountpoint,
-            scope: v.Scope,
-            size: v.UsageData?.Size ?? null,
-            refCount: v.UsageData?.RefCount ?? null,
-          })),
+      const managed = (Volumes ?? []).filter((v) => managedNames.has(v.Name));
+
+      // Inspect each volume for UsageData (size + refCount)
+      const results = await Promise.all(
+        managed.map(async (v) => {
+          try {
+            const info = await docker.getVolume(v.Name).inspect();
+            return {
+              name: v.Name,
+              driver: v.Driver,
+              mountpoint: v.Mountpoint,
+              scope: v.Scope,
+              size: info.UsageData?.Size ?? null,
+              refCount: info.UsageData?.RefCount ?? null,
+            };
+          } catch {
+            return {
+              name: v.Name,
+              driver: v.Driver,
+              mountpoint: v.Mountpoint,
+              scope: v.Scope,
+              size: null,
+              refCount: null,
+            };
+          }
+        }),
       );
+
+      return c.json(results);
     } catch (err) {
       return c.json(
         { error: `Failed to list volumes: ${err instanceof Error ? err.message : String(err)}` },
@@ -547,15 +564,55 @@ const app = new Hono<AuthEnv>()
         },
       });
 
-      // Set role if specified
-      if (data.role && data.role !== "user") {
-        await db
-          .update(schema.user)
-          .set({ role: data.role, updatedAt: new Date() })
-          .where(eq(schema.user.email, data.email));
+      // Set username and role after sign-up
+      const updates: Record<string, unknown> = { updatedAt: new Date() };
+      if (data.username) updates.username = data.username;
+      if (data.role && data.role !== "user") updates.role = data.role;
+
+      if (Object.keys(updates).length > 1) {
+        await db.update(schema.user).set(updates).where(eq(schema.user.email, data.email));
       }
 
       return c.json(result, 201);
+    },
+  )
+
+  .put(
+    "/users/:id",
+    adminMiddleware,
+    zValidator(
+      "json",
+      z.object({
+        name: z.string().optional(),
+        email: z.string().optional(),
+        username: z.string().optional(),
+        role: z.string().optional(),
+      }),
+    ),
+    async (c) => {
+      const session = c.get("session");
+      const targetId = c.req.param("id");
+      const data = c.req.valid("json");
+
+      if (targetId === session.user.id && data.role && data.role !== session.user.role) {
+        return c.json({ error: "Cannot change your own role" }, 400);
+      }
+
+      const updates: Record<string, unknown> = { updatedAt: new Date() };
+      if (data.name !== undefined) updates.name = data.name;
+      if (data.email !== undefined) updates.email = data.email;
+      if (data.username !== undefined) updates.username = data.username;
+      if (data.role !== undefined) updates.role = data.role;
+
+      const updated = await db
+        .update(schema.user)
+        .set(updates)
+        .where(eq(schema.user.id, targetId))
+        .returning();
+
+      if (updated.length === 0) return c.json({ error: "User not found" }, 404);
+
+      return c.json(updated[0]);
     },
   )
 

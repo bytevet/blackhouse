@@ -11,16 +11,26 @@ function applyTheme(theme: Theme) {
   document.documentElement.classList.toggle("dark", resolved === "dark");
 }
 
+function resolveTheme(theme: Theme): "light" | "dark" {
+  return theme === "system" ? getSystemTheme() : theme;
+}
+
 export function useTheme() {
   const [theme, setThemeState] = useState<Theme>(
     () => (localStorage.getItem("blackhouse-theme") as Theme) || "system",
   );
+
+  const resolved = resolveTheme(theme);
 
   const setTheme = useCallback((t: Theme) => {
     setThemeState(t);
     localStorage.setItem("blackhouse-theme", t);
     applyTheme(t);
   }, []);
+
+  const toggle = useCallback(() => {
+    setTheme(resolveTheme(theme) === "dark" ? "light" : "dark");
+  }, [theme, setTheme]);
 
   useEffect(() => {
     applyTheme(theme);
@@ -33,5 +43,5 @@ export function useTheme() {
     return () => mq.removeEventListener("change", handler);
   }, [theme]);
 
-  return { theme, setTheme };
+  return { theme, resolved, setTheme, toggle };
 }

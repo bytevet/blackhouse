@@ -33,6 +33,8 @@ import {
   RotateCcw,
   GitBranch,
   Bot,
+  User,
+  Clock,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
@@ -40,12 +42,14 @@ import { timeAgo } from "@/lib/time";
 import type { CodingSession, Template, AgentConfig, SessionStatus } from "@/db/schema";
 import { sessionStatusConfig } from "@/lib/session-status";
 
+type SessionWithUser = CodingSession & { user?: { name: string | null; email: string | null } };
+
 export function DashboardPage() {
   const { data: session } = useSession();
   const navigate = useNavigate();
   const isAdmin = session?.user?.role === "admin";
 
-  const [sessions, setSessions] = useState<CodingSession[]>([]);
+  const [sessions, setSessions] = useState<SessionWithUser[]>([]);
   const [sessionsTotal, setSessionsTotal] = useState(0);
   const [sessionsPage, setSessionsPage] = useState(1);
   const sessionsPerPage = 12;
@@ -81,7 +85,7 @@ export function DashboardPage() {
                 ...(isAdmin && showAll ? { all: "true" } : {}),
               },
             })
-            .then((r) => unwrap<Paginated<CodingSession>>(r)),
+            .then((r) => unwrap<Paginated<SessionWithUser>>(r)),
           client.api.templates
             .$get({ query: { mine: "true", perPage: "100" } })
             .then((r) => unwrap<Paginated<Template>>(r)),
@@ -111,7 +115,7 @@ export function DashboardPage() {
     const res = await client.api.sessions.$get({
       query: { page: String(page), perPage: String(sessionsPerPage) },
     });
-    const result = await unwrap<Paginated<CodingSession>>(res);
+    const result = await unwrap<Paginated<SessionWithUser>>(res);
     setSessions(result.data);
     setSessionsTotal(result.total);
   };
@@ -411,6 +415,12 @@ export function DashboardPage() {
                   )}
                 </CardHeader>
                 <CardContent className="flex-1 space-y-1.5">
+                  {showAll && s.user && (
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <User className="size-3 shrink-0" />
+                      {s.user.name || s.user.email}
+                    </div>
+                  )}
                   <div className="flex items-center gap-1 text-xs text-muted-foreground">
                     <Bot className="size-3 shrink-0" />
                     {s.preset}
@@ -430,7 +440,10 @@ export function DashboardPage() {
                       Result
                     </Badge>
                   )}
-                  <div className="text-xs text-muted-foreground">{timeAgo(s.createdAt)}</div>
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <Clock className="size-3 shrink-0" />
+                    {timeAgo(s.createdAt)}
+                  </div>
                 </CardContent>
                 <CardFooter className="gap-1.5">
                   <Link

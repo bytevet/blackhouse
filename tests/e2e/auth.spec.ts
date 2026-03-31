@@ -14,7 +14,6 @@ test.describe("Authentication", () => {
     await expect(page.getByPlaceholder("username")).toBeVisible();
     await expect(page.getByPlaceholder("********")).toBeVisible();
     await expect(page.getByRole("button", { name: /sign in/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /github/i })).toBeVisible();
   });
 
   test("no sign-up option is available", async ({ page }) => {

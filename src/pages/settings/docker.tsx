@@ -271,49 +271,61 @@ export function DockerPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Driver</TableHead>
-                <TableHead className="hidden sm:table-cell">Mountpoint</TableHead>
-                <TableHead>Size</TableHead>
-                <TableHead>In Use</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {volumes.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground">
-                    No volumes found.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                volumes.map((v) => (
-                  <TableRow key={v.name}>
-                    <TableCell className="font-mono text-xs">{v.name}</TableCell>
-                    <TableCell className="text-muted-foreground">{v.driver}</TableCell>
-                    <TableCell
-                      className="hidden max-w-60 truncate text-muted-foreground sm:table-cell"
-                      title={v.mountpoint}
-                    >
-                      {v.mountpoint}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {v.size != null ? formatBytes(v.size) : "\u2014"}
-                    </TableCell>
-                    <TableCell>
-                      {v.refCount != null && v.refCount > 0 ? (
-                        <Badge variant="outline">{v.refCount}</Badge>
-                      ) : (
-                        <span className="text-muted-foreground">{"\u2014"}</span>
-                      )}
-                    </TableCell>
+          {(() => {
+            const hasUsageData = volumes.some((v) => v.size != null || v.refCount != null);
+            return (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Driver</TableHead>
+                    <TableHead className="hidden sm:table-cell">Mountpoint</TableHead>
+                    {hasUsageData && <TableHead>Size</TableHead>}
+                    {hasUsageData && <TableHead>In Use</TableHead>}
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+                </TableHeader>
+                <TableBody>
+                  {volumes.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={hasUsageData ? 5 : 3}
+                        className="text-center text-muted-foreground"
+                      >
+                        No volumes found.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    volumes.map((v) => (
+                      <TableRow key={v.name}>
+                        <TableCell className="font-mono text-xs">{v.name}</TableCell>
+                        <TableCell className="text-muted-foreground">{v.driver}</TableCell>
+                        <TableCell
+                          className="hidden max-w-60 truncate text-muted-foreground sm:table-cell"
+                          title={v.mountpoint}
+                        >
+                          {v.mountpoint}
+                        </TableCell>
+                        {hasUsageData && (
+                          <TableCell className="text-muted-foreground">
+                            {v.size != null ? formatBytes(v.size) : "\u2014"}
+                          </TableCell>
+                        )}
+                        {hasUsageData && (
+                          <TableCell>
+                            {v.refCount != null && v.refCount > 0 ? (
+                              <Badge variant="outline">{v.refCount}</Badge>
+                            ) : (
+                              <span className="text-muted-foreground">{"\u2014"}</span>
+                            )}
+                          </TableCell>
+                        )}
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            );
+          })()}
         </CardContent>
       </Card>
     </div>

@@ -62,7 +62,7 @@ function BuildStatusBadge({
   lastBuiltAt?: Date | string | null;
   onClick?: () => void;
 }) {
-  const clickProps = onClick ? { onClick, className: "cursor-pointer" } : {};
+  const clickProps = onClick ? { onClick, role: "button" as const } : {};
   switch (status) {
     case "building":
       return (
@@ -75,7 +75,10 @@ function BuildStatusBadge({
       );
     case "built":
       return (
-        <span className="flex items-center gap-1.5" {...clickProps}>
+        <span
+          className={`flex items-center gap-2 ${onClick ? "cursor-pointer" : ""}`}
+          {...clickProps}
+        >
           <Badge className="border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-400">
             Built
           </Badge>

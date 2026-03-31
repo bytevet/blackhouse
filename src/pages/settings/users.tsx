@@ -30,7 +30,7 @@ import {
   SelectItem,
 } from "@/components/ui/select";
 import { Field, FieldLabel, FieldError, FieldGroup } from "@/components/ui/field";
-import { Plus, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, Trash2, Edit, ChevronLeft, ChevronRight } from "lucide-react";
 
 interface UserRow {
   id: string;
@@ -48,26 +48,43 @@ const createUserSchema = z.object({
   role: z.string(),
 });
 
+const editUserSchema = z.object({
+  name: z.string().min(1, "Name is required"),
+  email: z.string().min(1, "Email is required").email("Invalid email address"),
+  username: z.string().min(1, "Username is required"),
+  role: z.string(),
+});
+
 export function UsersPage() {
   const { data: session } = useSession();
   const navigate = useNavigate();
   const isAdmin = session?.user?.role === "admin";
+  const currentUserId = session?.user?.id;
 
   const [users, setUsers] = useState<UserRow[]>([]);
   const [usersTotal, setUsersTotal] = useState(0);
   const [usersPage, setUsersPage] = useState(1);
   const usersPerPage = 20;
   const [loading, setLoading] = useState(true);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [deletingUser, setDeletingUser] = useState<UserRow | null>(null);
-  const [creating, setCreating] = useState(false);
 
-  const [formData, setFormData] = useState({
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<UserRow | null>(null);
+  const [deletingUser, setDeletingUser] = useState<UserRow | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const [createForm, setCreateForm] = useState({
     name: "",
     email: "",
     username: "",
     password: "",
+    role: "user",
+  });
+  const [editForm, setEditForm] = useState({
+    name: "",
+    email: "",
+    username: "",
     role: "user",
   });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
@@ -97,23 +114,33 @@ export function UsersPage() {
   };
 
   const openCreate = () => {
-    setFormData({ name: "", email: "", username: "", password: "", role: "user" });
+    setCreateForm({ name: "", email: "", username: "", password: "", role: "user" });
     setFormErrors({});
-    setDialogOpen(true);
+    setCreateDialogOpen(true);
   };
 
-  const handleCreateUser = async () => {
+  const openEdit = (u: UserRow) => {
+    setEditingUser(u);
+    setEditForm({
+      name: u.name,
+      email: u.email,
+      username: u.username || "",
+      role: u.role || "user",
+    });
     setFormErrors({});
-    const result = createUserSchema.safeParse(formData);
+    setEditDialogOpen(true);
+  };
+
+  const handleCreate = async () => {
+    setFormErrors({});
+    const result = createUserSchema.safeParse(createForm);
     if (!result.success) {
       const errs: Record<string, string> = {};
-      for (const issue of result.error.issues) {
-        errs[issue.path[0] as string] = issue.message;
-      }
+      for (const issue of result.error.issues) errs[issue.path[0] as string] = issue.message;
       setFormErrors(errs);
       return;
     }
-    setCreating(true);
+    setSaving(true);
     try {
       await client.api.settings.users.$post({
         json: {
@@ -124,19 +151,40 @@ export function UsersPage() {
           role: result.data.role,
         },
       });
-      setDialogOpen(false);
+      setCreateDialogOpen(false);
       await refresh();
     } finally {
-      setCreating(false);
+      setSaving(false);
     }
   };
 
-  const handleRoleChange = async (userId: string, newRole: string) => {
-    await client.api.settings.users[":id"].role.$put({
-      param: { id: userId },
-      json: { role: newRole },
-    });
-    await refresh();
+  const handleEdit = async () => {
+    if (!editingUser) return;
+    setFormErrors({});
+    const result = editUserSchema.safeParse(editForm);
+    if (!result.success) {
+      const errs: Record<string, string> = {};
+      for (const issue of result.error.issues) errs[issue.path[0] as string] = issue.message;
+      setFormErrors(errs);
+      return;
+    }
+    setSaving(true);
+    try {
+      await client.api.settings.users[":id"].$put({
+        param: { id: editingUser.id },
+        json: {
+          name: result.data.name.trim(),
+          email: result.data.email.trim(),
+          username: result.data.username.trim(),
+          role: result.data.role,
+        },
+      });
+      setEditDialogOpen(false);
+      setEditingUser(null);
+      await refresh();
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDelete = async () => {
@@ -178,47 +226,63 @@ export function UsersPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {users.map((u) => (
-                <TableRow key={u.id}>
-                  <TableCell>{u.name}</TableCell>
-                  <TableCell className="hidden text-muted-foreground sm:table-cell">
-                    {u.email}
-                  </TableCell>
-                  <TableCell className="hidden text-muted-foreground sm:table-cell">
-                    {u.username || "\u2014"}
-                  </TableCell>
-                  <TableCell>
-                    <Select
-                      value={u.role || "user"}
-                      onValueChange={(val) => val !== null && handleRoleChange(u.id, val)}
-                      items={[
-                        { label: "User", value: "user" },
-                        { label: "Admin", value: "admin" },
-                      ]}
-                    >
-                      <SelectTrigger className="h-6 w-24">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="user">User</SelectItem>
-                        <SelectItem value="admin">Admin</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => {
-                        setDeletingUser(u);
-                        setDeleteDialogOpen(true);
-                      }}
-                    >
-                      <Trash2 className="size-3" />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
+              {users.map((u) => {
+                const isSelf = u.id === currentUserId;
+                return (
+                  <TableRow key={u.id}>
+                    <TableCell>{u.name}</TableCell>
+                    <TableCell className="hidden text-muted-foreground sm:table-cell">
+                      {u.email}
+                    </TableCell>
+                    <TableCell className="hidden text-muted-foreground sm:table-cell">
+                      {u.username || "\u2014"}
+                    </TableCell>
+                    <TableCell>
+                      <Select
+                        value={u.role || "user"}
+                        onValueChange={(val) => {
+                          if (val !== null && !isSelf) {
+                            client.api.settings.users[":id"].role
+                              .$put({ param: { id: u.id }, json: { role: val } })
+                              .then(() => refresh());
+                          }
+                        }}
+                        items={[
+                          { label: "User", value: "user" },
+                          { label: "Admin", value: "admin" },
+                        ]}
+                      >
+                        <SelectTrigger className="h-6 w-24" disabled={isSelf}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="user">User</SelectItem>
+                          <SelectItem value="admin">Admin</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button variant="ghost" size="icon-sm" onClick={() => openEdit(u)}>
+                          <Edit className="size-3" />
+                        </Button>
+                        {!isSelf && (
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={() => {
+                              setDeletingUser(u);
+                              setDeleteDialogOpen(true);
+                            }}
+                          >
+                            <Trash2 className="size-3" />
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </CardContent>
@@ -248,8 +312,8 @@ export function UsersPage() {
         </div>
       )}
 
-      {/* Add User Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      {/* Create User Dialog */}
+      <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Add User</DialogTitle>
@@ -259,8 +323,8 @@ export function UsersPage() {
             <Field data-invalid={!!formErrors.name || undefined}>
               <FieldLabel>Name</FieldLabel>
               <Input
-                value={formData.name}
-                onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
+                value={createForm.name}
+                onChange={(e) => setCreateForm((prev) => ({ ...prev, name: e.target.value }))}
               />
               {formErrors.name && <FieldError errors={[{ message: formErrors.name }]} />}
             </Field>
@@ -268,16 +332,16 @@ export function UsersPage() {
               <FieldLabel>Email</FieldLabel>
               <Input
                 type="email"
-                value={formData.email}
-                onChange={(e) => setFormData((prev) => ({ ...prev, email: e.target.value }))}
+                value={createForm.email}
+                onChange={(e) => setCreateForm((prev) => ({ ...prev, email: e.target.value }))}
               />
               {formErrors.email && <FieldError errors={[{ message: formErrors.email }]} />}
             </Field>
             <Field data-invalid={!!formErrors.username || undefined}>
               <FieldLabel>Username</FieldLabel>
               <Input
-                value={formData.username}
-                onChange={(e) => setFormData((prev) => ({ ...prev, username: e.target.value }))}
+                value={createForm.username}
+                onChange={(e) => setCreateForm((prev) => ({ ...prev, username: e.target.value }))}
               />
               {formErrors.username && <FieldError errors={[{ message: formErrors.username }]} />}
             </Field>
@@ -285,16 +349,16 @@ export function UsersPage() {
               <FieldLabel>Password</FieldLabel>
               <Input
                 type="password"
-                value={formData.password}
-                onChange={(e) => setFormData((prev) => ({ ...prev, password: e.target.value }))}
+                value={createForm.password}
+                onChange={(e) => setCreateForm((prev) => ({ ...prev, password: e.target.value }))}
               />
               {formErrors.password && <FieldError errors={[{ message: formErrors.password }]} />}
             </Field>
             <Field>
               <FieldLabel>Role</FieldLabel>
               <Select
-                value={formData.role}
-                onValueChange={(v) => v !== null && setFormData((prev) => ({ ...prev, role: v }))}
+                value={createForm.role}
+                onValueChange={(v) => v !== null && setCreateForm((prev) => ({ ...prev, role: v }))}
                 items={[
                   { label: "User", value: "user" },
                   { label: "Admin", value: "admin" },
@@ -311,8 +375,71 @@ export function UsersPage() {
             </Field>
           </FieldGroup>
           <DialogFooter>
-            <Button onClick={handleCreateUser} disabled={creating}>
-              {creating ? "Creating..." : "Create User"}
+            <Button onClick={handleCreate} disabled={saving}>
+              {saving ? "Creating..." : "Create User"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit User Dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit User</DialogTitle>
+            <DialogDescription>Update user details.</DialogDescription>
+          </DialogHeader>
+          <FieldGroup>
+            <Field data-invalid={!!formErrors.name || undefined}>
+              <FieldLabel>Name</FieldLabel>
+              <Input
+                value={editForm.name}
+                onChange={(e) => setEditForm((prev) => ({ ...prev, name: e.target.value }))}
+              />
+              {formErrors.name && <FieldError errors={[{ message: formErrors.name }]} />}
+            </Field>
+            <Field data-invalid={!!formErrors.email || undefined}>
+              <FieldLabel>Email</FieldLabel>
+              <Input
+                type="email"
+                value={editForm.email}
+                onChange={(e) => setEditForm((prev) => ({ ...prev, email: e.target.value }))}
+              />
+              {formErrors.email && <FieldError errors={[{ message: formErrors.email }]} />}
+            </Field>
+            <Field data-invalid={!!formErrors.username || undefined}>
+              <FieldLabel>Username</FieldLabel>
+              <Input
+                value={editForm.username}
+                onChange={(e) => setEditForm((prev) => ({ ...prev, username: e.target.value }))}
+              />
+              {formErrors.username && <FieldError errors={[{ message: formErrors.username }]} />}
+            </Field>
+            {editingUser?.id !== currentUserId && (
+              <Field>
+                <FieldLabel>Role</FieldLabel>
+                <Select
+                  value={editForm.role}
+                  onValueChange={(v) => v !== null && setEditForm((prev) => ({ ...prev, role: v }))}
+                  items={[
+                    { label: "User", value: "user" },
+                    { label: "Admin", value: "admin" },
+                  ]}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="user">User</SelectItem>
+                    <SelectItem value="admin">Admin</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
+          </FieldGroup>
+          <DialogFooter>
+            <Button onClick={handleEdit} disabled={saving}>
+              {saving ? "Saving..." : "Save Changes"}
             </Button>
           </DialogFooter>
         </DialogContent>
