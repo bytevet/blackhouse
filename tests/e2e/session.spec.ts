@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { signInAsAdmin, createSession, getBaseUrl } from "./helpers";
 
-test.describe("Session lifecycle", () => {
+test.describe.serial("Session lifecycle", () => {
   test.skip(() => !process.env.E2E_DOCKER, "Requires Docker — set E2E_DOCKER=1 to enable");
 
   let sessionId: string;

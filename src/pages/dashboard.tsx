@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 import { timeAgo } from "@/lib/time";
 import type { CodingSession, Template, AgentConfig, SessionStatus } from "@/db/schema";
+import { SESSION_STATUSES } from "@/db/schema";
 import { sessionStatusConfig } from "@/lib/session-status";
 
 type SessionWithUser = CodingSession & { user?: { name: string | null; email: string | null } };
@@ -57,6 +58,10 @@ export function DashboardPage() {
   const [agentConfigs, setAgentConfigs] = useState<AgentConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAll, setShowAll] = useState(false);
+  const [filterStatus, setFilterStatus] = useState<SessionStatus | "">("");
+  const [filterResult, setFilterResult] = useState("");
+  const [filterAgent, setFilterAgent] = useState("");
+  const [filterTemplate, setFilterTemplate] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{
@@ -73,18 +78,22 @@ export function DashboardPage() {
     templateId: "",
   });
 
+  const sessionQuery = (page: number) => ({
+    page: String(page),
+    perPage: String(sessionsPerPage),
+    ...(isAdmin && showAll ? { all: "true" as const } : {}),
+    ...(filterStatus ? { status: filterStatus } : {}),
+    ...(filterResult ? { hasResult: filterResult } : {}),
+    ...(filterAgent ? { agent: filterAgent } : {}),
+    ...(filterTemplate ? { templateId: filterTemplate } : {}),
+  });
+
   useEffect(() => {
     const load = async () => {
       try {
         const [sessionsResult, myTemplates, publicTemplates, configs] = await Promise.all([
           client.api.sessions
-            .$get({
-              query: {
-                page: String(sessionsPage),
-                perPage: String(sessionsPerPage),
-                ...(isAdmin && showAll ? { all: "true" } : {}),
-              },
-            })
+            .$get({ query: sessionQuery(sessionsPage) })
             .then((r) => unwrap<Paginated<SessionWithUser>>(r)),
           client.api.templates
             .$get({ query: { mine: "true", perPage: "100" } })
@@ -109,12 +118,10 @@ export function DashboardPage() {
       }
     };
     load();
-  }, [sessionsPage, showAll]);
+  }, [sessionsPage, showAll, filterStatus, filterResult, filterAgent, filterTemplate]);
 
   const refreshSessions = async (page = sessionsPage) => {
-    const res = await client.api.sessions.$get({
-      query: { page: String(page), perPage: String(sessionsPerPage) },
-    });
+    const res = await client.api.sessions.$get({ query: sessionQuery(page) });
     const result = await unwrap<Paginated<SessionWithUser>>(res);
     setSessions(result.data);
     setSessionsTotal(result.total);
@@ -383,14 +390,110 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {isAdmin && (
-        <div className="flex items-center gap-2">
-          <Switch checked={showAll} onCheckedChange={setShowAll} size="sm" />
-          <Label className="text-xs text-muted-foreground">
-            {showAll ? "Show all sessions" : "My sessions"}
-          </Label>
-        </div>
-      )}
+      <div className="flex flex-wrap items-center gap-2">
+        {isAdmin && (
+          <>
+            <Switch checked={showAll} onCheckedChange={setShowAll} size="sm" />
+            <Label className="text-xs text-muted-foreground">{showAll ? "All" : "Mine"}</Label>
+            <div className="mx-1 h-4 w-px bg-border" />
+          </>
+        )}
+        <Select
+          value={filterStatus || "__all__"}
+          onValueChange={(v) => {
+            setFilterStatus(v === "__all__" ? "" : (v as SessionStatus));
+            setSessionsPage(1);
+          }}
+          items={[
+            { label: "All statuses", value: "__all__" },
+            ...SESSION_STATUSES.map((s) => ({
+              label: sessionStatusConfig[s].label,
+              value: s,
+            })),
+          ]}
+        >
+          <SelectTrigger className="h-7 w-auto min-w-28 text-xs">
+            <SelectValue placeholder="Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">All statuses</SelectItem>
+            {SESSION_STATUSES.map((s) => (
+              <SelectItem key={s} value={s}>
+                {sessionStatusConfig[s].label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select
+          value={filterResult || "__all__"}
+          onValueChange={(v) => {
+            setFilterResult(v === "__all__" ? "" : v!);
+            setSessionsPage(1);
+          }}
+          items={[
+            { label: "All results", value: "__all__" },
+            { label: "Has result", value: "true" },
+            { label: "No result", value: "false" },
+          ]}
+        >
+          <SelectTrigger className="h-7 w-auto min-w-28 text-xs">
+            <SelectValue placeholder="Result" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">All results</SelectItem>
+            <SelectItem value="true">Has result</SelectItem>
+            <SelectItem value="false">No result</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select
+          value={filterAgent || "__all__"}
+          onValueChange={(v) => {
+            setFilterAgent(v === "__all__" ? "" : v!);
+            setSessionsPage(1);
+          }}
+          items={[
+            { label: "All agents", value: "__all__" },
+            ...agentConfigs.map((a) => ({ label: a.displayName, value: a.id })),
+          ]}
+        >
+          <SelectTrigger className="h-7 w-auto min-w-28 text-xs">
+            <SelectValue placeholder="Agent" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">All agents</SelectItem>
+            {agentConfigs.map((a) => (
+              <SelectItem key={a.id} value={a.id}>
+                {a.displayName}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {templates.length > 0 && (
+          <Select
+            value={filterTemplate || "__all__"}
+            onValueChange={(v) => {
+              setFilterTemplate(v === "__all__" ? "" : v!);
+              setSessionsPage(1);
+            }}
+            items={[
+              { label: "All templates", value: "__all__" },
+              ...templates.map((t) => ({ label: t.name, value: t.id })),
+            ]}
+          >
+            <SelectTrigger className="h-7 w-auto min-w-28 text-xs">
+              <SelectValue placeholder="Template" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">All templates</SelectItem>
+              {templates.map((t) => (
+                <SelectItem key={t.id} value={t.id}>
+                  {t.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      </div>
 
       {sessions.length === 0 ? (
         <p className="text-sm text-muted-foreground">No sessions yet. Create one to get started.</p>
@@ -415,15 +518,37 @@ export function DashboardPage() {
                   )}
                 </CardHeader>
                 <CardContent className="flex-1 space-y-1.5">
-                  {showAll && s.user && (
-                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <User className="size-3 shrink-0" />
-                      {s.user.name || s.user.email}
-                    </div>
-                  )}
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Bot className="size-3 shrink-0" />
-                    {s.preset}
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                    {showAll && s.user && (
+                      <>
+                        <span className="flex items-center gap-1">
+                          <User className="size-3" />
+                          {s.user.name || s.user.email}
+                        </span>
+                        <span>&middot;</span>
+                      </>
+                    )}
+                    <span className="flex items-center gap-1">
+                      <Bot className="size-3" />
+                      {s.preset}
+                    </span>
+                    <span>&middot;</span>
+                    <span className="flex items-center gap-1">
+                      <Clock className="size-3" />
+                      {timeAgo(s.createdAt)}
+                    </span>
+                    {s.resultHtml && (
+                      <>
+                        <span>&middot;</span>
+                        <Badge
+                          variant="outline"
+                          className="h-4 gap-1 border-green-500/30 bg-green-500/10 text-[0.625rem] text-green-700 dark:text-green-400"
+                        >
+                          <span className="size-1.5 rounded-full bg-green-500" />
+                          Result
+                        </Badge>
+                      </>
+                    )}
                   </div>
                   {s.gitRepoUrl && (
                     <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -431,19 +556,6 @@ export function DashboardPage() {
                       <span className="truncate">{s.gitRepoUrl}</span>
                     </div>
                   )}
-                  {s.resultHtml && (
-                    <Badge
-                      variant="outline"
-                      className="gap-1 border-green-500/30 bg-green-500/10 text-xs text-green-700 dark:text-green-400"
-                    >
-                      <span className="size-1.5 rounded-full bg-green-500" />
-                      Result
-                    </Badge>
-                  )}
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Clock className="size-3 shrink-0" />
-                    {timeAgo(s.createdAt)}
-                  </div>
                 </CardContent>
                 <CardFooter className="gap-1.5">
                   <Link

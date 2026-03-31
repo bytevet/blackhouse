@@ -4,7 +4,7 @@ import { zValidator } from "@hono/zod-validator";
 import { randomBytes } from "node:crypto";
 import { db } from "../db/index.js";
 import * as schema from "../db/schema.js";
-import { eq, desc, count } from "drizzle-orm";
+import { eq, desc, count, and, isNotNull, isNull, type SQL } from "drizzle-orm";
 import { getDockerClient } from "../lib/docker.js";
 import type { AuthEnv } from "../middleware/auth.js";
 import { authMiddleware } from "../middleware/auth.js";
@@ -19,7 +19,16 @@ const app = new Hono<AuthEnv>()
     authMiddleware,
     zValidator(
       "query",
-      z.object({ all: z.coerce.boolean().optional() }).merge(paginationQuery).optional(),
+      z
+        .object({
+          all: z.coerce.boolean().optional(),
+          status: z.enum(["pending", "running", "stopped", "destroyed"]).optional(),
+          hasResult: z.coerce.boolean().optional(),
+          agent: z.string().optional(),
+          templateId: z.string().optional(),
+        })
+        .merge(paginationQuery)
+        .optional(),
     ),
     async (c) => {
       const session = c.get("session");
@@ -28,8 +37,21 @@ const app = new Hono<AuthEnv>()
       const perPage = query?.perPage ?? 20;
       const offset = (page - 1) * perPage;
 
+      // Build filter conditions
+      const filters: SQL[] = [];
+      if (query?.status) filters.push(eq(schema.codingSessions.status, query.status));
+      if (query?.hasResult === true) filters.push(isNotNull(schema.codingSessions.resultHtml));
+      if (query?.hasResult === false) filters.push(isNull(schema.codingSessions.resultHtml));
+      if (query?.agent) filters.push(eq(schema.codingSessions.agentConfigId, query.agent));
+      if (query?.templateId) filters.push(eq(schema.codingSessions.templateId, query.templateId));
+
       if (query?.all && session.user.role === "admin") {
-        const [{ total }] = await db.select({ total: count() }).from(schema.codingSessions);
+        const where = filters.length > 0 ? and(...filters) : undefined;
+
+        const [{ total }] = await db
+          .select({ total: count() })
+          .from(schema.codingSessions)
+          .where(where);
 
         const rows = await db
           .select({
@@ -39,6 +61,7 @@ const app = new Hono<AuthEnv>()
           })
           .from(schema.codingSessions)
           .leftJoin(schema.user, eq(schema.codingSessions.userId, schema.user.id))
+          .where(where)
           .orderBy(desc(schema.codingSessions.createdAt))
           .limit(perPage)
           .offset(offset);
@@ -54,15 +77,18 @@ const app = new Hono<AuthEnv>()
         });
       }
 
+      const ownerFilter = eq(schema.codingSessions.userId, session.user.id);
+      const where = filters.length > 0 ? and(ownerFilter, ...filters) : ownerFilter;
+
       const [{ total }] = await db
         .select({ total: count() })
         .from(schema.codingSessions)
-        .where(eq(schema.codingSessions.userId, session.user.id));
+        .where(where);
 
       const rows = await db
         .select()
         .from(schema.codingSessions)
-        .where(eq(schema.codingSessions.userId, session.user.id))
+        .where(where)
         .orderBy(desc(schema.codingSessions.createdAt))
         .limit(perPage)
         .offset(offset);
