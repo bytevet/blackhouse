@@ -1,4 +1,3 @@
-// @ts-nocheck — Hono WebSocket types not fully resolved
 import { Hono } from "hono";
 import type { WSContext } from "hono/ws";
 import type { createNodeWebSocket } from "@hono/node-ws";
@@ -36,11 +35,11 @@ setInterval(
   5 * 60 * 1000,
 );
 
-function tagOutput(chunk: Buffer): Uint8Array {
+function tagOutput(chunk: Buffer): ArrayBuffer {
   const tagged = Buffer.allocUnsafe(1 + chunk.length);
   tagged[0] = 0x00;
   chunk.copy(tagged, 1);
-  return new Uint8Array(tagged);
+  return tagged.buffer.slice(tagged.byteOffset, tagged.byteOffset + tagged.byteLength);
 }
 
 async function validateSession(
@@ -154,12 +153,12 @@ export function createTerminalRoute(
   app.get(
     "/:sessionId",
     upgradeWebSocket((c) => {
-      const sessionId = c.req.param("sessionId");
+      const sessionId = c.req.param("sessionId")!;
       const token = c.req.query("token");
 
       return {
         async onOpen(_evt, ws) {
-          const result = await validateSession(sessionId, token ?? undefined);
+          const result = await validateSession(sessionId, token);
           if (!result) {
             ws.send("[Auth failed or session not running]");
             ws.close(4001, "Unauthorized");
@@ -334,8 +333,14 @@ export function createTerminalRoute(
             raw = message;
           } else if (typeof message === "string") {
             raw = Buffer.from(message, "utf-8");
-          } else if (message instanceof ArrayBuffer || message instanceof Uint8Array) {
+          } else if (message instanceof ArrayBuffer) {
             raw = Buffer.from(message);
+          } else if (message instanceof Uint8Array) {
+            raw = Buffer.from(
+              message.buffer as ArrayBuffer,
+              message.byteOffset,
+              message.byteLength,
+            );
           } else {
             raw = Buffer.from(String(message), "utf-8");
           }
