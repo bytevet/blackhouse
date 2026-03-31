@@ -41,15 +41,15 @@ test.describe("Dashboard", () => {
     // Admin should see the toggle
     const toggle = page.getByRole("switch");
     await expect(toggle).toBeVisible();
-    await expect(page.getByText("My sessions")).toBeVisible();
+    await expect(page.getByText("Mine")).toBeVisible();
 
     // Toggle on
     await toggle.click();
-    await expect(page.getByText("Show all sessions")).toBeVisible();
+    await expect(page.getByText("All", { exact: true })).toBeVisible();
 
     // Toggle off
     await toggle.click();
-    await expect(page.getByText("My sessions")).toBeVisible();
+    await expect(page.getByText("Mine")).toBeVisible();
   });
 
   test("theme toggle works", async ({ page }) => {

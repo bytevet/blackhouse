@@ -119,9 +119,9 @@ test.describe("Settings", () => {
       timeout: 5000,
     });
 
-    // Delete user — click the trash button in the row
+    // Delete user — click the last button (trash) in the row
     const row = page.getByRole("row").filter({ hasText: "test-e2e@blackhouse.local" });
-    await row.getByRole("button").click();
+    await row.getByRole("button").last().click();
     await page.waitForTimeout(500);
     await page
       .getByRole("dialog")
