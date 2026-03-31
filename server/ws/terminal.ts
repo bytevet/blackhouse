@@ -8,6 +8,9 @@ import { eq } from "drizzle-orm";
 
 const SCROLLBACK_LIMIT = 256 * 1024; // 256KB of recent output
 
+const DEFAULT_COLS = 120;
+const DEFAULT_ROWS = 30;
+
 interface TerminalState {
   stream: NodeJS.ReadWriteStream & { destroyed?: boolean };
   containerId: string;
@@ -15,6 +18,8 @@ interface TerminalState {
   scrollbackSize: number;
   errored: boolean;
   peers: Set<WSContext>;
+  cols: number;
+  rows: number;
 }
 
 const activeTerminals = new Map<string, TerminalState>();
@@ -232,12 +237,21 @@ export function createTerminalRoute(
                 scrollbackSize: 0,
                 errored: false,
                 peers: new Set(),
+                cols: DEFAULT_COLS,
+                rows: DEFAULT_ROWS,
               };
               activeTerminals.set(sessionId, terminal);
 
               terminal.stream.on("error", () => {
                 terminal.errored = true;
               });
+
+              // Set initial terminal size (better default than Docker's 80x24)
+              try {
+                await container.resize({ h: DEFAULT_ROWS, w: DEFAULT_COLS });
+              } catch {
+                // ignore — container may not support resize yet
+              }
 
               // Send initial logs to scrollback
               if (initialLogs && initialLogs.length > 0) {
@@ -258,12 +272,22 @@ export function createTerminalRoute(
               }
 
               // Set up stream listeners ONCE (shared across all peers)
-              let isFirstChunk = true;
+              // Dual guard for stripping Docker attach metadata:
+              // - Counter: first 10 chunks
+              // - Grace period: first 2 seconds after attach
+              let stripCounter = 10;
+              const stripDeadline = Date.now() + 2000;
+
               terminal.stream.on("data", (rawChunk: Buffer) => {
                 let chunk: Buffer = Buffer.from(rawChunk) as Buffer;
 
-                if (isFirstChunk) {
-                  isFirstChunk = false;
+                // Strip Docker log multiplexing headers (can appear intermittently)
+                chunk = stripDockerLogHeaders(chunk);
+                if (chunk.length === 0) return;
+
+                // Strip attach metadata during grace window
+                if (stripCounter > 0 && Date.now() < stripDeadline) {
+                  stripCounter--;
                   chunk = stripAttachMetadata(chunk);
                   if (chunk.length === 0) return;
                 }
@@ -362,7 +386,9 @@ export function createTerminalRoute(
               if (parts.length === 2) {
                 const cols = parseInt(parts[0], 10);
                 const rows = parseInt(parts[1], 10);
-                if (cols > 0 && rows > 0) {
+                if (cols > 0 && rows > 0 && (cols !== terminal.cols || rows !== terminal.rows)) {
+                  terminal.cols = cols;
+                  terminal.rows = rows;
                   try {
                     const docker = await getDockerClient();
                     const container = docker.getContainer(terminal.containerId);

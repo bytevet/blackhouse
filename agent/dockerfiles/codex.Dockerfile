@@ -9,8 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     locales build-essential python3 python3-pip python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
-ARG NODE_MAJOR_VER=22
-RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR_VER:-22}.x | bash - \
+ARG NODE_MAJOR_VER=24
+RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR_VER:-24}.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 

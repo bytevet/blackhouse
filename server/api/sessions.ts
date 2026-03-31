@@ -238,8 +238,10 @@ const app = new Hono<AuthEnv>()
       // Build environment variables for the container
       const env: string[] = [
         "TERM=xterm-256color",
-        "LANG=C.UTF-8",
-        "LC_ALL=C.UTF-8",
+        "COLORTERM=truecolor",
+        "LANG=en_US.UTF-8",
+        "LC_ALL=en_US.UTF-8",
+        "EDITOR=vi",
         `SESSION_ID=${codingSession.id}`,
         `SESSION_NAME=${data.name}`,
         `BLACKHOUSE_URL=${process.env.BLACKHOUSE_CONTAINER_URL || "http://host.docker.internal:3000"}`,
@@ -248,9 +250,7 @@ const app = new Hono<AuthEnv>()
 
       if (data.gitRepoUrl) {
         env.push(`GIT_REPO_URL=${data.gitRepoUrl}`);
-        if (data.gitBranch) {
-          env.push(`GIT_BRANCH=${data.gitBranch}`);
-        }
+        if (data.gitBranch) env.push(`GIT_BRANCH=${data.gitBranch}`);
       }
 
       if (agentConfig.agentCommand) {

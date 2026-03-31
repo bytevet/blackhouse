@@ -32,7 +32,14 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
   const [connected, setConnected] = useState(false);
   const [focused, setFocused] = useState(false);
 
-  const sendResize = useCallback((cols: number, rows: number) => {
+  const sendResize = useCallback((cols: number, rows: number, immediate = false) => {
+    if (immediate) {
+      const ws = wsRef.current;
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(encodeResize(cols, rows));
+      }
+      return;
+    }
     // Debounce: only send the last resize after 50ms of no changes
     if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
     resizeTimerRef.current = setTimeout(() => {
@@ -59,11 +66,14 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
     ws.onopen = () => {
       setConnected(true);
       terminalRef.current?.focus();
+      // Send resize immediately (no debounce) so the container PTY
+      // knows the correct dimensions before any output is rendered
       const fitAddon = fitAddonRef.current;
       if (fitAddon) {
+        fitAddon.fit();
         const dims = fitAddon.proposeDimensions();
         if (dims) {
-          sendResize(dims.cols, dims.rows);
+          sendResize(dims.cols, dims.rows, true);
         }
       }
     };
