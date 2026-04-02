@@ -17,7 +17,15 @@ const app = new Hono<AuthEnv>()
     authMiddleware,
     zValidator(
       "query",
-      z.object({ mine: z.coerce.boolean().optional() }).merge(paginationQuery).optional(),
+      z
+        .object({
+          mine: z
+            .enum(["true", "false"])
+            .transform((v) => v === "true")
+            .optional(),
+        })
+        .merge(paginationQuery)
+        .optional(),
     ),
     async (c) => {
       const session = c.get("session");
