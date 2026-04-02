@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSession } from "@/lib/auth-client";
 import { client, unwrap, type Paginated } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -48,6 +48,8 @@ export function MyTemplatesPage() {
     isPublic: false,
     gitRequired: false,
   });
+  const initialFormRef = useRef(formData);
+  const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
 
   const fetchTemplates = async (p = page) => {
     const res = await client.api.templates.$get({
@@ -66,26 +68,49 @@ export function MyTemplatesPage() {
 
   const openCreate = () => {
     setEditingTemplate(null);
-    setFormData({
+    const initial = {
       name: "",
       description: "",
       systemPrompt: "",
       isPublic: false,
       gitRequired: false,
-    });
+    };
+    setFormData(initial);
+    initialFormRef.current = initial;
     setDialogOpen(true);
   };
 
   const openEdit = (template: Template) => {
     setEditingTemplate(template);
-    setFormData({
+    const initial = {
       name: template.name,
       description: template.description || "",
       systemPrompt: template.systemPrompt || "",
       isPublic: template.isPublic ?? false,
       gitRequired: template.gitRequired ?? false,
-    });
+    };
+    setFormData(initial);
+    initialFormRef.current = initial;
     setDialogOpen(true);
+  };
+
+  const isFormDirty = () => {
+    const init = initialFormRef.current;
+    return (
+      formData.name !== init.name ||
+      formData.description !== init.description ||
+      formData.systemPrompt !== init.systemPrompt ||
+      formData.isPublic !== init.isPublic ||
+      formData.gitRequired !== init.gitRequired
+    );
+  };
+
+  const handleDialogClose = (open: boolean) => {
+    if (!open && isFormDirty()) {
+      setConfirmCloseOpen(true);
+      return;
+    }
+    setDialogOpen(open);
   };
 
   const openDelete = (template: Template) => {
@@ -216,61 +241,67 @@ export function MyTemplatesPage() {
       )}
 
       {/* Create / Edit Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
+      <Dialog open={dialogOpen} onOpenChange={handleDialogClose}>
+        <DialogContent className="sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>{editingTemplate ? "Edit Template" : "Create Template"}</DialogTitle>
             <DialogDescription>
               {editingTemplate ? "Update your template details." : "Create a new prompt template."}
             </DialogDescription>
           </DialogHeader>
-          <FieldGroup>
-            <Field>
-              <FieldLabel>Name</FieldLabel>
-              <Input
-                placeholder="Template name"
-                value={formData.name}
-                onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
-              />
-            </Field>
-            <Field>
-              <FieldLabel>Description</FieldLabel>
-              <Textarea
-                placeholder="Brief description"
-                value={formData.description}
-                onChange={(e) => setFormData((prev) => ({ ...prev, description: e.target.value }))}
-              />
-            </Field>
-            <Field>
-              <FieldLabel>System Prompt</FieldLabel>
-              <Textarea
-                placeholder="System prompt for the coding agent..."
-                className="min-h-32"
-                value={formData.systemPrompt}
-                onChange={(e) => setFormData((prev) => ({ ...prev, systemPrompt: e.target.value }))}
-              />
-            </Field>
-            <Field>
-              <div className="flex items-center gap-2">
-                <Switch
-                  checked={formData.isPublic}
-                  onCheckedChange={(v) => setFormData((prev) => ({ ...prev, isPublic: v }))}
-                  size="sm"
+          <div className="max-h-[60vh] overflow-y-auto -mx-4 px-4">
+            <FieldGroup>
+              <Field>
+                <FieldLabel>Name</FieldLabel>
+                <Input
+                  placeholder="Template name"
+                  value={formData.name}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
                 />
-                <FieldLabel className="text-xs">Public template</FieldLabel>
-              </div>
-            </Field>
-            <Field>
-              <div className="flex items-center gap-2">
-                <Switch
-                  checked={formData.gitRequired}
-                  onCheckedChange={(v) => setFormData((prev) => ({ ...prev, gitRequired: v }))}
-                  size="sm"
+              </Field>
+              <Field>
+                <FieldLabel>Description</FieldLabel>
+                <Textarea
+                  placeholder="Brief description"
+                  value={formData.description}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, description: e.target.value }))
+                  }
                 />
-                <FieldLabel className="text-xs">Require Git repository</FieldLabel>
-              </div>
-            </Field>
-          </FieldGroup>
+              </Field>
+              <Field>
+                <FieldLabel>System Prompt</FieldLabel>
+                <Textarea
+                  placeholder="System prompt for the coding agent..."
+                  className="resize-y"
+                  value={formData.systemPrompt}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, systemPrompt: e.target.value }))
+                  }
+                />
+              </Field>
+              <Field>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={formData.isPublic}
+                    onCheckedChange={(v) => setFormData((prev) => ({ ...prev, isPublic: v }))}
+                    size="sm"
+                  />
+                  <FieldLabel className="text-xs">Public template</FieldLabel>
+                </div>
+              </Field>
+              <Field>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={formData.gitRequired}
+                    onCheckedChange={(v) => setFormData((prev) => ({ ...prev, gitRequired: v }))}
+                    size="sm"
+                  />
+                  <FieldLabel className="text-xs">Require Git repository</FieldLabel>
+                </div>
+              </Field>
+            </FieldGroup>
+          </div>
           <DialogFooter>
             <Button onClick={handleSave} disabled={!formData.name.trim() || saving}>
               {saving ? "Saving..." : editingTemplate ? "Update Template" : "Create Template"}
@@ -295,6 +326,32 @@ export function MyTemplatesPage() {
             </Button>
             <Button variant="destructive" onClick={handleDelete}>
               Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Discard Changes Confirmation */}
+      <Dialog open={confirmCloseOpen} onOpenChange={setConfirmCloseOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Discard Changes</DialogTitle>
+            <DialogDescription>
+              You have unsaved changes. Are you sure you want to discard them?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmCloseOpen(false)}>
+              Keep Editing
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                setConfirmCloseOpen(false);
+                setDialogOpen(false);
+              }}
+            >
+              Discard
             </Button>
           </DialogFooter>
         </DialogContent>
