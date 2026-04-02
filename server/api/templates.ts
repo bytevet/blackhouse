@@ -7,6 +7,8 @@ import { eq, desc, count } from "drizzle-orm";
 import type { AuthEnv } from "../middleware/auth.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { paginationQuery } from "../lib/pagination.js";
+import { getDockerClient } from "../lib/docker.js";
+import { volumeMountSchema } from "../lib/validation.js";
 
 const app = new Hono<AuthEnv>()
   // ---------------------------------------------------------------------------
@@ -17,7 +19,15 @@ const app = new Hono<AuthEnv>()
     authMiddleware,
     zValidator(
       "query",
-      z.object({ mine: z.coerce.boolean().optional() }).merge(paginationQuery).optional(),
+      z
+        .object({
+          mine: z
+            .enum(["true", "false"])
+            .transform((v) => v === "true")
+            .optional(),
+        })
+        .merge(paginationQuery)
+        .optional(),
     ),
     async (c) => {
       const session = c.get("session");
@@ -62,6 +72,30 @@ const app = new Hono<AuthEnv>()
   )
 
   // ---------------------------------------------------------------------------
+  // GET /api/templates/volumes — list volumes in user's namespace
+  // ---------------------------------------------------------------------------
+  .get("/volumes", authMiddleware, async (c) => {
+    const session = c.get("session");
+    const username = session.user.username ?? session.user.id;
+    const prefix = `${username}-`;
+
+    try {
+      const docker = await getDockerClient();
+      const { Volumes } = await docker.listVolumes();
+      const userVolumes = (Volumes ?? [])
+        .filter((v) => v.Name.startsWith(prefix))
+        .map((v) => ({
+          name: v.Name.slice(prefix.length),
+          fullName: v.Name,
+          driver: v.Driver,
+        }));
+      return c.json(userVolumes);
+    } catch {
+      return c.json([]);
+    }
+  })
+
+  // ---------------------------------------------------------------------------
   // GET /api/templates/:id
   // ---------------------------------------------------------------------------
   .get("/:id", authMiddleware, async (c) => {
@@ -99,6 +133,7 @@ const app = new Hono<AuthEnv>()
         systemPrompt: z.string().optional(),
         skills: z.array(z.record(z.string(), z.unknown())).nullable().optional(),
         mcpConfig: z.record(z.string(), z.unknown()).nullable().optional(),
+        volumeMounts: volumeMountSchema.nullable().optional(),
         isPublic: z.boolean().optional(),
         gitRequired: z.boolean().optional(),
       }),
@@ -116,6 +151,7 @@ const app = new Hono<AuthEnv>()
           systemPrompt: data.systemPrompt ?? null,
           skills: data.skills ?? null,
           mcpConfig: data.mcpConfig ?? null,
+          volumeMounts: data.volumeMounts ?? null,
           isPublic: data.isPublic ?? false,
           gitRequired: data.gitRequired ?? false,
         })
@@ -139,6 +175,7 @@ const app = new Hono<AuthEnv>()
         systemPrompt: z.string().optional(),
         skills: z.array(z.record(z.string(), z.unknown())).nullable().optional(),
         mcpConfig: z.record(z.string(), z.unknown()).nullable().optional(),
+        volumeMounts: volumeMountSchema.nullable().optional(),
         isPublic: z.boolean().optional(),
         gitRequired: z.boolean().optional(),
       }),
@@ -168,6 +205,7 @@ const app = new Hono<AuthEnv>()
       if (data.systemPrompt !== undefined) updateData.systemPrompt = data.systemPrompt;
       if (data.skills !== undefined) updateData.skills = data.skills;
       if (data.mcpConfig !== undefined) updateData.mcpConfig = data.mcpConfig;
+      if (data.volumeMounts !== undefined) updateData.volumeMounts = data.volumeMounts;
       if (data.isPublic !== undefined) updateData.isPublic = data.isPublic;
       if (data.gitRequired !== undefined) updateData.gitRequired = data.gitRequired;
 

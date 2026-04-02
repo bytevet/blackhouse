@@ -69,6 +69,7 @@ export function DashboardPage() {
     sessionId: string;
     sessionName: string;
   } | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
 
   const [formData, setFormData] = useState({
     name: "",
@@ -649,18 +650,34 @@ export function DashboardPage() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmAction(null)}>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmAction(null)}
+              disabled={actionLoading}
+            >
               Cancel
             </Button>
             <Button
               variant="destructive"
+              disabled={actionLoading}
               onClick={async () => {
                 if (!confirmAction) return;
-                await handleSessionAction(confirmAction.sessionId, confirmAction.type);
-                setConfirmAction(null);
+                setActionLoading(true);
+                try {
+                  await handleSessionAction(confirmAction.sessionId, confirmAction.type);
+                  setConfirmAction(null);
+                } finally {
+                  setActionLoading(false);
+                }
               }}
             >
-              {confirmAction?.type === "stop" ? "Stop" : "Destroy"}
+              {actionLoading
+                ? confirmAction?.type === "stop"
+                  ? "Stopping..."
+                  : "Destroying..."
+                : confirmAction?.type === "stop"
+                  ? "Stop"
+                  : "Destroy"}
             </Button>
           </DialogFooter>
         </DialogContent>

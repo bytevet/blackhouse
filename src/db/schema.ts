@@ -120,6 +120,7 @@ export const templates = pgTable(
     systemPrompt: text("system_prompt"),
     skills: jsonb("skills").$type<object[] | null>(),
     mcpConfig: jsonb("mcp_config").$type<object | null>(),
+    volumeMounts: jsonb("volume_mounts").$type<{ name: string; mountPath: string }[] | null>(),
     isPublic: boolean("is_public").notNull().default(false),
     gitRequired: boolean("git_required").notNull().default(false),
     createdAt: timestamp("created_at").notNull().defaultNow(),

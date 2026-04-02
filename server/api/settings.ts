@@ -12,6 +12,7 @@ import { auth } from "../lib/auth.js";
 import type { AuthEnv } from "../middleware/auth.js";
 import { authMiddleware, adminMiddleware } from "../middleware/auth.js";
 import { paginationQuery, paginate } from "../lib/pagination.js";
+import { volumeMountSchema } from "../lib/validation.js";
 
 const app = new Hono<AuthEnv>()
   // ---------------------------------------------------------------------------
@@ -78,7 +79,7 @@ const app = new Hono<AuthEnv>()
         displayName: z.string(),
         agentCommand: z.string().optional(),
         envVars: z.array(z.object({ key: z.string(), value: z.string() })).optional(),
-        volumeMounts: z.array(z.object({ name: z.string(), mountPath: z.string() })).optional(),
+        volumeMounts: volumeMountSchema.optional(),
         dockerfileContent: z.string().nullable().optional(),
       }),
     ),
@@ -114,7 +115,7 @@ const app = new Hono<AuthEnv>()
         displayName: z.string(),
         agentCommand: z.string().optional(),
         envVars: z.array(z.object({ key: z.string(), value: z.string() })).optional(),
-        volumeMounts: z.array(z.object({ name: z.string(), mountPath: z.string() })).optional(),
+        volumeMounts: volumeMountSchema.optional(),
         dockerfileContent: z.string().nullable().optional(),
       }),
     ),
@@ -472,6 +473,25 @@ const app = new Hono<AuthEnv>()
         }
       }
 
+      // Collect namespaced volume names from templates
+      const allTemplates = await db
+        .select({
+          volumeMounts: schema.templates.volumeMounts,
+          username: schema.user.username,
+          userId: schema.user.id,
+        })
+        .from(schema.templates)
+        .leftJoin(schema.user, eq(schema.templates.userId, schema.user.id));
+
+      for (const t of allTemplates) {
+        if (Array.isArray(t.volumeMounts)) {
+          const prefix = t.username ?? t.userId ?? "unknown";
+          for (const m of t.volumeMounts as Array<{ name: string; mountPath: string }>) {
+            if (m.name) managedNames.add(`${prefix}-${m.name}`);
+          }
+        }
+      }
+
       const docker = await getDockerClient();
       const { Volumes } = await docker.listVolumes();
       const managed = (Volumes ?? []).filter((v) => managedNames.has(v.Name));
@@ -506,6 +526,20 @@ const app = new Hono<AuthEnv>()
     } catch (err) {
       return c.json(
         { error: `Failed to list volumes: ${err instanceof Error ? err.message : String(err)}` },
+        500,
+      );
+    }
+  })
+
+  .delete("/volumes/:name", adminMiddleware, async (c) => {
+    const volumeName = c.req.param("name");
+    try {
+      const docker = await getDockerClient();
+      await docker.getVolume(volumeName).remove();
+      return c.json({ success: true });
+    } catch (err) {
+      return c.json(
+        { error: `Failed to delete volume: ${err instanceof Error ? err.message : String(err)}` },
         500,
       );
     }

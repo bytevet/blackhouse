@@ -6,6 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import {
   Table,
@@ -15,7 +23,7 @@ import {
   TableRow,
   TableCell,
 } from "@/components/ui/table";
-import { Save, ChevronLeft, ChevronRight } from "lucide-react";
+import { Save, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 import { timeAgo } from "@/lib/time";
 
 interface ContainerInfo {
@@ -57,6 +65,8 @@ export function DockerPage() {
   const [containersPage, setContainersPage] = useState(1);
   const containersPerPage = 20;
   const [volumes, setVolumes] = useState<VolumeInfo[]>([]);
+  const [deletingVolume, setDeletingVolume] = useState<string | null>(null);
+  const [deleteVolumeLoading, setDeleteVolumeLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -282,13 +292,14 @@ export function DockerPage() {
                     <TableHead className="hidden sm:table-cell">Mountpoint</TableHead>
                     {hasUsageData && <TableHead>Size</TableHead>}
                     {hasUsageData && <TableHead>In Use</TableHead>}
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {volumes.length === 0 ? (
                     <TableRow>
                       <TableCell
-                        colSpan={hasUsageData ? 5 : 3}
+                        colSpan={hasUsageData ? 6 : 4}
                         className="text-center text-muted-foreground"
                       >
                         No volumes found.
@@ -319,6 +330,15 @@ export function DockerPage() {
                             )}
                           </TableCell>
                         )}
+                        <TableCell className="text-right">
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={() => setDeletingVolume(v.name)}
+                          >
+                            <Trash2 className="size-3" />
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     ))
                   )}
@@ -328,6 +348,47 @@ export function DockerPage() {
           })()}
         </CardContent>
       </Card>
+
+      <Dialog open={!!deletingVolume} onOpenChange={(open) => !open && setDeletingVolume(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Volume</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete volume{" "}
+              <code className="rounded bg-muted px-1 font-mono text-xs">{deletingVolume}</code>?
+              This will permanently remove all data stored in this volume.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeletingVolume(null)}
+              disabled={deleteVolumeLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleteVolumeLoading}
+              onClick={async () => {
+                if (!deletingVolume) return;
+                setDeleteVolumeLoading(true);
+                try {
+                  await client.api.settings.volumes[":name"].$delete({
+                    param: { name: deletingVolume },
+                  });
+                  setDeletingVolume(null);
+                  setVolumes((prev) => prev.filter((v) => v.name !== deletingVolume));
+                } finally {
+                  setDeleteVolumeLoading(false);
+                }
+              }}
+            >
+              {deleteVolumeLoading ? "Deleting..." : "Delete Volume"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

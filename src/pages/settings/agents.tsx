@@ -486,13 +486,14 @@ export function AgentsPage() {
               {volumeMounts.map((vm, i) => (
                 <div key={i} className="flex gap-2">
                   <Input
-                    placeholder="name"
+                    placeholder="volume-name"
                     value={vm.name}
                     onChange={(e) => {
                       const n = [...volumeMounts];
                       n[i] = { ...n[i], name: e.target.value };
                       setVolumeMounts(n);
                     }}
+                    pattern="^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
                     className="flex-1"
                   />
                   <Input
