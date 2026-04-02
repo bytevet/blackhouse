@@ -22,8 +22,10 @@ RUN npm install -g @google/gemini-cli
 RUN groupadd --gid 1001 workspace \
     && useradd --uid 1001 --gid 1001 --shell /bin/bash --create-home workspace
 
-# Create workspace directory
-RUN mkdir -p /workspace && chown workspace:workspace /workspace
+# Pre-create volume mount directories as workspace user so Docker
+# preserves ownership when mounting named volumes (avoids root:root)
+RUN mkdir -p /workspace /home/workspace/.gemini \
+    && chown -R workspace:workspace /workspace /home/workspace/.gemini
 WORKDIR /workspace
 
 # Copy entrypoint

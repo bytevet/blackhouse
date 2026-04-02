@@ -25,8 +25,10 @@ RUN curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/home/workspace/.local/bin:${PATH}"
 USER root
 
-# Create workspace directory
-RUN mkdir -p /workspace && chown workspace:workspace /workspace
+# Pre-create volume mount directories as workspace user so Docker
+# preserves ownership when mounting named volumes (avoids root:root)
+RUN mkdir -p /workspace /home/workspace/.claude /home/workspace/.config/claude-auth \
+    && chown -R workspace:workspace /workspace /home/workspace/.claude /home/workspace/.config
 WORKDIR /workspace
 
 # Copy entrypoint
