@@ -40,7 +40,7 @@ LICENSE
 # Docker files (avoid recursive context)
 Dockerfile
 Dockerfile.*
-docker-compose*.yml
+compose*.yml
 .dockerignore
 
 # OS files

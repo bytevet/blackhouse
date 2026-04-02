@@ -7,7 +7,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl git wget unzip jq vim openssh-client ca-certificates dumb-init \
     locales build-essential python3 python3-pip python3-venv \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && sed -i '/en_US.UTF-8/s/^# //' /etc/locale.gen && locale-gen
 
 ARG NODE_MAJOR_VER=24
 RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR_VER:-24}.x | bash - \

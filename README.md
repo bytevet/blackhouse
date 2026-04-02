@@ -46,10 +46,10 @@ cp .env.example .env
 echo "BETTER_AUTH_SECRET=$(openssl rand -base64 32)" >> .env
 
 # Start the stack
-docker-compose up -d
+docker compose up -d
 
 # Check logs for the generated admin password
-docker-compose logs app | grep password
+docker compose logs app | grep password
 ```
 
 The app is available at http://localhost:3000. On first startup, migrations run automatically and a default admin user is created.
@@ -59,7 +59,7 @@ The app is available at http://localhost:3000. On first startup, migrations run 
 ```bash
 # Set the VM-internal socket path
 echo "DOCKER_HOST_SOCKET=/run/podman/podman.sock" >> .env
-docker-compose up -d
+docker compose up -d
 ```
 
 ### Build Agent Images
@@ -129,7 +129,7 @@ npm run db:studio      # Drizzle Studio
 # Against dev server (starts automatically)
 npx playwright test
 
-# Against docker-compose deployment
+# Against docker compose deployment
 E2E_BASE_URL=http://localhost:3000 E2E_ADMIN_PASSWORD=your-password npx playwright test
 ```
 

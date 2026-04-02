@@ -296,6 +296,7 @@ const app = new Hono<AuthEnv>()
             Memory: 2 * 1024 * 1024 * 1024, // 2GB
             NanoCpus: 2_000_000_000, // 2 CPUs
             Binds: binds.length > 0 ? binds : undefined,
+            ExtraHosts: ["host.docker.internal:host-gateway"],
           },
         });
 
