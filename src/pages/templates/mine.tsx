@@ -22,8 +22,17 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/select";
 import { Field, FieldLabel, FieldGroup } from "@/components/ui/field";
-import { Plus, Edit, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
+import { Label } from "@/components/ui/label";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { Plus, Edit, Trash2, ChevronLeft, ChevronRight, Info } from "lucide-react";
 import { timeAgo } from "@/lib/time";
 import type { Template } from "@/db/schema";
 
@@ -48,8 +57,11 @@ export function MyTemplatesPage() {
     isPublic: false,
     gitRequired: false,
   });
+  const [volumeMounts, setVolumeMounts] = useState<{ name: string; mountPath: string }[]>([]);
   const initialFormRef = useRef(formData);
+  const initialVolumesRef = useRef(volumeMounts);
   const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
+  const [existingVolumes, setExistingVolumes] = useState<{ name: string }[]>([]);
 
   const fetchTemplates = async (p = page) => {
     const res = await client.api.templates.$get({
@@ -62,6 +74,11 @@ export function MyTemplatesPage() {
 
   useEffect(() => {
     fetchTemplates().finally(() => setLoading(false));
+    client.api.templates.volumes
+      .$get()
+      .then((r) => unwrap<{ name: string }[]>(r))
+      .then(setExistingVolumes)
+      .catch(() => {});
   }, [page]);
 
   const refreshTemplates = () => fetchTemplates();
@@ -77,6 +94,9 @@ export function MyTemplatesPage() {
     };
     setFormData(initial);
     initialFormRef.current = initial;
+    const vols: { name: string; mountPath: string }[] = [];
+    setVolumeMounts(vols);
+    initialVolumesRef.current = vols;
     setDialogOpen(true);
   };
 
@@ -91,17 +111,24 @@ export function MyTemplatesPage() {
     };
     setFormData(initial);
     initialFormRef.current = initial;
+    const vols = Array.isArray(template.volumeMounts)
+      ? (template.volumeMounts as { name: string; mountPath: string }[])
+      : [];
+    setVolumeMounts(vols.map((v) => ({ ...v })));
+    initialVolumesRef.current = vols;
     setDialogOpen(true);
   };
 
   const isFormDirty = () => {
     const init = initialFormRef.current;
+    const initVols = initialVolumesRef.current;
     return (
       formData.name !== init.name ||
       formData.description !== init.description ||
       formData.systemPrompt !== init.systemPrompt ||
       formData.isPublic !== init.isPublic ||
-      formData.gitRequired !== init.gitRequired
+      formData.gitRequired !== init.gitRequired ||
+      JSON.stringify(volumeMounts) !== JSON.stringify(initVols)
     );
   };
 
@@ -122,10 +149,12 @@ export function MyTemplatesPage() {
     if (!formData.name.trim()) return;
     setSaving(true);
     try {
+      const filteredMounts = volumeMounts.filter((v) => v.name.trim() && v.mountPath.trim());
       const body = {
         name: formData.name.trim(),
         description: formData.description.trim(),
         systemPrompt: formData.systemPrompt.trim(),
+        volumeMounts: filteredMounts.length > 0 ? filteredMounts : null,
         isPublic: formData.isPublic,
         gitRequired: formData.gitRequired,
       };
@@ -301,6 +330,93 @@ export function MyTemplatesPage() {
                 </div>
               </Field>
             </FieldGroup>
+
+            <div className="mt-4 space-y-2">
+              <div className="flex items-center gap-2">
+                <Label>Volume Mounts</Label>
+                <Tooltip>
+                  <TooltipTrigger>
+                    <Info className="size-3.5 text-muted-foreground" />
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-64 text-xs">
+                    All sessions using this template share the same volumes, including other users
+                    of public templates.
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              {volumeMounts.map((vm, i) => {
+                const isExisting = existingVolumes.some((v) => v.name === vm.name);
+                const selectValue = isExisting ? vm.name : "__new__";
+                return (
+                  <div key={i} className="flex gap-2">
+                    <Select
+                      value={selectValue}
+                      onValueChange={(v) => {
+                        if (v === null) return;
+                        const n = [...volumeMounts];
+                        n[i] = { ...n[i], name: v === "__new__" ? "" : v };
+                        setVolumeMounts(n);
+                      }}
+                      items={[
+                        { label: "New volume...", value: "__new__" },
+                        ...existingVolumes.map((v) => ({ label: v.name, value: v.name })),
+                      ]}
+                    >
+                      <SelectTrigger className="w-36 shrink-0">
+                        <SelectValue placeholder="Volume" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__new__">New volume...</SelectItem>
+                        {existingVolumes.map((v) => (
+                          <SelectItem key={v.name} value={v.name}>
+                            {v.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {selectValue === "__new__" && (
+                      <Input
+                        placeholder="volume-name"
+                        value={vm.name}
+                        onChange={(e) => {
+                          const n = [...volumeMounts];
+                          n[i] = { ...n[i], name: e.target.value };
+                          setVolumeMounts(n);
+                        }}
+                        pattern="^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+                        className="flex-1"
+                      />
+                    )}
+                    <Input
+                      placeholder="/mount/path"
+                      value={vm.mountPath}
+                      onChange={(e) => {
+                        const n = [...volumeMounts];
+                        n[i] = { ...n[i], mountPath: e.target.value };
+                        setVolumeMounts(n);
+                      }}
+                      className="flex-1"
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      type="button"
+                      onClick={() => setVolumeMounts(volumeMounts.filter((_, j) => j !== i))}
+                    >
+                      <Trash2 className="size-3" />
+                    </Button>
+                  </div>
+                );
+              })}
+              <Button
+                variant="outline"
+                size="sm"
+                type="button"
+                onClick={() => setVolumeMounts([...volumeMounts, { name: "", mountPath: "" }])}
+              >
+                <Plus className="size-3" /> Add Volume
+              </Button>
+            </div>
           </div>
           <DialogFooter>
             <Button onClick={handleSave} disabled={!formData.name.trim() || saving}>

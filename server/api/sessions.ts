@@ -268,7 +268,7 @@ const app = new Hono<AuthEnv>()
         }
       }
 
-      // Build volume mounts (Binds) from agent config
+      // Build volume mounts (Binds) from agent config + template
       const binds: string[] = [];
       if (Array.isArray(agentConfig.volumeMounts)) {
         for (const mount of agentConfig.volumeMounts as Array<{
@@ -276,6 +276,19 @@ const app = new Hono<AuthEnv>()
           mountPath: string;
         }>) {
           binds.push(`${mount.name}:${mount.mountPath}`);
+        }
+      }
+
+      // Template volumes — namespaced under template owner's username
+      if (template && Array.isArray(template.volumeMounts)) {
+        const [templateOwner] = await db
+          .select({ username: schema.user.username, id: schema.user.id })
+          .from(schema.user)
+          .where(eq(schema.user.id, template.userId))
+          .limit(1);
+        const ownerPrefix = templateOwner?.username ?? templateOwner?.id ?? "unknown";
+        for (const mount of template.volumeMounts as Array<{ name: string; mountPath: string }>) {
+          binds.push(`${ownerPrefix}-${mount.name}:${mount.mountPath}`);
         }
       }
 
