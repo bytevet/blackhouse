@@ -5,7 +5,14 @@ import { client, unwrap, type Paginated } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+  CardFooter,
+} from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -194,6 +201,31 @@ export function DockerPage() {
     load();
   }, [isAdmin, session, navigate, containersPage]);
 
+  // Poll system info every 5 seconds
+  useEffect(() => {
+    if (!isAdmin || loading) return;
+    const poll = setInterval(async () => {
+      try {
+        const info = await client.api.settings.system.$get().then((r) => unwrap<SystemInfo>(r));
+        setSystemInfo((prev) => {
+          if (!prev) return info;
+          // Skip update if values haven't meaningfully changed
+          if (
+            prev.loadAvg[0].toFixed(2) === info.loadAvg[0].toFixed(2) &&
+            prev.memFree === info.memFree &&
+            prev.diskFree === info.diskFree &&
+            prev.uptime === info.uptime
+          )
+            return prev;
+          return info;
+        });
+      } catch {
+        // ignore polling errors
+      }
+    }, 5000);
+    return () => clearInterval(poll);
+  }, [isAdmin, loading]);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
@@ -233,7 +265,14 @@ export function DockerPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               Connection Status
-              <Badge variant={isConnected ? "default" : "destructive"}>
+              <Badge
+                variant="outline"
+                className={
+                  isConnected
+                    ? "border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-400"
+                    : "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400"
+                }
+              >
                 {isConnected ? "Connected" : "Disconnected"}
               </Badge>
               {dockerStatus?.version && (
@@ -293,7 +332,7 @@ export function DockerPage() {
         </Card>
 
         {systemInfo && (
-          <Card>
+          <Card className="flex flex-col">
             <CardHeader>
               <CardTitle>System</CardTitle>
               <CardDescription>
@@ -301,35 +340,37 @@ export function DockerPage() {
                 {formatUptime(systemInfo.uptime)}
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="flex items-center justify-around">
-                <GaugeChart value={cpuLoad} label="CPU" color="hsl(var(--chart-1))" />
-                <GaugeChart value={memUsed} label="Memory" color="hsl(var(--chart-2))" />
-                {systemInfo.diskTotal > 0 && (
-                  <GaugeChart value={diskUsed} label="Disk" color="hsl(var(--chart-3))" />
-                )}
-              </div>
-              <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            <CardContent className="flex flex-1 items-center justify-center gap-6">
+              <GaugeChart value={cpuLoad} label="CPU" color="var(--color-chart-1)" />
+              <GaugeChart value={memUsed} label="Memory" color="var(--color-chart-2)" />
+              {systemInfo.diskTotal > 0 && (
+                <GaugeChart value={diskUsed} label="Disk" color="var(--color-chart-3)" />
+              )}
+            </CardContent>
+            <CardFooter className="flex-col gap-1 text-xs text-muted-foreground">
+              <div className="flex w-full justify-between">
                 <span>CPU</span>
-                <span className="text-right">
+                <span>
                   {systemInfo.cpuCount} cores &middot; load {systemInfo.loadAvg[0].toFixed(2)}
                 </span>
+              </div>
+              <div className="flex w-full justify-between">
                 <span>Memory</span>
-                <span className="text-right">
+                <span>
                   {formatBytes(systemInfo.memTotal - systemInfo.memFree)} /{" "}
                   {formatBytes(systemInfo.memTotal)}
                 </span>
-                {systemInfo.diskTotal > 0 && (
-                  <>
-                    <span>Disk</span>
-                    <span className="text-right">
-                      {formatBytes(systemInfo.diskTotal - systemInfo.diskFree)} /{" "}
-                      {formatBytes(systemInfo.diskTotal)}
-                    </span>
-                  </>
-                )}
               </div>
-            </CardContent>
+              {systemInfo.diskTotal > 0 && (
+                <div className="flex w-full justify-between">
+                  <span>Disk</span>
+                  <span>
+                    {formatBytes(systemInfo.diskTotal - systemInfo.diskFree)} /{" "}
+                    {formatBytes(systemInfo.diskTotal)}
+                  </span>
+                </div>
+              )}
+            </CardFooter>
           </Card>
         )}
       </div>
