@@ -23,7 +23,9 @@ import {
   TableRow,
   TableCell,
 } from "@/components/ui/table";
+import { ChartContainer } from "@/components/ui/chart";
 import { Save, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
+import { Label, PolarGrid, PolarRadiusAxis, RadialBar, RadialBarChart } from "recharts";
 import { timeAgo } from "@/lib/time";
 
 interface ContainerInfo {
@@ -41,6 +43,81 @@ interface VolumeInfo {
   scope: string;
   size: number | null;
   refCount: number | null;
+}
+
+interface SystemInfo {
+  hostname: string;
+  platform: string;
+  arch: string;
+  uptime: number;
+  loadAvg: [number, number, number];
+  cpuCount: number;
+  cpuModel: string;
+  memTotal: number;
+  memFree: number;
+  diskTotal: number;
+  diskFree: number;
+}
+
+function formatUptime(seconds: number): string {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+function GaugeChart({ value, label, color }: { value: number; label: string; color: string }) {
+  const pct = Math.min(Math.round(value * 100), 100);
+  const endAngle = 90 - (pct / 100) * 360;
+  return (
+    <div className="flex flex-col items-center">
+      <ChartContainer config={{}} className="mx-auto aspect-square h-24">
+        <RadialBarChart
+          data={[{ value: pct, fill: color }]}
+          startAngle={90}
+          endAngle={endAngle}
+          innerRadius={36}
+          outerRadius={48}
+        >
+          <PolarGrid
+            gridType="circle"
+            radialLines={false}
+            stroke="none"
+            polarRadius={[40, 32]}
+            className="first:fill-muted last:fill-background"
+          />
+          <RadialBar dataKey="value" background cornerRadius={5} />
+          <PolarRadiusAxis tick={false} tickLine={false} axisLine={false}>
+            <Label
+              content={({ viewBox }) => {
+                if (viewBox && "cx" in viewBox && "cy" in viewBox) {
+                  return (
+                    <text
+                      x={viewBox.cx}
+                      y={viewBox.cy}
+                      textAnchor="middle"
+                      dominantBaseline="middle"
+                    >
+                      <tspan
+                        x={viewBox.cx}
+                        y={viewBox.cy}
+                        className="fill-foreground text-lg font-bold"
+                      >
+                        {pct}%
+                      </tspan>
+                    </text>
+                  );
+                }
+              }}
+            />
+          </PolarRadiusAxis>
+        </RadialBarChart>
+      </ChartContainer>
+      <span className="text-xs text-muted-foreground">{label}</span>
+    </div>
+  );
 }
 
 function formatBytes(bytes: number): string {
@@ -65,6 +142,7 @@ export function DockerPage() {
   const [containersPage, setContainersPage] = useState(1);
   const containersPerPage = 20;
   const [volumes, setVolumes] = useState<VolumeInfo[]>([]);
+  const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
   const [deletingVolume, setDeletingVolume] = useState<string | null>(null);
   const [deleteVolumeLoading, setDeleteVolumeLoading] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -83,7 +161,7 @@ export function DockerPage() {
     }
     const load = async () => {
       try {
-        const [status, config, containerList, volumeList] = await Promise.all([
+        const [status, config, containerList, volumeList, sysInfo] = await Promise.all([
           client.api.settings.docker.status
             .$get()
             .then((r) => unwrap<{ connected: boolean; version?: string; error?: string }>(r)),
@@ -94,11 +172,16 @@ export function DockerPage() {
             .$get({ query: { page: String(containersPage), perPage: String(containersPerPage) } })
             .then((r) => unwrap<Paginated<ContainerInfo>>(r)),
           client.api.settings.volumes.$get().then((r) => unwrap<VolumeInfo[]>(r)),
+          client.api.settings.system
+            .$get()
+            .then((r) => unwrap<SystemInfo>(r))
+            .catch(() => null),
         ]);
         setDockerStatus(status);
         setContainers(containerList.data);
         setContainersTotal(containerList.total);
         setVolumes(volumeList);
+        if (sysInfo) setSystemInfo(sysInfo);
         setFormData({
           socketPath: config?.socketPath || "",
           host: config?.host || "",
@@ -137,68 +220,119 @@ export function DockerPage() {
 
   const isConnected = dockerStatus?.connected ?? false;
 
+  const memUsed = systemInfo ? (systemInfo.memTotal - systemInfo.memFree) / systemInfo.memTotal : 0;
+  const diskUsed = systemInfo?.diskTotal
+    ? (systemInfo.diskTotal - systemInfo.diskFree) / systemInfo.diskTotal
+    : 0;
+  const cpuLoad = systemInfo ? systemInfo.loadAvg[0] / systemInfo.cpuCount : 0;
+
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            Connection Status
-            <Badge variant={isConnected ? "default" : "destructive"}>
-              {isConnected ? "Connected" : "Disconnected"}
-            </Badge>
-            {dockerStatus?.version && (
-              <span className="text-xs font-normal text-muted-foreground">
-                v{dockerStatus.version}
-              </span>
-            )}
-          </CardTitle>
-          <CardDescription>
-            {!isConnected && dockerStatus?.error ? (
-              <span className="text-destructive">{dockerStatus.error}</span>
-            ) : (
-              "Configure how Blackhouse connects to the Docker daemon."
-            )}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="max-w-md">
-          <form onSubmit={handleSubmit}>
-            <FieldGroup>
-              <Field>
-                <FieldLabel>Socket Path</FieldLabel>
-                <Input
-                  placeholder="/var/run/docker.sock"
-                  value={formData.socketPath}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, socketPath: e.target.value }))}
-                />
-              </Field>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              Connection Status
+              <Badge variant={isConnected ? "default" : "destructive"}>
+                {isConnected ? "Connected" : "Disconnected"}
+              </Badge>
+              {dockerStatus?.version && (
+                <span className="text-xs font-normal text-muted-foreground">
+                  v{dockerStatus.version}
+                </span>
+              )}
+            </CardTitle>
+            <CardDescription>
+              {!isConnected && dockerStatus?.error ? (
+                <span className="text-destructive">{dockerStatus.error}</span>
+              ) : (
+                "Configure how Blackhouse connects to the Docker daemon."
+              )}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="max-w-md">
+            <form onSubmit={handleSubmit}>
+              <FieldGroup>
+                <Field>
+                  <FieldLabel>Socket Path</FieldLabel>
+                  <Input
+                    placeholder="/var/run/docker.sock"
+                    value={formData.socketPath}
+                    onChange={(e) =>
+                      setFormData((prev) => ({ ...prev, socketPath: e.target.value }))
+                    }
+                  />
+                </Field>
 
-              <Field>
-                <FieldLabel>Host</FieldLabel>
-                <Input
-                  placeholder="localhost"
-                  value={formData.host}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, host: e.target.value }))}
-                />
-              </Field>
+                <Field>
+                  <FieldLabel>Host</FieldLabel>
+                  <Input
+                    placeholder="localhost"
+                    value={formData.host}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, host: e.target.value }))}
+                  />
+                </Field>
 
-              <Field>
-                <FieldLabel>Port</FieldLabel>
-                <Input
-                  type="number"
-                  placeholder="2375"
-                  value={formData.port}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, port: e.target.value }))}
-                />
-              </Field>
+                <Field>
+                  <FieldLabel>Port</FieldLabel>
+                  <Input
+                    type="number"
+                    placeholder="2375"
+                    value={formData.port}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, port: e.target.value }))}
+                  />
+                </Field>
 
-              <Button type="submit" disabled={saving} className="w-fit">
-                <Save className="size-3" />
-                {saving ? "Saving..." : "Save Config"}
-              </Button>
-            </FieldGroup>
-          </form>
-        </CardContent>
-      </Card>
+                <Button type="submit" disabled={saving} className="w-fit">
+                  <Save className="size-3" />
+                  {saving ? "Saving..." : "Save Config"}
+                </Button>
+              </FieldGroup>
+            </form>
+          </CardContent>
+        </Card>
+
+        {systemInfo && (
+          <Card>
+            <CardHeader>
+              <CardTitle>System</CardTitle>
+              <CardDescription>
+                {systemInfo.hostname} &middot; {systemInfo.platform}/{systemInfo.arch} &middot; up{" "}
+                {formatUptime(systemInfo.uptime)}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-around">
+                <GaugeChart value={cpuLoad} label="CPU" color="hsl(var(--chart-1))" />
+                <GaugeChart value={memUsed} label="Memory" color="hsl(var(--chart-2))" />
+                {systemInfo.diskTotal > 0 && (
+                  <GaugeChart value={diskUsed} label="Disk" color="hsl(var(--chart-3))" />
+                )}
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                <span>CPU</span>
+                <span className="text-right">
+                  {systemInfo.cpuCount} cores &middot; load {systemInfo.loadAvg[0].toFixed(2)}
+                </span>
+                <span>Memory</span>
+                <span className="text-right">
+                  {formatBytes(systemInfo.memTotal - systemInfo.memFree)} /{" "}
+                  {formatBytes(systemInfo.memTotal)}
+                </span>
+                {systemInfo.diskTotal > 0 && (
+                  <>
+                    <span>Disk</span>
+                    <span className="text-right">
+                      {formatBytes(systemInfo.diskTotal - systemInfo.diskFree)} /{" "}
+                      {formatBytes(systemInfo.diskTotal)}
+                    </span>
+                  </>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </div>
 
       <Card>
         <CardHeader>
