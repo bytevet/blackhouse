@@ -5,15 +5,19 @@ import { timeAgo } from "@/lib/time";
 import { getHighlighter } from "@/lib/shiki";
 
 interface ResultViewerProps {
+  sessionId: string;
   html: string;
-  updatedAt?: Date;
+  updatedAt?: string;
   onDelete?: () => void;
 }
 
-export function ResultViewer({ html, updatedAt, onDelete }: ResultViewerProps) {
+export function ResultViewer({ sessionId, html, updatedAt, onDelete }: ResultViewerProps) {
   const [showSource, setShowSource] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [highlightedHtml, setHighlightedHtml] = useState<string | null>(null);
+
+  const resultUrl = `/api/sessions/${sessionId}/results/latest`;
+  const cacheBuster = updatedAt ? new Date(updatedAt).getTime() : Date.now();
 
   useEffect(() => {
     if (!showSource) {
@@ -94,8 +98,8 @@ export function ResultViewer({ html, updatedAt, onDelete }: ResultViewerProps) {
         )
       ) : (
         <iframe
-          srcDoc={html}
-          sandbox="allow-scripts"
+          src={`${resultUrl}?t=${cacheBuster}`}
+          sandbox="allow-scripts allow-same-origin"
           className="flex-1 border-0 bg-white"
           title="Session Result"
         />

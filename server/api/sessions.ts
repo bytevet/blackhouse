@@ -547,6 +547,36 @@ const app = new Hono<AuthEnv>()
   })
 
   // ---------------------------------------------------------------------------
+  // GET /api/sessions/:id/results/latest — serve raw result HTML with CSP
+  // ---------------------------------------------------------------------------
+  .get("/:id/results/latest", authMiddleware, async (c) => {
+    const session = c.get("session");
+    const id = c.req.param("id");
+
+    const [codingSession] = await db
+      .select({
+        resultHtml: schema.codingSessions.resultHtml,
+        userId: schema.codingSessions.userId,
+      })
+      .from(schema.codingSessions)
+      .where(eq(schema.codingSessions.id, id))
+      .limit(1);
+
+    if (!codingSession) return c.text("Session not found", 404);
+    if (codingSession.userId !== session.user.id && session.user.role !== "admin") {
+      return c.text("Forbidden", 403);
+    }
+    if (!codingSession.resultHtml) return c.text("No result", 404);
+
+    c.header(
+      "Content-Security-Policy",
+      "default-src 'none'; style-src 'unsafe-inline' *; img-src * data: blob:; font-src * data:; script-src 'unsafe-inline' * blob:; connect-src 'none'; form-action 'none'; frame-src 'none'",
+    );
+    c.header("X-Content-Type-Options", "nosniff");
+    return c.html(codingSession.resultHtml);
+  })
+
+  // ---------------------------------------------------------------------------
   // DELETE /api/sessions/:id/result
   // ---------------------------------------------------------------------------
   .delete("/:id/result", authMiddleware, async (c) => {

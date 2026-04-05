@@ -10,6 +10,7 @@ import {
   PanelBottomClose,
   Loader2,
   Copy,
+  ExternalLink,
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { client, unwrap } from "@/lib/api";
@@ -25,6 +26,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { TerminalPanel } from "@/components/terminal";
 import { FileExplorer } from "@/components/file-explorer";
 import { FileViewer } from "@/components/file-viewer";
@@ -292,6 +294,24 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
                 <TabsTrigger value="result" className="text-xs">
                   Result
                   {session.resultHtml && <span className="ml-1 size-1.5 rounded-full bg-primary" />}
+                  {session.resultHtml && (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <a
+                            href={`/api/sessions/${session.id}/results/latest`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="ml-1 opacity-50 hover:opacity-100"
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        }
+                      >
+                        <ExternalLink className="size-3" />
+                      </TooltipTrigger>
+                      <TooltipContent>Open in new tab</TooltipContent>
+                    </Tooltip>
+                  )}
                 </TabsTrigger>
               </TabsList>
 
@@ -337,6 +357,7 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
               <TabsContent value="result" className="m-0 flex-1 overflow-hidden">
                 {session.resultHtml ? (
                   <ResultViewer
+                    sessionId={session.id}
                     html={session.resultHtml}
                     updatedAt={session.updatedAt}
                     onDelete={async () => {
