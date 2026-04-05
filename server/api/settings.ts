@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import * as tar from "tar-stream";
 import { db } from "../db/index.js";
@@ -309,6 +310,36 @@ const app = new Hono<AuthEnv>()
       return c.text(fs.readFileSync(filePath, "utf-8"));
     },
   )
+
+  // ---------------------------------------------------------------------------
+  // System Info (admin only)
+  // ---------------------------------------------------------------------------
+  .get("/system", adminMiddleware, async (c) => {
+    const cpus = os.cpus();
+    let diskTotal = 0;
+    let diskFree = 0;
+    try {
+      const stats = fs.statfsSync("/");
+      diskTotal = stats.bsize * stats.blocks;
+      diskFree = stats.bsize * stats.bavail;
+    } catch {
+      // statfs not available
+    }
+
+    return c.json({
+      hostname: os.hostname(),
+      platform: os.platform(),
+      arch: os.arch(),
+      uptime: os.uptime(),
+      loadAvg: os.loadavg() as [number, number, number],
+      cpuCount: cpus.length,
+      cpuModel: cpus[0]?.model ?? "Unknown",
+      memTotal: os.totalmem(),
+      memFree: os.freemem(),
+      diskTotal,
+      diskFree,
+    });
+  })
 
   // ---------------------------------------------------------------------------
   // Docker Config (admin only)
