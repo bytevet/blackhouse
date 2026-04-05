@@ -298,12 +298,18 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
                     <Tooltip>
                       <TooltipTrigger
                         render={
-                          <a
-                            href={`/api/sessions/${session.id}/results/latest`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="ml-1 opacity-50 hover:opacity-100"
-                            onClick={(e) => e.stopPropagation()}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="ml-1 size-5 opacity-50 hover:opacity-100"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              window.open(
+                                `/api/sessions/${session.id}/results/latest`,
+                                "_blank",
+                                "noopener,noreferrer",
+                              );
+                            }}
                           />
                         }
                       >
