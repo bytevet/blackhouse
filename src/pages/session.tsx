@@ -10,6 +10,7 @@ import {
   PanelBottomClose,
   Loader2,
   Copy,
+  ExternalLink,
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { client, unwrap } from "@/lib/api";
@@ -25,6 +26,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { TerminalPanel } from "@/components/terminal";
 import { FileExplorer } from "@/components/file-explorer";
 import { FileViewer } from "@/components/file-viewer";
@@ -76,10 +78,10 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const [session, setSession] = useState(initialSession);
-  const [explorerOpen, setExplorerOpen] = useState(!!initialSession.resultHtml);
+  const [explorerOpen, setExplorerOpen] = useState(!!initialSession.hasResult);
   const [selectedFile, setSelectedFile] = useState<string | undefined>();
   const [explorerTab, setExplorerTab] = useState<string>(
-    initialSession.resultHtml ? "result" : "files",
+    initialSession.hasResult ? "result" : "files",
   );
   const [actionLoading, setActionLoading] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ type: "stop" | "destroy" } | null>(null);
@@ -94,7 +96,7 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
           .then((r) => unwrap<CodingSession>(r));
         if (updated) {
           const isNewResult =
-            updated.resultHtml && (!session.resultHtml || updated.updatedAt > session.updatedAt);
+            updated.hasResult && (!session.hasResult || updated.updatedAt > session.updatedAt);
           setSession(updated);
           if (isNewResult) {
             setExplorerOpen(true);
@@ -291,7 +293,31 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
                 </TabsTrigger>
                 <TabsTrigger value="result" className="text-xs">
                   Result
-                  {session.resultHtml && <span className="ml-1 size-1.5 rounded-full bg-primary" />}
+                  {session.hasResult && <span className="ml-1 size-1.5 rounded-full bg-primary" />}
+                  {session.hasResult && (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="ml-1 size-5 opacity-50 hover:opacity-100"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              window.open(
+                                `/api/sessions/${session.id}/results/latest`,
+                                "_blank",
+                                "noopener,noreferrer",
+                              );
+                            }}
+                          />
+                        }
+                      >
+                        <ExternalLink className="size-3" />
+                      </TooltipTrigger>
+                      <TooltipContent>Open in new tab</TooltipContent>
+                    </Tooltip>
+                  )}
                 </TabsTrigger>
               </TabsList>
 
@@ -335,9 +361,9 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
               </TabsContent>
 
               <TabsContent value="result" className="m-0 flex-1 overflow-hidden">
-                {session.resultHtml ? (
+                {session.hasResult ? (
                   <ResultViewer
-                    html={session.resultHtml}
+                    sessionId={session.id}
                     updatedAt={session.updatedAt}
                     onDelete={async () => {
                       await client.api.sessions[":id"].result.$delete({

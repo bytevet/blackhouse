@@ -167,7 +167,7 @@ describe("Database Schema", () => {
         agentConfigId: null,
         containerId: null,
         containerImage: "ubuntu:latest",
-        resultHtml: null,
+        hasResult: false,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
