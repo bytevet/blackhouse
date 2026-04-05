@@ -7,7 +7,7 @@ import { getHighlighter } from "@/lib/shiki";
 interface ResultViewerProps {
   sessionId: string;
   html: string;
-  updatedAt?: string;
+  updatedAt?: string | Date;
   onDelete?: () => void;
 }
 
