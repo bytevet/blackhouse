@@ -1,12 +1,14 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
-import { db } from "../db/index.js";
-import * as schema from "../db/schema.js";
-import { eq } from "drizzle-orm";
 import { getDockerClient } from "../lib/docker.js";
 import type { AuthEnv } from "../middleware/auth.js";
 import { authMiddleware } from "../middleware/auth.js";
+import {
+  requireSessionAccess,
+  SessionAccessError,
+  handleSessionAccessError,
+} from "../lib/session.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -41,19 +43,13 @@ async function execInContainer(
   });
 }
 
-async function requireSessionOwnership(
+async function requireSessionWithContainer(
   sessionId: string,
-  session: { user: { id: string; role?: string | null } },
+  user: { id: string; role?: string | null },
 ) {
-  const [codingSession] = await db
-    .select()
-    .from(schema.codingSessions)
-    .where(eq(schema.codingSessions.id, sessionId))
-    .limit(1);
-  if (!codingSession) throw new Error("Session not found");
-  if (!codingSession.containerId) throw new Error("Session has no container");
-  if (codingSession.userId !== session.user.id && session.user.role !== "admin") {
-    throw new Error("Forbidden");
+  const codingSession = await requireSessionAccess(sessionId, user);
+  if (!codingSession.containerId) {
+    throw new SessionAccessError("Session has no container", 400);
   }
   return codingSession as typeof codingSession & { containerId: string };
 }
@@ -121,12 +117,13 @@ const pathParam = z.object({
 // ---------------------------------------------------------------------------
 
 const app = new Hono<AuthEnv>()
+  .onError(handleSessionAccessError)
   // GET /api/files/list — list files in directory
   .get("/list", authMiddleware, zValidator("query", pathParam), async (c) => {
     const { sessionId, path: dirPath } = c.req.valid("query");
     const session = c.get("session");
 
-    const codingSession = await requireSessionOwnership(sessionId, session);
+    const codingSession = await requireSessionWithContainer(sessionId, session.user);
     const output = await execInContainer(codingSession.containerId, [
       "ls",
       "-la",
@@ -190,7 +187,7 @@ const app = new Hono<AuthEnv>()
     const { sessionId, path: filePath } = c.req.valid("query");
     const session = c.get("session");
 
-    const codingSession = await requireSessionOwnership(sessionId, session);
+    const codingSession = await requireSessionWithContainer(sessionId, session.user);
     const content = await execInContainer(codingSession.containerId, ["cat", filePath]);
     return c.text(content);
   })
@@ -204,7 +201,7 @@ const app = new Hono<AuthEnv>()
       const { sessionId } = c.req.valid("query");
       const session = c.get("session");
 
-      const codingSession = await requireSessionOwnership(sessionId, session);
+      const codingSession = await requireSessionWithContainer(sessionId, session.user);
       const output = await execInContainer(
         codingSession.containerId,
         ["git", "-C", "/workspace", "diff", "--stat"],
@@ -219,7 +216,7 @@ const app = new Hono<AuthEnv>()
     const { sessionId, path: filePath } = c.req.valid("query");
     const session = c.get("session");
 
-    const codingSession = await requireSessionOwnership(sessionId, session);
+    const codingSession = await requireSessionWithContainer(sessionId, session.user);
 
     let gitRoot: string;
     try {

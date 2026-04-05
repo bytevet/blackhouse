@@ -160,7 +160,9 @@ export const dockerConfigs = pgTable("docker_configs", {
 
 // --- Inferred types ---
 
-export type CodingSession = typeof codingSessions.$inferSelect;
+export type CodingSession = Omit<typeof codingSessions.$inferSelect, "resultHtml"> & {
+  hasResult: boolean;
+};
 export type Template = typeof templates.$inferSelect;
 export type AgentConfig = typeof agentConfigs.$inferSelect;
 export type User = typeof user.$inferSelect;

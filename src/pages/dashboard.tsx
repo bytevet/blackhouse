@@ -538,7 +538,7 @@ export function DashboardPage() {
                       <Clock className="size-3" />
                       {timeAgo(s.createdAt)}
                     </span>
-                    {s.resultHtml && (
+                    {s.hasResult && (
                       <>
                         <span>&middot;</span>
                         <Badge

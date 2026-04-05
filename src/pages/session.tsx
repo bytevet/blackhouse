@@ -78,10 +78,10 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const [session, setSession] = useState(initialSession);
-  const [explorerOpen, setExplorerOpen] = useState(!!initialSession.resultHtml);
+  const [explorerOpen, setExplorerOpen] = useState(!!initialSession.hasResult);
   const [selectedFile, setSelectedFile] = useState<string | undefined>();
   const [explorerTab, setExplorerTab] = useState<string>(
-    initialSession.resultHtml ? "result" : "files",
+    initialSession.hasResult ? "result" : "files",
   );
   const [actionLoading, setActionLoading] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ type: "stop" | "destroy" } | null>(null);
@@ -96,7 +96,7 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
           .then((r) => unwrap<CodingSession>(r));
         if (updated) {
           const isNewResult =
-            updated.resultHtml && (!session.resultHtml || updated.updatedAt > session.updatedAt);
+            updated.hasResult && (!session.hasResult || updated.updatedAt > session.updatedAt);
           setSession(updated);
           if (isNewResult) {
             setExplorerOpen(true);
@@ -293,8 +293,8 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
                 </TabsTrigger>
                 <TabsTrigger value="result" className="text-xs">
                   Result
-                  {session.resultHtml && <span className="ml-1 size-1.5 rounded-full bg-primary" />}
-                  {session.resultHtml && (
+                  {session.hasResult && <span className="ml-1 size-1.5 rounded-full bg-primary" />}
+                  {session.hasResult && (
                     <Tooltip>
                       <TooltipTrigger
                         render={
@@ -355,10 +355,9 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
               </TabsContent>
 
               <TabsContent value="result" className="m-0 flex-1 overflow-hidden">
-                {session.resultHtml ? (
+                {session.hasResult ? (
                   <ResultViewer
                     sessionId={session.id}
-                    html={session.resultHtml}
                     updatedAt={session.updatedAt}
                     onDelete={async () => {
                       await client.api.sessions[":id"].result.$delete({

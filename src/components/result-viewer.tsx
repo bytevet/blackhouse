@@ -1,45 +1,77 @@
-import { useState, useEffect } from "react";
-import { Code, Eye, Trash2 } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Code, Eye, Trash2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { timeAgo } from "@/lib/time";
 import { getHighlighter } from "@/lib/shiki";
 
 interface ResultViewerProps {
   sessionId: string;
-  html: string;
   updatedAt?: string | Date;
   onDelete?: () => void;
 }
 
-export function ResultViewer({ sessionId, html, updatedAt, onDelete }: ResultViewerProps) {
+export function ResultViewer({ sessionId, updatedAt, onDelete }: ResultViewerProps) {
   const [showSource, setShowSource] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [sourceHtml, setSourceHtml] = useState<string | null>(null);
   const [highlightedHtml, setHighlightedHtml] = useState<string | null>(null);
+  const [loadingSource, setLoadingSource] = useState(false);
 
   const resultUrl = `/api/sessions/${sessionId}/results/latest`;
-  const cacheBuster = updatedAt ? new Date(updatedAt).getTime() : Date.now();
+  const stableFallback = useRef(Date.now());
+  const cacheBuster = updatedAt ? new Date(updatedAt).getTime() : stableFallback.current;
+
+  // Invalidate cached source when result updates
+  const prevUpdatedAt = useRef(cacheBuster);
+  if (prevUpdatedAt.current !== cacheBuster) {
+    prevUpdatedAt.current = cacheBuster;
+    setSourceHtml(null);
+    setHighlightedHtml(null);
+  }
 
   useEffect(() => {
     if (!showSource) {
       setHighlightedHtml(null);
       return;
     }
+
     let cancelled = false;
-    getHighlighter()
-      .then((hl) => {
+
+    (async () => {
+      // Fetch raw HTML if not cached
+      let raw = sourceHtml;
+      if (!raw) {
+        setLoadingSource(true);
+        try {
+          const res = await fetch(resultUrl);
+          raw = await res.text();
+          if (!cancelled) setSourceHtml(raw);
+        } catch {
+          if (!cancelled) setLoadingSource(false);
+          return;
+        }
+      }
+
+      // Syntax highlight
+      try {
+        const hl = await getHighlighter();
         if (cancelled) return;
-        const result = hl.codeToHtml(html, {
+        const result = hl.codeToHtml(raw, {
           lang: "html",
           themes: { dark: "github-dark", light: "github-light" },
           defaultColor: false,
         });
         setHighlightedHtml(result);
-      })
-      .catch(() => setHighlightedHtml(null));
+      } catch {
+        setHighlightedHtml(null);
+      }
+      if (!cancelled) setLoadingSource(false);
+    })();
+
     return () => {
       cancelled = true;
     };
-  }, [html, showSource]);
+  }, [showSource, resultUrl, sourceHtml]);
 
   return (
     <div className="flex h-full flex-col">
@@ -86,14 +118,18 @@ export function ResultViewer({ sessionId, html, updatedAt, onDelete }: ResultVie
         </div>
       </div>
       {showSource ? (
-        highlightedHtml ? (
+        loadingSource && !highlightedHtml && !sourceHtml ? (
+          <div className="flex flex-1 items-center justify-center">
+            <Loader2 className="size-4 animate-spin text-muted-foreground" />
+          </div>
+        ) : highlightedHtml ? (
           <div
             className="flex-1 overflow-auto"
             dangerouslySetInnerHTML={{ __html: highlightedHtml }}
           />
         ) : (
           <pre className="flex-1 overflow-auto p-3 text-xs leading-relaxed text-foreground">
-            {html}
+            {sourceHtml}
           </pre>
         )
       ) : (

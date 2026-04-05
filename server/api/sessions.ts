@@ -4,13 +4,37 @@ import { zValidator } from "@hono/zod-validator";
 import { randomBytes } from "node:crypto";
 import { db } from "../db/index.js";
 import * as schema from "../db/schema.js";
-import { eq, desc, count, and, isNotNull, isNull, type SQL } from "drizzle-orm";
+import {
+  eq,
+  desc,
+  count,
+  and,
+  isNotNull,
+  isNull,
+  sql,
+  getTableColumns,
+  type SQL,
+} from "drizzle-orm";
 import { getDockerClient } from "../lib/docker.js";
 import type { AuthEnv } from "../middleware/auth.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { paginationQuery } from "../lib/pagination.js";
+import { requireSessionAccess, handleSessionAccessError } from "../lib/session.js";
+
+/** Session columns without the potentially-large resultHtml blob. */
+const { resultHtml: _resultHtml, ...sessionColumns } = getTableColumns(schema.codingSessions);
+const sessionSummary = {
+  ...sessionColumns,
+  hasResult: sql<boolean>`${schema.codingSessions.resultHtml} is not null`.as("has_result"),
+};
+
+/** Strip resultHtml from a raw DB row and add hasResult boolean. */
+function toSessionSummary<T extends { resultHtml?: string | null }>({ resultHtml, ...rest }: T) {
+  return { ...rest, hasResult: resultHtml != null };
+}
 
 const app = new Hono<AuthEnv>()
+  .onError(handleSessionAccessError)
   // ---------------------------------------------------------------------------
   // GET /api/sessions — list sessions
   // ---------------------------------------------------------------------------
@@ -55,7 +79,7 @@ const app = new Hono<AuthEnv>()
 
         const rows = await db
           .select({
-            session: schema.codingSessions,
+            ...sessionSummary,
             userName: schema.user.name,
             userEmail: schema.user.email,
           })
@@ -67,9 +91,9 @@ const app = new Hono<AuthEnv>()
           .offset(offset);
 
         return c.json({
-          data: rows.map((r) => ({
-            ...r.session,
-            user: { name: r.userName, email: r.userEmail },
+          data: rows.map(({ userName, userEmail, ...s }) => ({
+            ...s,
+            user: { name: userName, email: userEmail },
           })),
           total,
           page,
@@ -86,7 +110,7 @@ const app = new Hono<AuthEnv>()
         .where(where);
 
       const rows = await db
-        .select()
+        .select(sessionSummary)
         .from(schema.codingSessions)
         .where(where)
         .orderBy(desc(schema.codingSessions.createdAt))
@@ -105,7 +129,7 @@ const app = new Hono<AuthEnv>()
     const id = c.req.param("id");
 
     const [codingSession] = await db
-      .select()
+      .select(sessionSummary)
       .from(schema.codingSessions)
       .where(eq(schema.codingSessions.id, id))
       .limit(1);
@@ -325,7 +349,7 @@ const app = new Hono<AuthEnv>()
           .where(eq(schema.codingSessions.id, codingSession.id))
           .returning();
 
-        return c.json(updated[0]);
+        return c.json(toSessionSummary(updated[0]));
       } catch (err) {
         await db
           .update(schema.codingSessions)
@@ -349,19 +373,8 @@ const app = new Hono<AuthEnv>()
   // PUT /api/sessions/:id/stop
   // ---------------------------------------------------------------------------
   .put("/:id/stop", authMiddleware, async (c) => {
-    const session = c.get("session");
     const id = c.req.param("id");
-
-    const [codingSession] = await db
-      .select()
-      .from(schema.codingSessions)
-      .where(eq(schema.codingSessions.id, id))
-      .limit(1);
-
-    if (!codingSession) return c.json({ error: "Session not found" }, 404);
-    if (codingSession.userId !== session.user.id && session.user.role !== "admin") {
-      return c.json({ error: "Forbidden" }, 403);
-    }
+    const codingSession = await requireSessionAccess(id, c.get("session").user);
 
     if (!codingSession.containerId) {
       return c.json({ error: "No container associated with this session" }, 400);
@@ -384,26 +397,15 @@ const app = new Hono<AuthEnv>()
       .where(eq(schema.codingSessions.id, id))
       .returning();
 
-    return c.json(updated[0]);
+    return c.json(toSessionSummary(updated[0]));
   })
 
   // ---------------------------------------------------------------------------
   // DELETE /api/sessions/:id — destroy session + container
   // ---------------------------------------------------------------------------
   .delete("/:id", authMiddleware, async (c) => {
-    const session = c.get("session");
     const id = c.req.param("id");
-
-    const [codingSession] = await db
-      .select()
-      .from(schema.codingSessions)
-      .where(eq(schema.codingSessions.id, id))
-      .limit(1);
-
-    if (!codingSession) return c.json({ error: "Session not found" }, 404);
-    if (codingSession.userId !== session.user.id && session.user.role !== "admin") {
-      return c.json({ error: "Forbidden" }, 403);
-    }
+    const codingSession = await requireSessionAccess(id, c.get("session").user);
 
     if (codingSession.containerId) {
       try {
@@ -427,19 +429,8 @@ const app = new Hono<AuthEnv>()
   // PUT /api/sessions/:id/restart
   // ---------------------------------------------------------------------------
   .put("/:id/restart", authMiddleware, async (c) => {
-    const session = c.get("session");
     const id = c.req.param("id");
-
-    const [codingSession] = await db
-      .select()
-      .from(schema.codingSessions)
-      .where(eq(schema.codingSessions.id, id))
-      .limit(1);
-
-    if (!codingSession) return c.json({ error: "Session not found" }, 404);
-    if (codingSession.userId !== session.user.id && session.user.role !== "admin") {
-      return c.json({ error: "Forbidden" }, 403);
-    }
+    const codingSession = await requireSessionAccess(id, c.get("session").user);
 
     if (!codingSession.containerId) {
       return c.json({ error: "No container associated with this session" }, 400);
@@ -515,26 +506,15 @@ const app = new Hono<AuthEnv>()
       .where(eq(schema.codingSessions.id, id))
       .returning();
 
-    return c.json(updated[0]);
+    return c.json(toSessionSummary(updated[0]));
   })
 
   // ---------------------------------------------------------------------------
   // GET /api/sessions/:id/recreate-params
   // ---------------------------------------------------------------------------
   .get("/:id/recreate-params", authMiddleware, async (c) => {
-    const session = c.get("session");
     const id = c.req.param("id");
-
-    const [original] = await db
-      .select()
-      .from(schema.codingSessions)
-      .where(eq(schema.codingSessions.id, id))
-      .limit(1);
-
-    if (!original) return c.json({ error: "Session not found" }, 404);
-    if (original.userId !== session.user.id && session.user.role !== "admin") {
-      return c.json({ error: "Forbidden" }, 403);
-    }
+    const original = await requireSessionAccess(id, c.get("session").user);
 
     return c.json({
       name: original.name,
@@ -550,22 +530,8 @@ const app = new Hono<AuthEnv>()
   // GET /api/sessions/:id/results/latest — serve raw result HTML with CSP
   // ---------------------------------------------------------------------------
   .get("/:id/results/latest", authMiddleware, async (c) => {
-    const session = c.get("session");
     const id = c.req.param("id");
-
-    const [codingSession] = await db
-      .select({
-        resultHtml: schema.codingSessions.resultHtml,
-        userId: schema.codingSessions.userId,
-      })
-      .from(schema.codingSessions)
-      .where(eq(schema.codingSessions.id, id))
-      .limit(1);
-
-    if (!codingSession) return c.text("Session not found", 404);
-    if (codingSession.userId !== session.user.id && session.user.role !== "admin") {
-      return c.text("Forbidden", 403);
-    }
+    const codingSession = await requireSessionAccess(id, c.get("session").user);
     if (!codingSession.resultHtml) return c.text("No result", 404);
 
     c.header(
@@ -580,19 +546,8 @@ const app = new Hono<AuthEnv>()
   // DELETE /api/sessions/:id/result
   // ---------------------------------------------------------------------------
   .delete("/:id/result", authMiddleware, async (c) => {
-    const session = c.get("session");
     const id = c.req.param("id");
-
-    const [codingSession] = await db
-      .select()
-      .from(schema.codingSessions)
-      .where(eq(schema.codingSessions.id, id))
-      .limit(1);
-
-    if (!codingSession) return c.json({ error: "Session not found" }, 404);
-    if (codingSession.userId !== session.user.id && session.user.role !== "admin") {
-      return c.json({ error: "Forbidden" }, 403);
-    }
+    await requireSessionAccess(id, c.get("session").user);
 
     await db
       .update(schema.codingSessions)
