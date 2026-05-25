@@ -6,17 +6,31 @@
  * the byte layout end-to-end — any qa-found regression is in the React
  * layer. If it fails, the wire spec is wrong somewhere.
  *
- * What it does:
+ * Default flow hires its own session and dismisses it after the run —
+ * deliberately avoids reuse of long-lived sessions whose container image
+ * may have been baked before the latest `agent/browser-service/*` source
+ * (see #61's image-rebuild hazard). The container code is frozen at the
+ * image's build time; the only way to test the current wire spec is via
+ * a session whose image was rebuilt against current source.
+ *
  *   1. Sign in as admin via Better Auth → grab session cookie.
- *   2. Find or accept a running session ID (E2E_SESSION_ID env or first
- *      running session from GET /api/sessions).
+ *   2. Hire a fresh session (preset configurable via E2E_SMOKE_PRESET);
+ *      poll until `status === "running"`. Or use E2E_SESSION_ID to reuse
+ *      an existing session (debug / iteration).
  *   3. Open ws://localhost:3000/api/browser-ws/:id?token=<sessionToken>.
  *   4. Send 0x10 control(navigate, "https://example.com").
- *   5. Within ~5s assert: ≥1 0x80 config, ≥1 0x81 video, exactly one 0x86
+ *   5. Within ~5s assert: ≥1 0x80 config, ≥1 0x81 video, ≥1 0x86
  *      navigate with the example.com URL.
- *   6. Send 0x12 state(flags=includeUrl|includeTitle|includeLoading).
- *   7. Within ~2s assert one 0x84 with the reqId we sent and JSON payload
- *      containing url + title + loading.
+ *   6. Send 0x12 state(includeUrl|includeTitle|includeLoading).
+ *   7. Within ~2s assert one 0x84 echoes the reqId with url+title+loading
+ *      in the JSON payload.
+ *   8. Dismiss the session (DELETE /api/sessions/:id). Always runs even
+ *      on failure — leaks zombies otherwise.
+ *
+ * On a TEXT frame the smoke fails fast with a "container image is stale"
+ * hint: the pre-#61-cut-2 agent emits TEXT JSON config preambles, so a
+ * TEXT frame means the operator forgot to rebuild the agent image
+ * (`agent/browser-service/*` changes after the last image build).
  *
  * Usage:
  *   tsx scripts/smoke-browser-ws.ts
@@ -26,7 +40,8 @@
  *   E2E_BASE_URL          (default http://localhost:3000)
  *   E2E_ADMIN_USERNAME    (default admin)
  *   E2E_ADMIN_PASSWORD    (default test1234)
- *   E2E_SESSION_ID        (optional; otherwise auto-picks first running)
+ *   E2E_SESSION_ID        (optional; reuse instead of hiring fresh)
+ *   E2E_SMOKE_PRESET      (default antigravity; agent preset for hires)
  */
 
 import {
@@ -43,6 +58,15 @@ import {
 const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
 const USERNAME = process.env.E2E_ADMIN_USERNAME ?? "admin";
 const PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? "test1234";
+const SMOKE_PRESET = process.env.E2E_SMOKE_PRESET ?? "antigravity";
+const HIRE_POLL_TIMEOUT_MS = 90_000;
+const HIRE_POLL_INTERVAL_MS = 1_000;
+
+function cookieHeader(auth: AuthBundle): string {
+  // Re-encode for the Cookie header value (`%3D` etc.); the server's
+  // cookie parser expects the wire-format.
+  return `better-auth.session_token=${encodeURIComponent(auth.cookieValue)}`;
+}
 
 interface AuthBundle {
   /** Full signed cookie value (`<token>.<signature>` decoded). For REST. */
@@ -70,24 +94,52 @@ async function signIn(): Promise<AuthBundle> {
   return { cookieValue, wsToken: cookieValue.split(".")[0] };
 }
 
-async function pickSession(auth: AuthBundle): Promise<string> {
-  if (process.env.E2E_SESSION_ID) return process.env.E2E_SESSION_ID;
+async function hireSession(auth: AuthBundle): Promise<string> {
+  const name = `smoke-${new Date().toISOString().replace(/[:.]/g, "-")}`;
   const res = await fetch(`${BASE_URL}/api/sessions`, {
-    // Re-encode for the Cookie header value (`%3D` etc.); the server's
-    // cookie parser expects the wire-format.
-    headers: { cookie: `better-auth.session_token=${encodeURIComponent(auth.cookieValue)}` },
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      cookie: cookieHeader(auth),
+    },
+    body: JSON.stringify({ name, preset: SMOKE_PRESET }),
   });
-  if (!res.ok) throw new Error(`list sessions ${res.status}`);
-  const body = (await res.json()) as { data: Array<{ id: string; status: string }> };
-  const sessions = body.data ?? [];
-  const running = sessions.find((s) => s.status === "running");
-  if (!running) {
-    throw new Error(
-      `no running session found among ${sessions.length}. ` +
-        `Hire a worker via the UI first, or pass E2E_SESSION_ID=<uuid>.`,
-    );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`hire session ${res.status}: ${text}`);
   }
-  return running.id;
+  const body = (await res.json()) as { data: { id: string } } | { id: string };
+  const id = "data" in body ? body.data.id : body.id;
+  console.log(`[smoke] hired session ${id} (preset=${SMOKE_PRESET}) — waiting for running`);
+  return id;
+}
+
+async function waitForRunning(auth: AuthBundle, sessionId: string): Promise<void> {
+  const deadline = Date.now() + HIRE_POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const res = await fetch(`${BASE_URL}/api/sessions/${sessionId}`, {
+      headers: { cookie: cookieHeader(auth) },
+    });
+    if (res.ok) {
+      const body = (await res.json()) as { status?: string };
+      if (body.status === "running") return;
+      if (body.status === "destroyed") throw new Error("session destroyed before reaching running");
+    }
+    await new Promise((r) => setTimeout(r, HIRE_POLL_INTERVAL_MS));
+  }
+  throw new Error(`session ${sessionId} not running after ${HIRE_POLL_TIMEOUT_MS}ms`);
+}
+
+async function dismissSession(auth: AuthBundle, sessionId: string): Promise<void> {
+  const res = await fetch(`${BASE_URL}/api/sessions/${sessionId}`, {
+    method: "DELETE",
+    headers: { cookie: cookieHeader(auth) },
+  });
+  if (!res.ok) {
+    console.warn(`[smoke] WARN dismiss ${sessionId} failed (${res.status}); manual cleanup needed`);
+  } else {
+    console.log(`[smoke] dismissed session ${sessionId}`);
+  }
 }
 
 interface Counts {
@@ -136,7 +188,19 @@ async function smokeOnSession(sessionId: string, sessionToken: string): Promise<
 
     ws.addEventListener("message", (event) => {
       if (typeof event.data === "string") {
-        console.warn(`[smoke] WARN unexpected TEXT frame: ${event.data.slice(0, 80)}`);
+        // The post-#61-cut-2 protocol is binary-only. A TEXT frame means
+        // the container's `agent/browser-service/*` was baked into the
+        // image before commit 5677d6c. Bail loudly — staying open just
+        // ties up the deadline waiting for frames that will never arrive.
+        clearTimeout(deadline);
+        ws.close();
+        reject(
+          new Error(
+            `STALE CONTAINER: received TEXT preamble "${event.data.slice(0, 100)}". ` +
+              `Agent image was built before #61 cut-2 (commit 5677d6c). ` +
+              `Rebuild the agent image and hire a fresh session, then re-run.`,
+          ),
+        );
         return;
       }
       const buf = event.data as ArrayBuffer;
@@ -258,9 +322,25 @@ async function smokeOnSession(sessionId: string, sessionToken: string): Promise<
 async function main() {
   const auth = await signIn();
   console.log(`[smoke] signed in`);
-  const sessionId = await pickSession(auth);
-  console.log(`[smoke] session ${sessionId}`);
-  await smokeOnSession(sessionId, auth.wsToken);
+
+  const reuseId = process.env.E2E_SESSION_ID;
+  const sessionId = reuseId ?? (await hireSession(auth));
+  if (reuseId) {
+    console.log(`[smoke] reusing session ${reuseId} (E2E_SESSION_ID set)`);
+  } else {
+    await waitForRunning(auth, sessionId);
+    console.log(`[smoke] session ${sessionId} is running`);
+  }
+
+  try {
+    await smokeOnSession(sessionId, auth.wsToken);
+  } finally {
+    if (!reuseId) {
+      // Only dismiss sessions WE hired. Reused sessions belong to the
+      // operator — they decide when to dismiss.
+      await dismissSession(auth, sessionId);
+    }
+  }
 }
 
 main().catch((err) => {
