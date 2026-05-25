@@ -3,11 +3,38 @@ import {
   signInAsAdmin,
   createSession,
   createSessionWithPreset,
+  cleanupSession,
   execInContainer,
   getSessionContainerId,
   getBaseUrl,
   openSidePanel,
 } from "./helpers";
+
+/**
+ * Wait until the `<canvas data-browser-frame>` has actually been painted with
+ * a decoded H.264 frame. The canvas exists in the DOM from mount (with
+ * intrinsic 1280×720), so visibility alone isn't a frame-presence signal —
+ * we sample the top-left 64×64 pixel region and look for any non-black pixel
+ * (a blank canvas reads all-zeros). Browser-service Chromium navigation +
+ * ffmpeg encoder warmup can take 30–60s on a cold container; the timeout is
+ * generous by design.
+ */
+async function waitForFirstFrame(page: Page, timeout = 60000) {
+  await page.waitForFunction(
+    () => {
+      const c = document.querySelector("canvas[data-browser-frame]") as HTMLCanvasElement | null;
+      const ctx = c?.getContext("2d");
+      if (!c || !ctx) return false;
+      const data = ctx.getImageData(0, 0, Math.min(c.width, 64), Math.min(c.height, 64)).data;
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i] !== 0 || data[i + 1] !== 0 || data[i + 2] !== 0) return true;
+      }
+      return false;
+    },
+    undefined,
+    { timeout },
+  );
+}
 
 test.describe.serial("Session lifecycle", () => {
   test.skip(() => !process.env.E2E_DOCKER, "Requires Docker — set E2E_DOCKER=1 to enable");
@@ -140,9 +167,7 @@ test.describe("WebSocket terminal", () => {
     const terminal = page.locator(".xterm-screen");
     await expect(terminal).toBeVisible();
 
-    // Clean up — destroy the session+container via API to avoid leaking
-    // resources across runs (matters under back-to-back load).
-    await page.request.delete(`${getBaseUrl()}/api/sessions/${sessionId}`);
+    await cleanupSession(page, sessionId);
   });
 });
 
@@ -222,11 +247,7 @@ test.describe("Antigravity session happy-path", () => {
       timeout: 15000,
     });
 
-    // Cleanup: destroy the session via API. The UI destroy button only
-    // appears after stopping (status === "stopped"); a DELETE call here also
-    // tears the container down and is simpler than stop-then-destroy.
-    const cleanup = await page.request.delete(`${getBaseUrl()}/api/sessions/${sessionId}`);
-    expect(cleanup.ok()).toBeTruthy();
+    await cleanupSession(page, sessionId);
   });
 });
 
@@ -281,30 +302,9 @@ test.describe("Browser tab end-to-end", () => {
     await addressBar.fill("https://example.com");
     await page.getByRole("button", { name: /^go$/i }).click();
 
-    // First H.264 frame: the <canvas data-browser-frame> exists from mount
-    // (with intrinsic 1280×720) so visibility alone isn't a frame-presence
-    // signal — we sample actual pixel content to confirm the VideoDecoder
-    // has rendered something. Browser-service Chromium navigation + ffmpeg
-    // encoder warmup can take 30-60s on a cold container; budget generously.
     const frameCanvas = page.locator("canvas[data-browser-frame]");
     await expect(frameCanvas).toBeVisible({ timeout: 60000 });
-    await page.waitForFunction(
-      () => {
-        const c = document.querySelector("canvas[data-browser-frame]") as HTMLCanvasElement | null;
-        if (!c) return false;
-        const ctx = c.getContext("2d");
-        if (!ctx) return false;
-        // Sample the top-left 64×64 region — any non-black pixel means a
-        // decoded frame has been drawn (a blank canvas reads all-zeros).
-        const data = ctx.getImageData(0, 0, Math.min(c.width, 64), Math.min(c.height, 64)).data;
-        for (let i = 0; i < data.length; i += 4) {
-          if (data[i] !== 0 || data[i + 1] !== 0 || data[i + 2] !== 0) return true;
-        }
-        return false;
-      },
-      undefined,
-      { timeout: 60000 },
-    );
+    await waitForFirstFrame(page);
 
     // Click somewhere in the frame; SPA must not log an error in response to
     // the click. (We ignore transient 502s that can show up while browser-
@@ -386,11 +386,7 @@ test.describe("Browser tab end-to-end", () => {
       )
       .toEqual({ w: resizeWidth, h: resizeHeight });
 
-    // Cleanup: destroy the session via API. The UI destroy button only
-    // appears after stopping (status === "stopped"); a DELETE call here also
-    // tears the container down and is simpler than stop-then-destroy.
-    const cleanup = await page.request.delete(`${getBaseUrl()}/api/sessions/${sessionId}`);
-    expect(cleanup.ok()).toBeTruthy();
+    await cleanupSession(page, sessionId);
   });
 });
 
@@ -433,22 +429,7 @@ test.describe("Browser interactivity (strict)", () => {
     await page.getByRole("button", { name: /^go$/i }).click();
     const canvas = page.locator("canvas[data-browser-frame]");
     await expect(canvas).toBeVisible({ timeout: 60000 });
-    // Wait for first frame to paint (canvas pixel content)
-    await page.waitForFunction(
-      () => {
-        const c = document.querySelector("canvas[data-browser-frame]") as HTMLCanvasElement | null;
-        if (!c) return false;
-        const ctx = c.getContext("2d");
-        if (!ctx) return false;
-        const data = ctx.getImageData(0, 0, Math.min(c.width, 64), Math.min(c.height, 64)).data;
-        for (let i = 0; i < data.length; i += 4) {
-          if (data[i] !== 0 || data[i + 1] !== 0 || data[i + 2] !== 0) return true;
-        }
-        return false;
-      },
-      undefined,
-      { timeout: 60000 },
-    );
+    await waitForFirstFrame(page);
     const box = await canvas.boundingBox();
     if (!box) throw new Error("canvas has no bounding box");
     return { sessionId, canvas, canvasBox: box };
@@ -564,7 +545,7 @@ test.describe("Browser interactivity (strict)", () => {
     expect(finalState.selectionText ?? "").toMatch(/[A-Za-z]{3,}/);
     expect((finalState.selectionText ?? "").toLowerCase()).toMatch(/example|domain|mple/);
 
-    await page.request.delete(`${getBaseUrl()}/api/sessions/${sessionId}`);
+    await cleanupSession(page, sessionId);
   });
 
   test("right-click on canvas shows the SPA context menu", async ({ page }) => {
@@ -599,7 +580,7 @@ test.describe("Browser interactivity (strict)", () => {
       menu.getByRole("menuitem", { name: /reload|back|forward|new tab/i }).first(),
     ).toBeVisible({ timeout: 2000 });
 
-    await page.request.delete(`${getBaseUrl()}/api/sessions/${sessionId}`);
+    await cleanupSession(page, sessionId);
   });
 
   test("wheel scrolls the in-container page; SPA stays put", async ({ page }) => {
@@ -671,7 +652,7 @@ test.describe("Browser interactivity (strict)", () => {
     const spaScrollAfter = await page.evaluate(() => window.scrollY);
     expect(spaScrollAfter).toBe(spaScrollBefore);
 
-    await page.request.delete(`${getBaseUrl()}/api/sessions/${sessionId}`);
+    await cleanupSession(page, sessionId);
   });
 });
 
@@ -760,35 +741,30 @@ test.describe("IDE tab end-to-end", () => {
     // wired up and the workspace is accessible.
     await page.waitForTimeout(2000);
 
-    // Cleanup: destroy the session via API. The UI destroy button only
-    // appears after stopping (status === "stopped"); a DELETE call here also
-    // tears the container down and is simpler than stop-then-destroy.
-    const cleanup = await page.request.delete(`${getBaseUrl()}/api/sessions/${sessionId}`);
-    expect(cleanup.ok()).toBeTruthy();
+    await cleanupSession(page, sessionId);
   });
 });
 
 /**
  * Dashboard worker-card action paths (#53).
  *
- * The dashboard `SessionWorkerCard` is the ONLY UI that surfaces the
- * "Re-spawn" and "Dismiss" labels (the session-detail action bar still uses
- * literal "Re-create" / "Destroy"). This suite drives both buttons end-to-end
- * so a future relabel can't silently regress those paths.
+ * The session-detail action bar covers Send-Off-Duty / Re-spawn / Dismiss via
+ * its own tests above; this suite exercises the SAME actions but from the
+ * dashboard's `SessionWorkerCard` surface. They share the labels (post-#54
+ * rename) but live on different routes and wire through different handlers,
+ * so we test both ends.
  *
- * Flow per test:
- *   1. Create + stop a session via API (faster than driving the UI for setup)
- *   2. Land on the dashboard, locate the card by session name
- *   3. Assert the worker-card surface (OFF DUTY band, Re-spawn + Dismiss
- *      buttons visible)
- *   4. Exercise the action under test and assert the user-visible outcome
+ * Per-test flow:
+ *   1. Create + stop a session (`createStopped`) — yields a card in OFF DUTY
+ *   2. Land on /dashboard, locate the card by session name
+ *   3. Exercise the action and assert the user-visible outcome
  */
 test.describe.serial("Dashboard worker-card actions", () => {
   test.skip(() => !process.env.E2E_DOCKER, "Requires Docker — set E2E_DOCKER=1 to enable");
 
-  // Helpers — local to this suite. `createStopped` creates a session via the
-  // UI then stops it via the API; that's faster than waiting for the detail-
-  // page Stop confirm-dialog dance, and yields a card in the OFF DUTY state.
+  // Create a session via the UI then stop it via the API — faster than
+  // driving the detail-page Stop confirm-dialog, and yields a card in the
+  // OFF DUTY state ready for the action assertions below.
   async function createStopped(page: Page, name: string): Promise<string> {
     const sessionId = await createSession(page, name);
     const stopRes = await page.request.put(`${getBaseUrl()}/api/sessions/${sessionId}/stop`);
@@ -796,18 +772,11 @@ test.describe.serial("Dashboard worker-card actions", () => {
     return sessionId;
   }
 
-  async function deleteSession(page: Page, id: string) {
-    // Best-effort cleanup. Already-destroyed sessions return 404, which is
-    // fine — we only care that the container is gone.
-    await page.request.delete(`${getBaseUrl()}/api/sessions/${id}`);
-  }
-
-  // Locate a card by the session name in its `<h3>` title. Multiple cards
-  // may exist on the dashboard (other tests, leftover state); the filter
-  // scopes to the right one.
-  function cardByName(page: Page, name: string) {
-    return page.locator("[data-slot='card']").filter({ hasText: name });
-  }
+  // Locate a card by the session name. Multiple cards may exist (leftover
+  // state, the Re-spawn test creates two with the same name); the hasText
+  // filter scopes to the right one(s).
+  const cardByName = (page: Page, name: string) =>
+    page.locator("[data-slot='card']").filter({ hasText: name });
 
   test("stopped session card shows OFF DUTY band + Re-spawn + Dismiss buttons", async ({
     page,
@@ -829,7 +798,7 @@ test.describe.serial("Dashboard worker-card actions", () => {
       await expect(card.getByRole("button", { name: /re-spawn/i })).toBeVisible();
       await expect(card.getByRole("button", { name: /dismiss/i })).toBeVisible();
     } finally {
-      await deleteSession(page, sessionId);
+      await cleanupSession(page, sessionId);
     }
   });
 
@@ -869,8 +838,8 @@ test.describe.serial("Dashboard worker-card actions", () => {
       await expect(named.filter({ hasText: "OFF DUTY" })).toHaveCount(1);
       await expect(named.filter({ hasText: "ON DUTY" })).toHaveCount(1);
     } finally {
-      if (newSessionId) await deleteSession(page, newSessionId);
-      await deleteSession(page, originalId);
+      if (newSessionId) await cleanupSession(page, newSessionId);
+      await cleanupSession(page, originalId);
     }
   });
 
@@ -897,7 +866,7 @@ test.describe.serial("Dashboard worker-card actions", () => {
       // sessions-refetch under load doesn't flake the check.
       await expect(card).toBeHidden({ timeout: 10000 });
     } finally {
-      await deleteSession(page, sessionId);
+      await cleanupSession(page, sessionId);
     }
   });
 });

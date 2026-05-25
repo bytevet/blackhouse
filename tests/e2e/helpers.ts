@@ -1,20 +1,15 @@
 import Docker from "dockerode";
 import type { Page } from "@playwright/test";
 
-/**
- * Get the base URL for API calls.
- */
+/** Base URL for API calls — defaults to the Vite dev server. */
 export function getBaseUrl(): string {
   return process.env.E2E_BASE_URL || "http://localhost:5173";
 }
 
 /**
- * Sign in with the admin user.
- * Uses E2E_ADMIN_USERNAME / E2E_ADMIN_PASSWORD env vars,
- * falling back to the local dev seed defaults: admin / test1234.
- *
- * Note: actual seed password depends on the ADMIN_PASSWORD env var at seed
- * time. The dev Podman env stood up in task #1 uses `test1234`.
+ * Sign in with the admin user. Honors E2E_ADMIN_USERNAME / E2E_ADMIN_PASSWORD;
+ * falls back to the local dev seed defaults (admin / test1234, per the Podman
+ * setup in task #1). No-op if the page is already on the dashboard.
  */
 export async function signInAsAdmin(page: Page) {
   const username = process.env.E2E_ADMIN_USERNAME ?? "admin";
@@ -31,101 +26,84 @@ export async function signInAsAdmin(page: Page) {
 }
 
 /**
- * Create a new session from the dashboard.
- * Picks the first available built agent.
- * Returns the session ID from the URL.
+ * Drive the Hire-Worker dialog. Shared body for `createSession` (any agent)
+ * and `createSessionWithPreset` (specific preset). The two public helpers
+ * differ only in how they pick the agent inside the open dropdown.
+ *
+ * Post-#54 naming: "New Session" → "Hire Worker"; "Create Session" → "Hire".
+ * Anchor on `^hire$` for the submit button to avoid colliding with the
+ * trigger button (which contains the substring "Hire" via "Hire Worker").
  */
-export async function createSession(page: Page, name: string): Promise<string> {
+async function hireWorker(
+  page: Page,
+  name: string,
+  pickAgent: () => Promise<void>,
+): Promise<string> {
   await page.goto("/dashboard");
   await page.waitForLoadState("networkidle");
 
-  // Post-#54: "New Session" button → "Hire Worker"; dialog primary action
-  // "Create Session" → "Hire". The dialog's placeholder for the session name
-  // is still "My session" (the input itself wasn't themed).
   await page.getByRole("button", { name: /hire worker/i }).click();
   await page.waitForTimeout(500);
 
-  // Hire-Worker dialog uses <FieldLabel> + <Input placeholder="My session">.
-  // FieldLabel has no htmlFor association, so target by placeholder instead.
+  // Dialog uses <FieldLabel> + <Input placeholder="My session">; FieldLabel
+  // has no htmlFor association, so target by placeholder.
   await page.getByPlaceholder("My session").fill(name);
 
   // Open the "Agent Config" Select. Scope to the Field wrapper whose label
-  // text is "Agent Config" so we pick the right select-trigger when the
-  // dialog has multiple selects (Agent Config, Template, …).
+  // text is "Agent Config" — the dialog has multiple selects (Agent, Template).
   const agentField = page.locator('[data-slot="field"]').filter({ hasText: "Agent Config" });
   await agentField.locator('[data-slot="select-trigger"]').click();
   await page.waitForTimeout(300);
-  // Click the first non-disabled option in the open dropdown
-  const agentOption = page.locator("[role=option]:not([data-disabled])").first();
-  await agentOption.click();
+  await pickAgent();
 
-  // Anchor on `^hire$` to avoid colliding with the trigger button (which
-  // includes the word "Hire" in "Hire Worker"). The dialog's primary button
-  // is just "Hire" (or "Hiring..." mid-flight).
   await page
     .getByRole("dialog")
     .getByRole("button", { name: /^hire$/i })
     .click();
 
-  // Wait for navigation to session page
   await page.waitForURL(/\/sessions\//, { timeout: 30000 });
-
-  const url = page.url();
-  const match = url.match(/\/sessions\/([a-f0-9-]+)/);
-  return match?.[1] ?? "";
+  return page.url().match(/\/sessions\/([a-f0-9-]+)/)?.[1] ?? "";
 }
 
-/**
- * Create a new session and pick a specific agent preset by displayName.
- *
- * Used by Track A (antigravity happy-path), C (browser tests need a specific
- * agent), and D (smoke loops over every preset).
- *
- * Returns the session ID from the URL.
- */
+/** Create a session and pick the first non-disabled agent. Returns sessionId. */
+export async function createSession(page: Page, name: string): Promise<string> {
+  return hireWorker(page, name, async () => {
+    await page.locator("[role=option]:not([data-disabled])").first().click();
+  });
+}
+
+/** Create a session with a named agent preset (e.g. "Antigravity"). */
 export async function createSessionWithPreset(
   page: Page,
   name: string,
   presetDisplayName: string,
 ): Promise<string> {
-  await page.goto("/dashboard");
-  await page.waitForLoadState("networkidle");
-
-  // Same #54 rename as createSession above.
-  await page.getByRole("button", { name: /hire worker/i }).click();
-  await page.waitForTimeout(500);
-
-  await page.getByPlaceholder("My session").fill(name);
-
-  const agentField = page.locator('[data-slot="field"]').filter({ hasText: "Agent Config" });
-  await agentField.locator('[data-slot="select-trigger"]').click();
-  await page.waitForTimeout(300);
-  await page.getByRole("option", { name: presetDisplayName, exact: true }).click();
-
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: /^hire$/i })
-    .click();
-
-  await page.waitForURL(/\/sessions\//, { timeout: 30000 });
-
-  const url = page.url();
-  const match = url.match(/\/sessions\/([a-f0-9-]+)/);
-  return match?.[1] ?? "";
+  return hireWorker(page, name, async () => {
+    await page.getByRole("option", { name: presetDisplayName, exact: true }).click();
+  });
 }
 
 /**
- * Ensure the session page's right-hand sidebar (containing the IDE / Result /
- * Browser tabs) is open. On fresh sessions it defaults to closed; the toggle
- * button shows "IDE" when closed and "Hide Panel" when open.
- *
- * Idempotent — safe to call when the panel is already open.
+ * Best-effort session cleanup via the DELETE API. Used at the end of docker-
+ * gated tests instead of driving the UI's Stop→Destroy dance — that path only
+ * works when status=stopped and is several confirm-dialogs deep. DELETE tears
+ * the container + DB row down in one call, and 404s on already-gone sessions
+ * are silently ignored.
+ */
+export async function cleanupSession(page: Page, sessionId: string): Promise<void> {
+  await page.request.delete(`${getBaseUrl()}/api/sessions/${sessionId}`).catch(() => {});
+}
+
+/**
+ * Ensure the session page's right-hand sidebar (IDE / Result / Browser tabs)
+ * is open. On fresh sessions the panel starts collapsed and the toggle button
+ * is labeled "IDE"; once open, the tab list is mounted. Idempotent — safe to
+ * call when the panel is already open (the locator misses and we no-op).
  */
 export async function openSidePanel(page: Page) {
   const openLabel = page.getByRole("button", { name: /^ide$/i });
   if (await openLabel.isVisible().catch(() => false)) {
     await openLabel.click();
-    // Wait for the tab list to mount inside the now-open sidebar.
     await page.getByRole("tab", { name: /^ide$/i }).waitFor({ state: "visible", timeout: 5000 });
   }
 }
@@ -140,10 +118,9 @@ export async function openSidePanel(page: Page) {
  */
 let _docker: Docker | null = null;
 export function getTestDockerClient(): Docker {
-  if (_docker) return _docker;
-  const socketPath = process.env.DOCKER_HOST_SOCKET || "/var/run/docker.sock";
-  _docker = new Docker({ socketPath });
-  return _docker;
+  return (_docker ??= new Docker({
+    socketPath: process.env.DOCKER_HOST_SOCKET || "/var/run/docker.sock",
+  }));
 }
 
 export interface ExecResult {
@@ -153,16 +130,18 @@ export interface ExecResult {
 }
 
 /**
- * Exec a command inside a container by id (NOT session id).
- * Resolves the session's containerId via the API helper below if needed.
+ * Exec a command inside a container by id. Manually demuxes the multiplexed
+ * stream (avoids a dockerode `demuxStream` race where downstream readables
+ * can end before their `data` listeners drain). Docker stream-frame format:
+ *   8-byte header: [stream_type(1=out,2=err), 0, 0, 0, size_be_32]
+ *   followed by `size` bytes of payload
  */
 export async function execInContainer(
   containerId: string,
   cmd: string[],
   opts: { user?: string; workingDir?: string } = {},
 ): Promise<ExecResult> {
-  const docker = getTestDockerClient();
-  const container = docker.getContainer(containerId);
+  const container = getTestDockerClient().getContainer(containerId);
   const exec = await container.exec({
     Cmd: cmd,
     AttachStdout: true,
@@ -172,12 +151,6 @@ export async function execInContainer(
   });
   const stream = await exec.start({ hijack: true, stdin: false });
 
-  // Collect the raw multiplexed stream and demux ourselves — avoids a
-  // dockerode `demuxStream` race where downstream readables can end before
-  // their `data` listeners drain. Format per Docker API:
-  //   8-byte header: [stream_type, 0, 0, 0, size_be_32]
-  //   stream_type: 1=stdout, 2=stderr
-  //   followed by `size` bytes of payload
   const chunks: Buffer[] = [];
   stream.on("data", (c: Buffer) => chunks.push(c));
   await new Promise<void>((resolve, reject) => {
@@ -188,8 +161,7 @@ export async function execInContainer(
   const raw = Buffer.concat(chunks);
   const stdoutParts: Buffer[] = [];
   const stderrParts: Buffer[] = [];
-  let i = 0;
-  while (i + 8 <= raw.length) {
+  for (let i = 0; i + 8 <= raw.length; ) {
     const streamType = raw[i];
     const size = raw.readUInt32BE(i + 4);
     const payload = raw.subarray(i + 8, i + 8 + size);
@@ -206,10 +178,7 @@ export async function execInContainer(
   };
 }
 
-/**
- * Look up the containerId for a session via the API (assumes the requesting
- * page is already authenticated).
- */
+/** Look up the containerId for a session via the API (assumes signed-in). */
 export async function getSessionContainerId(page: Page, sessionId: string): Promise<string> {
   const res = await page.request.get(`${getBaseUrl()}/api/sessions/${sessionId}`);
   if (!res.ok()) throw new Error(`GET /api/sessions/${sessionId} -> ${res.status()}`);
