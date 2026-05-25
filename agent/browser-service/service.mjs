@@ -476,10 +476,15 @@ class H264PeerStream {
         "3.1",
         "-pix_fmt",
         "yuv420p",
+        // 2-second keyframe interval (at 30 FPS = every 60 frames). Was 30
+        // (1s) — at JPEG q80 baseline the keyframe is ~10–15× a delta, so
+        // halving the rate cuts bandwidth roughly 30–40% for typical
+        // interactive use. Trade-off: packet-loss recovery takes up to 2 s
+        // instead of 1, which is fine over the reliable WS/TCP transport.
         "-g",
-        "30",
+        "60",
         "-keyint_min",
-        "30",
+        "60",
         "-bf",
         "0",
         "-refs",
@@ -745,7 +750,13 @@ function auContainsIdr(au) {
 }
 
 const app = new Hono();
-const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
+const nodeWs = createNodeWebSocket({ app });
+const { injectWebSocket, upgradeWebSocket } = nodeWs;
+// Disable permessage-deflate: H.264 chunks are already entropy-coded, so
+// compression is pure CPU overhead. Bilateral with the Blackhouse proxy
+// upstream connection (which also opts out). Mutating `wss.options`
+// works because the `ws` package reads it at handshake time. (#59 item 3.)
+nodeWs.wss.options.perMessageDeflate = false;
 
 // ---------- WebSocket: H.264 video stream ------------------------------------
 
@@ -798,6 +809,26 @@ app.get(
         }
       }
     },
+    // Text frames from the client carry input events as JSON envelopes:
+    //   { type: "input", input: { type, x, y, buttons, ... } }
+    // The Blackhouse server's proxy WS forwards them straight through —
+    // skipping a localhost POST round-trip per event (was #58's path).
+    // The browser-service handles WS messages in receive order, so a
+    // mouseMove can't beat its mouseDown to CDP (TCP/WS framing preserves
+    // order; CDP dispatches are sequential by virtue of being awaited).
+    async onMessage(evt, _ws) {
+      const message = evt.data;
+      if (typeof message !== "string") return;
+      let envelope;
+      try {
+        envelope = JSON.parse(message);
+      } catch {
+        return;
+      }
+      if (!envelope || typeof envelope !== "object") return;
+      if (envelope.type !== "input") return;
+      await dispatchInput(envelope.input);
+    },
     onClose(_evt, ws) {
       const stream = ws._h264;
       if (stream) {
@@ -812,32 +843,32 @@ app.get(
   })),
 );
 
-// ---------- POST /browser/input ----------------------------------------------
-
-app.post("/browser/input", async (c) => {
-  const body = await c.req.json().catch(() => null);
+// ---------- Input dispatch (shared by REST + WS) ----------------------------
+//
+// Dispatch a single input payload to CDP. Used by:
+//   - POST /browser/input  (fallback REST path; e2e direct-probe uses it)
+//   - The /browser/ws message handler when a `{type:"input", input:...}`
+//     JSON text frame arrives — saves the localhost HTTP round-trip that
+//     the proxy used to take per event.
+//
+// Returns `{ ok: true }` on success or `{ ok: false, error, status }` on
+// validation failure or CDP error. The WS path discards the result; the
+// REST path serializes it to a Hono response.
+//
+// CDP `buttons` is the bitmask of currently-held mouse buttons (1=left,
+// 2=right, 4=middle). Without it, every `mouseMoved` during a drag is
+// classified as a *hover* by Chromium — so text-selection highlight never
+// renders. Likewise, `button` on `mouseMoved` must be the held button name
+// when buttons!=0 (not omitted/"none") — verified empirically in #45.
+async function dispatchInput(body) {
   if (!body || typeof body !== "object" || typeof body.type !== "string") {
-    return c.json({ error: "invalid_body" }, 400);
+    return { ok: false, error: "invalid_body", status: 400 };
   }
-
   try {
     switch (body.type) {
-      // CDP `buttons` is the bitmask of currently-held mouse buttons
-      // (1=left, 2=right, 4=middle). Without it, every `mouseMoved` during
-      // a drag is classified as a *hover* by Chromium — so text-selection
-      // highlight never renders. The FE side tracks the bitmask in a ref
-      // and passes it on every mouse event.
-      //
-      // `button` on mouseMoved must ALSO be set to the held button (not
-      // omitted, which defaults to "none") when buttons!=0 — otherwise
-      // Chromium's input handler treats the move as a hover even with
-      // `buttons:1`. Verified empirically: with `buttons:1` and no `button`
-      // field, drag-select never extends; with `button:"left", buttons:1`
-      // it does. We map the bitmask back to the conventional button name.
       case "mouseMove": {
         const buttons = body.buttons ?? 0;
-        // Pick the lowest-priority held button (left wins over right wins
-        // over middle), matching Playwright's `_lastButton` semantics.
+        // Match Playwright's `_lastButton` semantics for the held-button name.
         const buttonFromBitmask =
           buttons & 1 ? "left" : buttons & 2 ? "right" : buttons & 4 ? "middle" : "none";
         await state.cdp.send("Input.dispatchMouseEvent", {
@@ -896,16 +927,25 @@ app.post("/browser/input", async (c) => {
         });
         break;
       case "char":
-        if (typeof body.text !== "string") return c.json({ error: "missing_text" }, 400);
+        if (typeof body.text !== "string") {
+          return { ok: false, error: "missing_text", status: 400 };
+        }
         await state.cdp.send("Input.insertText", { text: body.text });
         break;
       default:
-        return c.json({ error: "unknown_type" }, 400);
+        return { ok: false, error: "unknown_type", status: 400 };
     }
-    return c.json({ ok: true });
+    return { ok: true };
   } catch (err) {
-    return c.json({ error: "cdp_error", message: String(err) }, 500);
+    return { ok: false, error: "cdp_error", message: String(err), status: 500 };
   }
+}
+
+app.post("/browser/input", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const result = await dispatchInput(body);
+  if (result.ok) return c.json({ ok: true });
+  return c.json({ error: result.error, message: result.message }, result.status);
 });
 
 // ---------- POST /browser/control --------------------------------------------

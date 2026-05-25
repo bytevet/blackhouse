@@ -12,17 +12,29 @@ import { rawDataToArrayBuffer } from "../lib/ws-binary.js";
  * Client connects to `ws://server/api/browser-ws/:sessionId?token=<sess>`.
  * After auth, we open a server-side WS to the in-container browser-service
  * at `ws://127.0.0.1:<hostPort>/browser/ws` and binary-pipe screencast
- * frames to the client.
+ * frames downstream + text-pipe input events upstream.
  *
- * For input events the client sends text JSON `{type:"input", input:{...}}`
- * on the same WS; we forward those as fire-and-forget POSTs to the
- * browser-service's `/browser/input` endpoint. This collapses what was
- * ~300 HTTP round-trips per scroll into 0 — see #58.
+ * The browser-service WS itself accepts text frames shaped
+ * `{type:"input", input:{...}}` and dispatches them to CDP — so the proxy
+ * is a pure byte-pipe in both directions and never has to parse, JSON-decode,
+ * or HTTP-forward per event (was the cost in #58).
  *
  * Single-peer per WS — code-server and the screencast both deliver to one
  * viewer at a time. We do not replicate the multi-peer/scrollback complexity
  * of the terminal WS (no historical frames worth replaying).
  */
+
+// Drop input frames if the upstream socket is already this far behind.
+// 64 KB is comfortably above any single input payload (input JSON is
+// ~50–100 B per event); reaching the cap means the upstream encoder /
+// browser-service can't keep up with the client. Better to lose the
+// stale event than to grow an unbounded queue.
+const UPSTREAM_BACKPRESSURE_LIMIT = 64 * 1024;
+// Larger threshold downstream — a single H.264 keyframe is ~50 KB, and we
+// don't want to drop them prematurely. But if the client falls 2 MB
+// behind, skip the next chunk; it'll resync on the next keyframe.
+const CLIENT_BACKPRESSURE_LIMIT = 2 * 1024 * 1024;
+
 export function createBrowserWsRoute(
   upgradeWebSocket: ReturnType<typeof createNodeWebSocket>["upgradeWebSocket"],
 ) {
@@ -35,14 +47,6 @@ export function createBrowserWsRoute(
       const token = c.req.query("token");
 
       let upstream: WebSocket | null = null;
-      // Hoisted so `onMessage` can reuse the port lookup from `onOpen`
-      // instead of calling `getContainerHostPort` on every input event.
-      let upstreamPort: number | null = null;
-      // Serial chain: input events must reach the page in the order the
-      // user produced them (a `mouseMove` before its `mouseDown` is a
-      // hover, not a drag). Each handler awaits the previous before
-      // issuing its localhost POST.
-      let inputChain: Promise<unknown> = Promise.resolve();
 
       return {
         async onOpen(_evt, ws) {
@@ -57,6 +61,7 @@ export function createBrowserWsRoute(
             return;
           }
 
+          let upstreamPort: number;
           try {
             upstreamPort = await getContainerHostPort(sessionId, 9223);
           } catch (err) {
@@ -69,21 +74,30 @@ export function createBrowserWsRoute(
             return;
           }
 
-          upstream = new WebSocket(`ws://127.0.0.1:${upstreamPort}/browser/ws`);
-
-          upstream.on("open", () => {
-            // Connection live; nothing else to do — frames flow inbound.
+          // `perMessageDeflate: false` — H.264 is already entropy-coded;
+          // permessage-deflate just burns CPU re-compressing it and adds
+          // latency on every frame. Bilateral negotiation means the
+          // browser-service WS server doesn't need its own opt-out.
+          upstream = new WebSocket(`ws://127.0.0.1:${upstreamPort}/browser/ws`, {
+            perMessageDeflate: false,
           });
 
           upstream.on("message", (data: RawData, isBinary: boolean) => {
             try {
-              // Preserve the WS frame type: H.264 NAL units are sent as
-              // binary, but the encoder also emits a JSON `config` message
-              // (codec metadata for VideoDecoder.configure) as a TEXT frame.
-              // Converting everything to binary breaks the decoder.
               if (isBinary) {
+                // Drop video frames if the client can't keep up. The stream
+                // self-resyncs at the next keyframe (#59 item 6 — 2 s GOP),
+                // so a few dropped P-frames are recoverable; an unbounded
+                // ws.send queue is not. hono/ws's WSContext doesn't expose
+                // bufferedAmount directly, but `.raw` is the underlying
+                // `ws` WebSocket which does.
+                const raw = ws.raw as WebSocket | undefined;
+                if (raw && raw.bufferedAmount > CLIENT_BACKPRESSURE_LIMIT) return;
                 ws.send(rawDataToArrayBuffer(data));
               } else {
+                // Preserve the WS frame type: encoder emits a JSON `config`
+                // message (codec metadata for VideoDecoder.configure) as a
+                // TEXT frame. Converting it to binary breaks the decoder.
                 const buf = Array.isArray(data)
                   ? Buffer.concat(data)
                   : Buffer.isBuffer(data)
@@ -118,41 +132,23 @@ export function createBrowserWsRoute(
           });
         },
 
+        // Client→server frames (text JSON input envelopes) get piped
+        // straight through to the upstream WS. browser-service parses
+        // them in-process and dispatches to CDP — no localhost HTTP
+        // round-trip per event.
         onMessage(evt, _ws: WSContext) {
-          // Only text frames are meaningful client→server today: a JSON
-          // `{type:"input", input:{...}}` envelope that we forward to the
-          // in-container browser-service's REST `/browser/input` endpoint.
-          // Binary frames have no protocol meaning yet and are dropped.
+          if (!upstream || upstream.readyState !== WebSocket.OPEN) return;
+          if (upstream.bufferedAmount > UPSTREAM_BACKPRESSURE_LIMIT) return;
           const message: unknown = evt.data;
-          if (typeof message !== "string") return;
-          if (upstreamPort == null) return; // onOpen hasn't completed
-          let parsed: unknown;
-          try {
-            parsed = JSON.parse(message);
-          } catch {
-            return;
+          if (typeof message === "string") {
+            upstream.send(message);
+          } else if (Buffer.isBuffer(message)) {
+            upstream.send(message);
+          } else if (message instanceof ArrayBuffer) {
+            upstream.send(Buffer.from(message));
+          } else if (message instanceof Uint8Array) {
+            upstream.send(Buffer.from(message.buffer, message.byteOffset, message.byteLength));
           }
-          if (
-            !parsed ||
-            typeof parsed !== "object" ||
-            (parsed as { type?: unknown }).type !== "input"
-          ) {
-            return;
-          }
-          const input = (parsed as { input?: unknown }).input;
-          if (!input || typeof input !== "object") return;
-          const port = upstreamPort;
-          inputChain = inputChain.then(() =>
-            fetch(`http://127.0.0.1:${port}/browser/input`, {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify(input),
-            }).catch(() => {
-              // Fire-and-forget; nothing the client could do about a
-              // failed input event anyway. The browser-service's own
-              // logging will surface real problems.
-            }),
-          );
         },
 
         onClose() {

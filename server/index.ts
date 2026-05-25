@@ -22,7 +22,17 @@ import { createIdeProxy } from "./proxy/ide.js";
 const app = new Hono();
 
 // WebSocket setup (must be before routes that use it)
-const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
+const nodeWs = createNodeWebSocket({ app });
+const { injectWebSocket, upgradeWebSocket } = nodeWs;
+// Disable permessage-deflate globally on the WS server. The browser
+// screencast WS carries already-entropy-coded H.264 chunks where
+// compression is pure CPU overhead; terminal and IDE WS carry tiny
+// amounts of text where the absolute bandwidth saved is negligible. The
+// net win is significant CPU reduction in the H.264 hot path. (#59 item 3.)
+// `@hono/node-ws` doesn't expose this knob directly; mutating the
+// internal `wss.options` works because the `ws` package reads it at
+// handshake time.
+nodeWs.wss.options.perMessageDeflate = false;
 
 // Middleware
 app.use("*", logger());
