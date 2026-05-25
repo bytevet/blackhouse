@@ -47,6 +47,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import ffmpegPath from "ffmpeg-static";
+import { decode as decodeInput } from "./input-codec.mjs";
 
 // Surface immediately at boot so we never silently lose ffmpeg later. If
 // ffmpeg-static didn't successfully run its post-install (e.g. the image
@@ -809,25 +810,37 @@ app.get(
         }
       }
     },
-    // Text frames from the client carry input events as JSON envelopes:
-    //   { type: "input", input: { type, x, y, buttons, ... } }
-    // The Blackhouse server's proxy WS forwards them straight through —
-    // skipping a localhost POST round-trip per event (was #58's path).
-    // The browser-service handles WS messages in receive order, so a
-    // mouseMove can't beat its mouseDown to CDP (TCP/WS framing preserves
-    // order; CDP dispatches are sequential by virtue of being awaited).
+    // Client→server input frames arrive on this same WS:
+    //
+    //   • Binary frame: compact opcode-prefixed encoding (see
+    //     `input-codec.mjs` for the table). Preferred path — 6 B for a
+    //     mouseMove vs ~80 B of JSON.
+    //   • Text frame:  legacy JSON envelope `{type:"input", input:{...}}`.
+    //     Kept as a fallback for clients that haven't shipped the binary
+    //     codec yet, and for forward-compat with any non-codec event.
+    //
+    // The proxy WS just byte-pipes both kinds through. browser-service
+    // handles them in receive order, so a mouseMove can't beat its
+    // mouseDown to CDP (WS framing preserves order; CDP dispatches are
+    // sequential by virtue of being awaited).
     async onMessage(evt, _ws) {
       const message = evt.data;
-      if (typeof message !== "string") return;
-      let envelope;
-      try {
-        envelope = JSON.parse(message);
-      } catch {
+      if (typeof message === "string") {
+        let envelope;
+        try {
+          envelope = JSON.parse(message);
+        } catch {
+          return;
+        }
+        if (!envelope || typeof envelope !== "object" || envelope.type !== "input") return;
+        await dispatchInput(envelope.input);
         return;
       }
-      if (!envelope || typeof envelope !== "object") return;
-      if (envelope.type !== "input") return;
-      await dispatchInput(envelope.input);
+      // Binary path. `evt.data` is an ArrayBuffer / Buffer / Uint8Array
+      // depending on `ws` package config; the codec accepts all three.
+      const payload = decodeInput(message);
+      if (!payload) return;
+      await dispatchInput(payload);
     },
     onClose(_evt, ws) {
       const stream = ws._h264;
