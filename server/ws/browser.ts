@@ -11,17 +11,21 @@ import { rawDataToArrayBuffer } from "../lib/ws-binary.js";
  *
  * Client connects to `ws://server/api/browser-ws/:sessionId?token=<sess>`.
  * After auth, we open a server-side WS to the in-container browser-service
- * at `ws://127.0.0.1:<hostPort>/browser/ws` and binary-pipe screencast
- * frames downstream + text-pipe input events upstream.
- *
- * The browser-service WS itself accepts text frames shaped
- * `{type:"input", input:{...}}` and dispatches them to CDP — so the proxy
- * is a pure byte-pipe in both directions and never has to parse, JSON-decode,
- * or HTTP-forward per event (was the cost in #58).
+ * at `ws://127.0.0.1:<hostPort>/browser/ws` and pipe binary frames in both
+ * directions: screencast (0x80/0x81/0x83–0x86) downstream and input events
+ * + request opcodes (0x01–0x12) upstream. The proxy is a pure byte-pipe;
+ * it never parses opcodes, JSON-decodes, or HTTP-forwards per event (that
+ * was the cost in #58, eliminated by #61).
  *
  * Single-peer per WS — code-server and the screencast both deliver to one
  * viewer at a time. We do not replicate the multi-peer/scrollback complexity
  * of the terminal WS (no historical frames worth replaying).
+ *
+ * Open-time race: `onOpen` is async (auth + container port lookup + WS
+ * handshake → 50–100 ms locally). Client frames arriving in that window
+ * get queued in `earlyQueue` and flushed in order from the upstream
+ * `"open"` listener — sub-100 ms post-mount sends (FE's first resize from
+ * ResizeObserver) used to be silently dropped before this fix.
  */
 
 // Drop input frames if the upstream socket is already this far behind.
@@ -34,6 +38,30 @@ const UPSTREAM_BACKPRESSURE_LIMIT = 64 * 1024;
 // don't want to drop them prematurely. But if the client falls 2 MB
 // behind, skip the next chunk; it'll resync on the next keyframe.
 const CLIENT_BACKPRESSURE_LIMIT = 2 * 1024 * 1024;
+// Cap on bytes queued from the client while the upstream WS is still
+// connecting (auth + container port lookup + handshake — typically 50–
+// 100 ms locally). Client frames arriving in that window get held here
+// and flushed on `upstream "open"`. Cap is byte-based, not count, because
+// resize frames are small (~10 B) but a runaway client could buffer many.
+// 16 KB easily covers the realistic burst: a flurry of resize + first
+// navigate is ~50 B; the typical inflight set fits in well under 1 KB.
+const EARLY_QUEUE_BYTES_CAP = 16 * 1024;
+
+type ProxyFrame = string | Buffer;
+
+function normalizeClientFrame(message: unknown): ProxyFrame | null {
+  if (typeof message === "string") return message;
+  if (Buffer.isBuffer(message)) return message;
+  if (message instanceof ArrayBuffer) return Buffer.from(message);
+  if (message instanceof Uint8Array) {
+    return Buffer.from(message.buffer, message.byteOffset, message.byteLength);
+  }
+  return null;
+}
+
+function frameByteLength(frame: ProxyFrame): number {
+  return typeof frame === "string" ? Buffer.byteLength(frame, "utf8") : frame.byteLength;
+}
 
 export function createBrowserWsRoute(
   upgradeWebSocket: ReturnType<typeof createNodeWebSocket>["upgradeWebSocket"],
@@ -47,6 +75,14 @@ export function createBrowserWsRoute(
       const token = c.req.query("token");
 
       let upstream: WebSocket | null = null;
+      // Frames the client sent before the upstream WS finished its async
+      // open dance (auth + port lookup + handshake). Flushed in receive
+      // order from the `upstream "open"` listener below. Bounded by
+      // `EARLY_QUEUE_BYTES_CAP` — excess frames get dropped with a single
+      // warn log so a degenerate client can't grow this unboundedly.
+      const earlyQueue: ProxyFrame[] = [];
+      let earlyQueueBytes = 0;
+      let earlyQueueDropped = false;
 
       return {
         async onOpen(_evt, ws) {
@@ -80,6 +116,19 @@ export function createBrowserWsRoute(
           // browser-service WS server doesn't need its own opt-out.
           upstream = new WebSocket(`ws://127.0.0.1:${upstreamPort}/browser/ws`, {
             perMessageDeflate: false,
+          });
+
+          // Flush any client frames that arrived during the open dance.
+          // Order-preserving; respects upstream backpressure (anything past
+          // the limit gets discarded the same way live frames do).
+          upstream.on("open", () => {
+            if (!upstream) return;
+            for (const frame of earlyQueue) {
+              if (upstream.bufferedAmount > UPSTREAM_BACKPRESSURE_LIMIT) break;
+              upstream.send(frame);
+            }
+            earlyQueue.length = 0;
+            earlyQueueBytes = 0;
           });
 
           upstream.on("message", (data: RawData, isBinary: boolean) => {
@@ -132,23 +181,34 @@ export function createBrowserWsRoute(
           });
         },
 
-        // Client→server frames (text JSON input envelopes) get piped
-        // straight through to the upstream WS. browser-service parses
-        // them in-process and dispatches to CDP — no localhost HTTP
-        // round-trip per event.
+        // Client→server frames get piped straight through to the upstream
+        // WS. If upstream isn't OPEN yet (still doing auth + port lookup +
+        // handshake), queue the frame and flush in order from the upstream
+        // "open" listener — otherwise sub-100 ms post-mount sends (FE's
+        // first resize fires from ResizeObserver almost immediately after
+        // viewer mount) would be silently dropped.
         onMessage(evt, _ws: WSContext) {
-          if (!upstream || upstream.readyState !== WebSocket.OPEN) return;
-          if (upstream.bufferedAmount > UPSTREAM_BACKPRESSURE_LIMIT) return;
-          const message: unknown = evt.data;
-          if (typeof message === "string") {
-            upstream.send(message);
-          } else if (Buffer.isBuffer(message)) {
-            upstream.send(message);
-          } else if (message instanceof ArrayBuffer) {
-            upstream.send(Buffer.from(message));
-          } else if (message instanceof Uint8Array) {
-            upstream.send(Buffer.from(message.buffer, message.byteOffset, message.byteLength));
+          const frame = normalizeClientFrame(evt.data);
+          if (frame == null) return;
+
+          if (!upstream || upstream.readyState !== WebSocket.OPEN) {
+            const size = frameByteLength(frame);
+            if (earlyQueueBytes + size > EARLY_QUEUE_BYTES_CAP) {
+              if (!earlyQueueDropped) {
+                console.warn(
+                  `[browser-proxy] early queue cap exceeded (${earlyQueueBytes}+${size}B > ${EARLY_QUEUE_BYTES_CAP}B); dropping client frame`,
+                );
+                earlyQueueDropped = true;
+              }
+              return;
+            }
+            earlyQueue.push(frame);
+            earlyQueueBytes += size;
+            return;
           }
+
+          if (upstream.bufferedAmount > UPSTREAM_BACKPRESSURE_LIMIT) return;
+          upstream.send(frame);
         },
 
         onClose() {
