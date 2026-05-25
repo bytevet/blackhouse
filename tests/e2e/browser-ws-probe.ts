@@ -19,12 +19,32 @@
  *     0x81 video, 0x85 console, 0x86 navigate). Returns an unsubscribe fn.
  *   - `close()` — reject pending requests + close the socket.
  *
- * KNOWN PROJECTION GAP (BE-cut2 follow-up): the 0x84 stateSnapshot payload
- * only carries `{ok, url?, title?, loading?}`. Probes that need
- * `selectionText` / `scrollX|Y` / `docSize` / `lastContextMenu` (the strict
- * browser-interactivity suite) MUST keep the REST `/browser/state` call
- * until the projection grows. The lone REST hold-out is intentional — see
- * call-site comments in `session.spec.ts`.
+ * Projection: as of 87578f8 the 0x84 stateSnapshot carries every field this
+ * suite reads — url/title/loading + selectionText + scrollX/Y + viewport +
+ * docSize + lastContextMenu — behind opt-in include-bits. Zero REST/SSE
+ * dependencies on the browser pane after this lands.
+ *
+ * AGENT-IMAGE STALENESS HAZARD (read before debugging a black canvas):
+ * `agent/browser-service/service.mjs` ships INSIDE the per-preset Docker
+ * image, baked at build time. Pulling new code (#61 wire format, 87578f8
+ * state-flag bits, etc.) does NOT update existing containers — only a
+ * `POST /api/settings/agent-configs/:id/build` rebuild does. Symptoms of
+ * a stale agent image:
+ *   - SPA console logs `[browser-viewer] unknown WS opcode 0x1` and the
+ *     canvas stays black (in-container encoder emits the pre-#61 bare
+ *     `[type, pts, nalu]` video frame, no 0x81 prefix).
+ *   - `selectionText` / `scrollY` / `lastContextMenu` come back undefined
+ *     even when the page clearly has selection / scroll / contextmenu
+ *     state (pre-87578f8 image masks the new include-bits to 0).
+ *   - `waitForFirstFrame` in `session.spec.ts` times out at 60s.
+ * Repro path for sanity-checking: hire a session, observe the failure;
+ * Settings → Docker → Rebuild on the preset; hire a NEW session (existing
+ * containers stay frozen at the pre-rebuild image); failures clear.
+ *
+ * Every helper in `tests/e2e/helpers.ts` (`createSession`, `createSession-
+ * WithPreset`) hires a fresh worker per call — none reuse pre-existing
+ * containers. Don't shortcut by attaching to an existing sessionId unless
+ * you've verified the container was spawned post-rebuild.
  */
 
 import { WebSocket as NodeWebSocket } from "ws";
