@@ -5,6 +5,7 @@ import type { AuthEnv } from "../middleware/auth.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireSessionAccess, handleSessionAccessError } from "../lib/session.js";
 import { getContainerHostPort } from "../lib/docker.js";
+import { rawDataToArrayBuffer } from "../lib/ws-binary.js";
 
 /**
  * IDE proxy mounted at `/api/sessions/:id/ide/*`.
@@ -94,14 +95,7 @@ export function createIdeProxy(
 
           upstream.on("message", (data: RawData) => {
             try {
-              const buf = Array.isArray(data)
-                ? Buffer.concat(data)
-                : Buffer.isBuffer(data)
-                  ? data
-                  : Buffer.from(data);
-              const bytes = new Uint8Array(buf.byteLength);
-              bytes.set(buf);
-              ws.send(bytes.buffer);
+              ws.send(rawDataToArrayBuffer(data));
             } catch {
               /* peer gone */
             }

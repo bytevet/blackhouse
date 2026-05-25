@@ -265,7 +265,6 @@ async function startBrowser() {
 
   async function runResize(width, height) {
     resizeInFlight = true;
-    console.log(`[resize] start ${SCREENCAST_WIDTH}x${SCREENCAST_HEIGHT} -> ${width}x${height}`);
     try {
       // 1. Stop the CDP screencast so no late frames arrive while we shuffle.
       if (screencastRunning) {
@@ -289,7 +288,6 @@ async function startBrowser() {
           /* already closed */
         }
       }
-      console.log(`[resize] tore down ${peerWss.length} peer encoder(s)`);
       // 3. Update Playwright viewport. This also resizes the underlying CDP
       //    page so subsequent screencast frames are at the new resolution.
       await page.setViewportSize({ width, height });
@@ -315,27 +313,18 @@ async function startBrowser() {
         const fresh = new H264PeerStream(ws);
         ws._h264 = fresh;
         peers.add(fresh);
-        console.log(
-          `[resize] peer ${fresh.id} re-registered for ${SCREENCAST_WIDTH}x${SCREENCAST_HEIGHT}; peers=${peers.size}`,
-        );
       }
       // 5. Restart the CDP screencast at the new size if anyone's listening.
       if (peers.size > 0) {
         try {
-          console.log(
-            `[resize] restarting CDP screencast at ${SCREENCAST_WIDTH}x${SCREENCAST_HEIGHT}`,
-          );
           await cdp.send("Page.startScreencast", makeScreencastConfig());
           screencastRunning = true;
-          console.log("[resize] CDP screencast restarted ok");
         } catch (err) {
-          console.error(`[resize] Page.startScreencast FAILED at restart: ${err?.message || err}`);
+          console.error(`[resize] Page.startScreencast failed: ${err?.message || err}`);
           // Don't leave the flag set — next ensureScreencastRunning gets a
           // chance to retry.
           screencastRunning = false;
         }
-      } else {
-        console.log("[resize] no peers — skipping screencast restart");
       }
     } catch (err) {
       console.error(`[resize] unexpected failure: ${err?.stack || err}`);
@@ -369,16 +358,11 @@ async function startBrowser() {
     }, 200);
   }
 
-  let _frameCount = 0;
   cdp.on("Page.screencastFrame", async (params) => {
     // Decode the base64 JPEG once; feed the bytes to each peer's ffmpeg
     // stdin. Annex-B chunks come back asynchronously via the stdout parser
     // inside H264PeerStream.
     const bytes = Buffer.from(params.data, "base64");
-    _frameCount++;
-    if (_frameCount <= 5 || _frameCount % 60 === 0) {
-      console.log(`[screencast] frame #${_frameCount} ${bytes.length}B peers=${peers.size}`);
-    }
     for (const peer of peers) {
       try {
         peer.pushJpeg(bytes);
@@ -516,9 +500,8 @@ class H264PeerStream {
     // Note: `pid` is set on the ChildProcess synchronously, but the actual
     // fork may not have happened yet — the 'spawn' event is the authoritative
     // signal that the child is alive.
-    console.log(`[peer ${this.id}] spawn() returned pid=${this.ffmpeg.pid}`);
     this.ffmpeg.on("spawn", () => {
-      console.log(`[peer ${this.id}] ffmpeg spawn event (alive) pid=${this.ffmpeg.pid}`);
+      console.log(`[peer ${this.id}] ffmpeg up pid=${this.ffmpeg.pid}`);
     });
     this.ffmpeg.on("error", (err) => {
       // Fires when the spawn itself fails (ENOENT, EACCES, etc.) — these
@@ -566,13 +549,11 @@ class H264PeerStream {
       }
       return;
     }
-    if (!this._loggedFirstPush) {
-      console.log(`[peer ${this.id}] first pushJpeg size=${jpegBytes.length}`);
-      this._loggedFirstPush = true;
-    }
     const ok = this.ffmpeg.stdin.write(jpegBytes);
     if (!ok && !this._loggedDrain) {
-      console.log(`[peer ${this.id}] stdin.write returned false (back-pressure)`);
+      // Back-pressure on the encoder's stdin is the first sign the WS
+      // peer can't keep up with the JPEG fan-out. One-shot to avoid a flood.
+      console.warn(`[peer ${this.id}] ffmpeg stdin back-pressure`);
       this._loggedDrain = true;
     }
     this._lastJpeg = jpegBytes;
@@ -607,10 +588,6 @@ class H264PeerStream {
   }
 
   _onStdout(chunk) {
-    if (!this._loggedFirstStdout) {
-      console.log(`[peer ${this.id}] first stdout chunk=${chunk.length}`);
-      this._loggedFirstStdout = true;
-    }
     // Accumulate, then walk AUD-delimited Access Units.
     this.buf = this.buf.length === 0 ? Buffer.from(chunk) : Buffer.concat([this.buf, chunk]);
     for (;;) {
@@ -659,18 +636,8 @@ class H264PeerStream {
 
   _scheduleDeferredFlush() {
     if (this._flushTimer) return; // already armed
-    if (!this._loggedFlushArm) {
-      console.log(`[peer ${this.id}] deferred flush armed buf=${this.buf.length}`);
-      this._loggedFlushArm = true;
-    }
     this._flushTimer = setTimeout(() => {
       this._flushTimer = null;
-      if (!this._loggedFlushFire) {
-        console.log(
-          `[peer ${this.id}] deferred flush fired closed=${this.closed} buf=${this.buf.length}`,
-        );
-        this._loggedFlushFire = true;
-      }
       if (this.closed) return;
       if (this.buf.length === 0) return;
       if (findAudStart(this.buf, 0) !== 0) return;
@@ -683,19 +650,9 @@ class H264PeerStream {
   _emitAu(au) {
     if (this.closed) return;
     const isKey = auContainsIdr(au);
-    if (!this._loggedEmitAu) {
-      console.log(
-        `[peer ${this.id}] _emitAu first call au=${au.length} isKey=${isKey} firstKeyEmitted=${this.firstKeyEmitted}`,
-      );
-      this._loggedEmitAu = true;
-    }
     if (!this.firstKeyEmitted && !isKey) {
       // Drop deltas that arrive before the first IDR. libx264 emits an IDR
       // first by construction, so this should be a no-op in practice.
-      if (!this._loggedDropDelta) {
-        console.log(`[peer ${this.id}] dropping delta (no IDR yet)`);
-        this._loggedDropDelta = true;
-      }
       return;
     }
     if (isKey) this.firstKeyEmitted = true;
@@ -707,10 +664,6 @@ class H264PeerStream {
 
     try {
       this.ws.send(Buffer.concat([header, au]));
-      if (!this._loggedFirstSent) {
-        console.log(`[peer ${this.id}] first ws.send au=${au.length} key=${isKey}`);
-        this._loggedFirstSent = true;
-      }
     } catch (err) {
       if (!this._loggedSendErr) {
         console.error(`[peer ${this.id}] ws.send threw:`, err?.message || err);
@@ -861,29 +814,10 @@ app.get(
 
 // ---------- POST /browser/input ----------------------------------------------
 
-let _inputSeq = 0;
-const INPUT_TRACE_LIMIT = 100;
 app.post("/browser/input", async (c) => {
   const body = await c.req.json().catch(() => null);
   if (!body || typeof body !== "object" || typeof body.type !== "string") {
     return c.json({ error: "invalid_body" }, 400);
-  }
-  // Server-side ordering trace — first N events get a sequence number and
-  // timestamp logged so we can spot out-of-order POST delivery (each fetch
-  // races independently over HTTP; mouseMove can arrive before its preceding
-  // mouseDown, which Chromium interprets as a hover and never extends the
-  // drag selection). Capped so logs stay readable in long sessions.
-  if (_inputSeq < INPUT_TRACE_LIMIT) {
-    _inputSeq++;
-    const tag =
-      body.type === "mouseMove" || body.type === "mouseDown" || body.type === "mouseUp"
-        ? `b=${body.buttons ?? 0}`
-        : body.type === "wheel"
-          ? `dy=${body.deltaY ?? 0}`
-          : body.type === "char" || body.type === "keyDown" || body.type === "keyUp"
-            ? `k=${body.key ?? ""}`
-            : "";
-    console.log(`[input #${_inputSeq}] t+${Date.now()}ms ${body.type} ${tag}`);
   }
 
   try {

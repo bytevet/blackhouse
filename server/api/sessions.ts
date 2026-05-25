@@ -34,6 +34,39 @@ function toSessionSummary<T extends { resultHtml?: string | null }>({ resultHtml
   return { ...rest, hasResult: resultHtml != null };
 }
 
+/**
+ * Forward a request to the in-container browser-service (port 9223) and
+ * mirror its status + content-type + body back to the caller. On any
+ * failure (port lookup, fetch, upstream error) responds with `502`
+ * `{error: "browser_unavailable", ...}`. Callers handle auth/ownership
+ * before invoking.
+ */
+async function proxyBrowser(
+  c: import("hono").Context,
+  sessionId: string,
+  upstreamPath: string,
+  init?: RequestInit,
+) {
+  try {
+    const port = await getContainerHostPort(sessionId, 9223);
+    const res = await fetch(`http://127.0.0.1:${port}${upstreamPath}`, init);
+    const text = await res.text();
+    return c.body(text, res.status as 200, {
+      "content-type": res.headers.get("content-type") || "application/json",
+    });
+  } catch (err) {
+    return c.json(
+      { error: "browser_unavailable", message: err instanceof Error ? err.message : String(err) },
+      502,
+    );
+  }
+}
+
+const JSON_HEADERS = { "content-type": "application/json" };
+function jsonPost(body: unknown): RequestInit {
+  return { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(body) };
+}
+
 const app = new Hono<AuthEnv>()
   .onError(handleSessionAccessError)
   // ---------------------------------------------------------------------------
@@ -600,28 +633,7 @@ const app = new Hono<AuthEnv>()
     async (c) => {
       const id = c.req.param("id");
       await requireSessionAccess(id, c.get("session").user);
-      const body = c.req.valid("json");
-
-      try {
-        const port = await getContainerHostPort(id, 9223);
-        const res = await fetch(`http://127.0.0.1:${port}/browser/control`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        const text = await res.text();
-        return c.body(text, res.status as 200, {
-          "content-type": res.headers.get("content-type") || "application/json",
-        });
-      } catch (err) {
-        return c.json(
-          {
-            error: "browser_unavailable",
-            message: err instanceof Error ? err.message : String(err),
-          },
-          502,
-        );
-      }
+      return proxyBrowser(c, id, "/browser/control", jsonPost(c.req.valid("json")));
     },
   )
 
@@ -652,28 +664,7 @@ const app = new Hono<AuthEnv>()
     async (c) => {
       const id = c.req.param("id");
       await requireSessionAccess(id, c.get("session").user);
-      const body = c.req.valid("json");
-
-      try {
-        const port = await getContainerHostPort(id, 9223);
-        const res = await fetch(`http://127.0.0.1:${port}/browser/input`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        const text = await res.text();
-        return c.body(text, res.status as 200, {
-          "content-type": res.headers.get("content-type") || "application/json",
-        });
-      } catch (err) {
-        return c.json(
-          {
-            error: "browser_unavailable",
-            message: err instanceof Error ? err.message : String(err),
-          },
-          502,
-        );
-      }
+      return proxyBrowser(c, id, "/browser/input", jsonPost(c.req.valid("json")));
     },
   )
 
@@ -681,37 +672,11 @@ const app = new Hono<AuthEnv>()
   .post(
     "/:id/browser/eval",
     authMiddleware,
-    zValidator(
-      "json",
-      z.object({
-        expression: z.string().min(1).max(10_000),
-      }),
-    ),
+    zValidator("json", z.object({ expression: z.string().min(1).max(10_000) })),
     async (c) => {
       const id = c.req.param("id");
       await requireSessionAccess(id, c.get("session").user);
-      const body = c.req.valid("json");
-
-      try {
-        const port = await getContainerHostPort(id, 9223);
-        const res = await fetch(`http://127.0.0.1:${port}/browser/eval`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        const text = await res.text();
-        return c.body(text, res.status as 200, {
-          "content-type": res.headers.get("content-type") || "application/json",
-        });
-      } catch (err) {
-        return c.json(
-          {
-            error: "browser_unavailable",
-            message: err instanceof Error ? err.message : String(err),
-          },
-          502,
-        );
-      }
+      return proxyBrowser(c, id, "/browser/eval", jsonPost(c.req.valid("json")));
     },
   )
 
@@ -723,24 +688,8 @@ const app = new Hono<AuthEnv>()
   .get("/:id/browser/state", authMiddleware, async (c) => {
     const id = c.req.param("id");
     await requireSessionAccess(id, c.get("session").user);
-    try {
-      const port = await getContainerHostPort(id, 9223);
-      const url = new URL(c.req.url);
-      const upstream = `http://127.0.0.1:${port}/browser/state${url.search}`;
-      const res = await fetch(upstream);
-      const text = await res.text();
-      return c.body(text, res.status as 200, {
-        "content-type": res.headers.get("content-type") || "application/json",
-      });
-    } catch (err) {
-      return c.json(
-        {
-          error: "browser_unavailable",
-          message: err instanceof Error ? err.message : String(err),
-        },
-        502,
-      );
-    }
+    const search = new URL(c.req.url).search;
+    return proxyBrowser(c, id, `/browser/state${search}`);
   })
 
   // GET /api/sessions/:id/browser/console — SSE re-broadcast.

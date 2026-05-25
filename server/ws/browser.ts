@@ -4,6 +4,7 @@ import type { createNodeWebSocket } from "@hono/node-ws";
 import WebSocket, { type RawData } from "ws";
 import { validateSessionForContainer } from "../lib/session-auth.js";
 import { getContainerHostPort } from "../lib/docker.js";
+import { rawDataToArrayBuffer } from "../lib/ws-binary.js";
 
 /**
  * Browser WebSocket proxy.
@@ -66,18 +67,15 @@ export function createBrowserWsRoute(
               // Preserve the WS frame type: H.264 NAL units are sent as
               // binary, but the encoder also emits a JSON `config` message
               // (codec metadata for VideoDecoder.configure) as a TEXT frame.
-              // Converting everything to binary breaks the decoder, which
-              // distinguishes text-config from binary-NAL by frame type.
-              const buf = Array.isArray(data)
-                ? Buffer.concat(data)
-                : Buffer.isBuffer(data)
-                  ? data
-                  : Buffer.from(data);
+              // Converting everything to binary breaks the decoder.
               if (isBinary) {
-                const bytes = new Uint8Array(buf.byteLength);
-                bytes.set(buf);
-                ws.send(bytes.buffer);
+                ws.send(rawDataToArrayBuffer(data));
               } else {
+                const buf = Array.isArray(data)
+                  ? Buffer.concat(data)
+                  : Buffer.isBuffer(data)
+                    ? data
+                    : Buffer.from(data);
                 ws.send(buf.toString("utf8"));
               }
             } catch {

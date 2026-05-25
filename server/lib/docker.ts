@@ -79,21 +79,30 @@ export function resetDockerClient(): void {
   dockerPromise = null;
 }
 
+// Short-lived cache for container host-port lookups. Browser/IDE flows
+// hit this multiple times per user gesture (every /browser/* REST call,
+// every WS upgrade); each cache miss requires a `container.inspect()`
+// round-trip to dockerode. Ports never change after a container starts,
+// so a few seconds of staleness is safe — the cache is invalidated on
+// session destroy via `resetDockerClient()` indirectly (callers see a
+// throw from inspect on the next miss and tear down).
+const HOST_PORT_TTL_MS = 5_000;
+const hostPortCache = new Map<string, { port: number; expires: number }>();
+
 /**
  * Resolve the ephemeral host port that Docker mapped to a given container's
  * internal port (e.g. 9223 for the browser service, 8443 for code-server).
- *
- * Looks up the container by Blackhouse session id, calls `inspect()`, and
- * returns the numeric host port. Throws if the session has no container, the
- * container has no binding for that port, or the binding has no host port.
- *
- * On-demand (not cached): a container may be recreated between calls, and an
- * inspect is cheap relative to the network hop the caller is about to do.
+ * Cached for {@link HOST_PORT_TTL_MS} since ports are immutable for the
+ * lifetime of a container.
  */
 export async function getContainerHostPort(
   sessionId: string,
   internalPort: number,
 ): Promise<number> {
+  const cacheKey = `${sessionId}:${internalPort}`;
+  const hit = hostPortCache.get(cacheKey);
+  if (hit && hit.expires > Date.now()) return hit.port;
+
   const [codingSession] = await db
     .select({ containerId: schema.codingSessions.containerId })
     .from(schema.codingSessions)
@@ -111,13 +120,17 @@ export async function getContainerHostPort(
   const key = `${internalPort}/tcp`;
   const bindings = info.NetworkSettings?.Ports?.[key];
   if (!bindings || bindings.length === 0 || !bindings[0].HostPort) {
-    throw new Error(`Container ${codingSession.containerId} has no host binding for ${key}`);
+    throw new Error(`Session ${sessionId} container has no host binding for ${key}`);
   }
   const port = Number(bindings[0].HostPort);
   if (!Number.isFinite(port)) {
-    throw new Error(
-      `Container ${codingSession.containerId} returned non-numeric HostPort for ${key}`,
-    );
+    throw new Error(`Session ${sessionId} returned non-numeric HostPort for ${key}`);
   }
+  hostPortCache.set(cacheKey, { port, expires: Date.now() + HOST_PORT_TTL_MS });
   return port;
+}
+
+/** Drop any cached host-port lookups for a session. Call after destroy. */
+export function invalidateContainerHostPortCache(sessionId: string): void {
+  for (const k of hostPortCache.keys()) if (k.startsWith(`${sessionId}:`)) hostPortCache.delete(k);
 }
