@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
 // Wire-format tests for the #61 binary WS opcodes (requests 0x10–0x12,
-// responses 0x82–0x84, server pushes 0x80/0x85/0x86, video frame header
-// 0x81). Byte-level fixtures so the TS client codec can interop without
-// drift — change either side and these break.
+// responses 0x83–0x84, server pushes 0x80/0x85/0x86, video frame header
+// 0x81). Control (0x10) is fire-and-forget — no response opcode.
+// Byte-level fixtures so the TS client codec can interop without drift —
+// change either side and these break.
 // @ts-expect-error — plain ESM module with no type defs
 import {
   decodeRequest,
@@ -164,19 +165,20 @@ describe("decodeRequest — framing errors", () => {
   });
 });
 
-describe("encodeResponse — opcodes 0x82, 0x83, 0x84", () => {
-  it("encodes controlAck (with ok byte)", () => {
-    const buf = encodeResponse(OP.CONTROL_ACK, 42, true, '{"url":"https://x.y"}');
-    const bytes = bytesOf(buf);
-    expect(bytes[0]).toBe(OP.CONTROL_ACK);
+describe("encodeResponse — opcodes 0x83 and 0x84", () => {
+  // Note: 0x82 controlAck was removed — control is fire-and-forget.
+  // Implicit acks: resize → next 0x80 config; nav-class → next 0x86.
+  it("encodes evalResult with ok=true", () => {
+    const bytes = bytesOf(encodeResponse(OP.EVAL_RESULT, 42, true, '{"result":"hello"}'));
+    expect(bytes[0]).toBe(OP.EVAL_RESULT);
     expect(readU32BE(bytes, 1)).toBe(42);
     expect(bytes[5]).toBe(1); // ok
-    const payload = '{"url":"https://x.y"}';
+    const payload = '{"result":"hello"}';
     expect(readU32BE(bytes, 6)).toBe(new TextEncoder().encode(payload).length);
     expect(new TextDecoder().decode(bytes.slice(10))).toBe(payload);
   });
 
-  it("encodes evalResult ok=false", () => {
+  it("encodes evalResult with ok=false", () => {
     const bytes = bytesOf(encodeResponse(OP.EVAL_RESULT, 7, false, '{"error":"x"}'));
     expect(bytes[0]).toBe(OP.EVAL_RESULT);
     expect(bytes[5]).toBe(0);

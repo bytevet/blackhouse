@@ -8,11 +8,11 @@
  *                            opcode framing on both directions; see
  *                            `input-codec.mjs` header for the wire format.
  *                            Server→client: 0x80 config (once at open + after
- *                            resize), 0x81 video frames, 0x82/0x83/0x84
- *                            request acks, 0x85 console push, 0x86 navigate
- *                            push. Client→server: 0x01–0x07 input events,
- *                            0x10 control / 0x11 eval / 0x12 state requests
- *                            with u32 reqId.
+ *                            resize), 0x81 video frames, 0x83 evalResult,
+ *                            0x84 stateSnapshot, 0x85 console push, 0x86
+ *                            navigate push. Client→server: 0x01–0x07 input
+ *                            events, 0x10 control (fire-and-forget), 0x11
+ *                            eval / 0x12 state requests with u32 reqId.
  *
  *   The REST + SSE routes below stay live during the cut-over so fe can
  *   migrate one call site at a time. They go away in the follow-up commit
@@ -844,13 +844,14 @@ app.get(
       }
     },
     // Client→server frames arrive as binary on this same WS, encoded per
-    // `input-codec.mjs`. Two opcode ranges:
+    // `input-codec.mjs`. Three categories:
     //
-    //   0x01–0x07: input events (mouseMove, keyDown, …). Fire-and-forget,
-    //     no reqId. Dispatched in receive order so a mouseMove can't beat
-    //     its mouseDown to CDP.
-    //   0x10–0x12: request/response (control, eval, state). Carry a u32
-    //     reqId we echo back in the 0x82/0x83/0x84 response frame.
+    //   0x01–0x07: input events. Fire-and-forget. Dispatched in receive
+    //     order so a mouseMove can't beat its mouseDown to CDP.
+    //   0x10 control: fire-and-forget. Implicit acks via 0x80 (resize)
+    //     and 0x86 (nav-class). Errors are logged server-side only.
+    //   0x11/0x12: request/response. Carry a u32 reqId we echo back in
+    //     the matching 0x83/0x84 response frame.
     //
     // Text frames are silently dropped. Malformed binary likewise returns
     // null from the decoders and we drop.
@@ -867,12 +868,12 @@ app.get(
       if (op === OP.CONTROL) {
         const req = decodeRequest(message);
         if (!req) return;
+        // Fire-and-forget. runControl returns its rich result for the REST
+        // path; we don't echo it on WS. Failures get one log line so
+        // they're not silently swallowed.
         const result = await runControl(req.body);
-        const buf = encodeResponse(OP.CONTROL_ACK, req.reqId, result.ok, JSON.stringify(result));
-        try {
-          ws.send(buf);
-        } catch {
-          /* peer gone */
+        if (!result?.ok) {
+          console.error(`[ws] control failed: ${JSON.stringify(result)}`);
         }
         return;
       }
@@ -1015,9 +1016,10 @@ async function dispatchInput(body) {
 // ---------- POST /browser/control --------------------------------------------
 
 // Shared in-process control dispatcher. Both the REST `POST /browser/control`
-// route and the WS opcode 0x10 handler call this. Returns a plain object that
-// each transport serializes its own way (Hono JSON response vs encoded
-// opcode 0x82 payload).
+// route and the WS opcode 0x10 handler call this. REST returns the result as
+// JSON; WS is fire-and-forget — the WS dispatcher logs `!ok` and moves on,
+// trusting the implicit ack via 0x80 (resize) or 0x86 (nav-class). The
+// returned `{ok, …}` shape is therefore only consumed by REST + log lines.
 async function runControl(body) {
   if (!body || typeof body !== "object" || typeof body.action !== "string") {
     return { ok: false, error: "invalid_body" };

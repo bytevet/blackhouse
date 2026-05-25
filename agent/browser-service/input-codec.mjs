@@ -23,20 +23,21 @@
 // layout above describes the 0x10+ request opcodes and the 0x80+
 // server-pushed/response opcodes.
 //
-// ── Requests (client→server, reqId != 0) ────────────────────────────────
-//   0x10 control   action:u8 (0=back, 1=forward, 2=reload, 3=navigate,
+// ── Requests (client→server) ────────────────────────────────────────────
+//   0x10 control   FIRE-AND-FORGET (reqId ignored — caller sends 0).
+//                  action:u8 (0=back, 1=forward, 2=reload, 3=navigate,
 //                  4=resize), urlLen:u16, url:utf8,
 //                  width:u16, height:u16 (last two used by resize)
-//   0x11 eval      exprLen:u32, expr:utf8
-//   0x12 state     flags:u8 (bit0=includeUrl, bit1=includeTitle,
-//                  bit2=includeLoading)
+//                  Implicit acks: resize → next 0x80; nav-class → next 0x86.
+//   0x11 eval      reqId != 0. exprLen:u32, expr:utf8
+//   0x12 state     reqId != 0. flags:u8 (bit0=includeUrl,
+//                  bit1=includeTitle, bit2=includeLoading)
 //
 // ── Responses + pushes (server→client) ──────────────────────────────────
 //   0x80 config        (reqId=0) codedWidth:u16, codedHeight:u16,
 //                                codecLen:u8, codec:utf8
 //   0x81 videoFrame    (reqId=0) type:u8 (0=key, 1=delta), pts:u64 BE,
 //                                naluBytes (Annex-B H.264)
-//   0x82 controlAck    (reqId echo) ok:u8, payloadLen:u32, payload:utf8
 //   0x83 evalResult    (reqId echo) ok:u8, payloadLen:u32, payload:utf8
 //   0x84 stateSnapshot (reqId echo) payloadLen:u32, payload:utf8
 //                                   (JSON; `ok` lives inside the JSON)
@@ -66,7 +67,6 @@ export const OP = Object.freeze({
   STATE: 0x12,
   CONFIG: 0x80,
   VIDEO_FRAME: 0x81,
-  CONTROL_ACK: 0x82,
   EVAL_RESULT: 0x83,
   STATE_SNAPSHOT: 0x84,
   CONSOLE_EVENT: 0x85,
@@ -301,17 +301,22 @@ export function decodeRequest(input) {
 }
 
 /**
- * Encode a request response (opcode 0x82/0x83/0x84). Frame layout:
- *   [op:u8, reqId:u32 BE, ok:u8, payloadLen:u32 BE, payload:utf8]
+ * Encode a request response (opcode 0x83 evalResult / 0x84 stateSnapshot).
+ * Frame layout:
+ *   [op:u8, reqId:u32 BE, ok:u8?, payloadLen:u32 BE, payload:utf8]
  *
- * The `stateSnapshot` opcode (0x84) elides the `ok` byte per spec — caller
- * passes `ok = true`. Callers serialize the JSON payload themselves; this
+ * stateSnapshot (0x84) elides the `ok` byte per spec — caller passes
+ * `ok = true` and the JSON itself carries an `ok` field. evalResult (0x83)
+ * keeps the ok byte. Callers serialize the JSON payload themselves; this
  * helper just frames bytes.
+ *
+ * (Control was previously 0x82 controlAck but is now fire-and-forget —
+ * `resize` is implicitly acked by the next 0x80 config frame and nav-class
+ * actions by the next 0x86 navigateEvent.)
  */
 export function encodeResponse(opcode, reqId, ok, jsonPayload) {
   const payloadBytes = utf8(jsonPayload);
-  // stateSnapshot has no ok byte; controlAck and evalResult do.
-  const hasOkByte = opcode === OP.CONTROL_ACK || opcode === OP.EVAL_RESULT;
+  const hasOkByte = opcode === OP.EVAL_RESULT;
   const headerLen = 1 + 4 + (hasOkByte ? 1 : 0) + 4;
   const buf = new ArrayBuffer(headerLen + payloadBytes.length);
   const v = new DataView(buf);
