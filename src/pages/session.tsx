@@ -370,7 +370,11 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
                 </TabsTrigger>
               </TabsList>
 
-              <TabsContent value="ide" className="m-0 flex-1 overflow-hidden">
+              <TabsContent
+                value="ide"
+                keepMounted
+                className="m-0 flex-1 overflow-hidden data-[hidden]:hidden"
+              >
                 <IdeViewer sessionId={session.id} status={session.status} />
               </TabsContent>
 
@@ -396,7 +400,11 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
                 )}
               </TabsContent>
 
-              <TabsContent value="browser" className="m-0 flex-1 overflow-hidden">
+              <TabsContent
+                value="browser"
+                keepMounted
+                className="m-0 flex-1 overflow-hidden data-[hidden]:hidden"
+              >
                 <BrowserViewer
                   sessionId={session.id}
                   status={session.status}
