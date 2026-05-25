@@ -9,6 +9,8 @@ import {
   getBaseUrl,
   openSidePanel,
 } from "./helpers";
+import { openBrowserWs, type BrowserWsProbe } from "./browser-ws-probe";
+import { REQUEST_OP } from "../../src/lib/browser-input-codec";
 
 /**
  * Wait until the `<canvas data-browser-frame>` has actually been painted with
@@ -363,28 +365,33 @@ test.describe("Browser tab end-to-end", () => {
     expect(healthBody.codedWidth).toBeGreaterThan(0);
     expect(healthBody.codedHeight).toBeGreaterThan(0);
 
-    // Resize: POST to the proxy with a new viewport. The encoder restarts and
-    // rebroadcasts a fresh config; the canvas's intrinsic width/height should
-    // update to match within ~500ms.
+    // Resize: send a 0x10 control frame on the binary WS (#61). Fire-and-
+    // forget — the implicit ack is the next 0x80 config rebroadcast, which
+    // the FE's BrowserViewer receives on its own WS and uses to reconfigure
+    // the VideoDecoder + reset canvas intrinsic w/h. We assert the canvas
+    // dims update within ~500ms, which proves the FE-side path is wired.
     const resizeWidth = 960;
     const resizeHeight = 540;
-    const resizeRes = await page.request.post(
-      `${getBaseUrl()}/api/sessions/${sessionId}/browser/control`,
-      {
-        data: { action: "resize", width: resizeWidth, height: resizeHeight },
-      },
-    );
-    expect(resizeRes.ok()).toBeTruthy();
-    await expect
-      .poll(
-        async () =>
-          frameCanvas.evaluate((el) => {
-            const c = el as HTMLCanvasElement;
-            return { w: c.width, h: c.height };
-          }),
-        { timeout: 5000, intervals: [100, 250, 500] },
-      )
-      .toEqual({ w: resizeWidth, h: resizeHeight });
+    const probe = await openBrowserWs(page, sessionId);
+    try {
+      probe.send(REQUEST_OP.control, {
+        action: "resize",
+        width: resizeWidth,
+        height: resizeHeight,
+      });
+      await expect
+        .poll(
+          async () =>
+            frameCanvas.evaluate((el) => {
+              const c = el as HTMLCanvasElement;
+              return { w: c.width, h: c.height };
+            }),
+          { timeout: 5000, intervals: [100, 250, 500] },
+        )
+        .toEqual({ w: resizeWidth, h: resizeHeight });
+    } finally {
+      probe.close();
+    }
 
     await cleanupSession(page, sessionId);
   });
@@ -435,14 +442,21 @@ test.describe("Browser interactivity (strict)", () => {
     return { sessionId, canvas, canvasBox: box };
   }
 
-  // Fetch /browser/state via the proxy. Returns the JSON shape browser-service
-  // documents in its module header.
+  // Fetch the strict-probe state projection via the binary WS (#61, opcode
+  // 0x12 → 0x84). Asks for every field this suite reads — `includeSelection`
+  // for text-select, `includeScroll` for the wheel + viewport asserts,
+  // `includeUrl` for the wheel-test's pre-injection navigation check.
+  // `includeContextMenu` is opt-in: setting the flag doubles as the legacy
+  // REST `?resetContextMenu=1` read-and-clear (per the 87578f8 wire spec),
+  // so leave it off for read-only polls to avoid clobbering a fresh slot.
   async function getBrowserState(
-    page: Page,
-    sessionId: string,
+    probe: BrowserWsProbe,
     opts: { resetContextMenu?: boolean } = {},
   ): Promise<{
     ok?: boolean;
+    url?: string;
+    title?: string;
+    loading?: boolean;
     selectionText?: string;
     scrollY?: number;
     scrollX?: number;
@@ -450,12 +464,14 @@ test.describe("Browser interactivity (strict)", () => {
     viewport?: { width: number; height: number };
     lastContextMenu?: { fired?: boolean; buttonInDOM?: number; ts?: number } | null;
   }> {
-    const q = opts.resetContextMenu ? "?resetContextMenu=1" : "";
-    const res = await page.request.get(
-      `${getBaseUrl()}/api/sessions/${sessionId}/browser/state${q}`,
-    );
-    if (!res.ok()) throw new Error(`/browser/state -> ${res.status()}`);
-    return (await res.json()) as Awaited<ReturnType<typeof getBrowserState>>;
+    return probe.request(REQUEST_OP.state, {
+      includeUrl: true,
+      includeTitle: true,
+      includeLoading: true,
+      includeSelection: true,
+      includeScroll: true,
+      includeContextMenu: opts.resetContextMenu === true,
+    });
   }
 
   test("text-select actually selects text on the page", async ({ page }) => {
@@ -470,38 +486,33 @@ test.describe("Browser interactivity (strict)", () => {
     // out of a 720px-tall in-container viewport (~17% from top). Earlier
     // attempts targeted y=30% which lands below the h1 in the surrounding
     // card padding — drag completes but selects nothing. Probe the page's
-    // actual h1 bbox via /browser/eval and map to canvas-pixel coords so the
-    // drag tracks the heading even if example.com layout shifts.
-    // Poll until the in-container page has actually rendered the h1 — the
-    // canvas-paint wait in `prepareBrowserTab` only confirms first frame,
-    // which can arrive before the page is fully laid out.
-    const h1 = await new Promise<{
-      x: number;
-      y: number;
-      w: number;
-      h: number;
-      vw: number;
-      vh: number;
-    }>(async (resolve, reject) => {
-      const deadline = Date.now() + 15000;
-      while (Date.now() < deadline) {
-        try {
-          const res = await page.request.post(
-            `${getBaseUrl()}/api/sessions/${sessionId}/browser/eval`,
-            {
-              data: {
-                expression: `(() => {
-                  const el = document.querySelector('h1');
-                  if (!el) return null;
-                  const r = el.getBoundingClientRect();
-                  return { x: r.x, y: r.y, w: r.width, h: r.height,
-                           vw: window.innerWidth, vh: window.innerHeight };
-                })()`,
-              },
-            },
-          );
-          if (res.ok()) {
-            const body = (await res.json()) as { ok?: boolean; result?: string };
+    // actual h1 bbox via the binary-WS 0x11 eval (#61) and map to canvas-
+    // pixel coords so the drag tracks the heading even if example.com
+    // layout shifts. Poll until the in-container page has actually rendered
+    // the h1 — the canvas-paint wait in `prepareBrowserTab` only confirms
+    // first frame, which can arrive before the page is fully laid out.
+    const probe = await openBrowserWs(page, sessionId);
+    try {
+      const h1 = await new Promise<{
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+        vw: number;
+        vh: number;
+      }>(async (resolve, reject) => {
+        const deadline = Date.now() + 15000;
+        while (Date.now() < deadline) {
+          try {
+            const body = await probe.request<{ ok?: boolean; result?: string }>(REQUEST_OP.eval, {
+              expression: `(() => {
+                const el = document.querySelector('h1');
+                if (!el) return null;
+                const r = el.getBoundingClientRect();
+                return { x: r.x, y: r.y, w: r.width, h: r.height,
+                         vw: window.innerWidth, vh: window.innerHeight };
+              })()`,
+            });
             if (body.result && body.result !== "null") {
               const parsed = JSON.parse(body.result);
               if (parsed && typeof parsed.w === "number" && parsed.w > 0) {
@@ -509,41 +520,44 @@ test.describe("Browser interactivity (strict)", () => {
                 return;
               }
             }
+          } catch {
+            /* try again */
           }
-        } catch {
-          /* try again */
+          await new Promise((r) => setTimeout(r, 500));
         }
-        await new Promise((r) => setTimeout(r, 500));
+        reject(new Error("h1 never appeared on the page (timeout 15s)"));
+      });
+
+      // Canvas-pixel coords (the SPA's canvas client size). BrowserViewer
+      // converts these to screencast space (1280×720 default but reflects the
+      // current viewport).
+      const startX = canvasBox.x + canvasBox.width * ((h1.x + 10) / h1.vw);
+      const endX = canvasBox.x + canvasBox.width * ((h1.x + h1.w - 10) / h1.vw);
+      const y = canvasBox.y + canvasBox.height * ((h1.y + h1.h / 2) / h1.vh);
+
+      await page.mouse.move(startX, y);
+      await page.mouse.down();
+      for (let i = 1; i <= 8; i++) {
+        await page.mouse.move(startX + ((endX - startX) * i) / 8, y, { steps: 1 });
       }
-      reject(new Error("h1 never appeared on the page (timeout 15s)"));
-    });
-    // Canvas-pixel coords (the SPA's canvas client size). BrowserViewer
-    // converts these to screencast space (1280×720 default but reflects the
-    // current viewport).
-    const startX = canvasBox.x + canvasBox.width * ((h1.x + 10) / h1.vw);
-    const endX = canvasBox.x + canvasBox.width * ((h1.x + h1.w - 10) / h1.vw);
-    const y = canvasBox.y + canvasBox.height * ((h1.y + h1.h / 2) / h1.vh);
+      await page.mouse.up();
 
-    await page.mouse.move(startX, y);
-    await page.mouse.down();
-    for (let i = 1; i <= 8; i++) {
-      await page.mouse.move(startX + ((endX - startX) * i) / 8, y, { steps: 1 });
+      // Poll the strict probe for non-empty selectionText.
+      await expect
+        .poll(async () => (await getBrowserState(probe)).selectionText ?? "", {
+          timeout: 5000,
+          intervals: [200, 500, 1000],
+        })
+        .not.toBe("");
+
+      const finalState = await getBrowserState(probe);
+      // Should match part of "Example Domain". Tolerant — drag-select edges
+      // may not snap to word boundaries.
+      expect(finalState.selectionText ?? "").toMatch(/[A-Za-z]{3,}/);
+      expect((finalState.selectionText ?? "").toLowerCase()).toMatch(/example|domain|mple/);
+    } finally {
+      probe.close();
     }
-    await page.mouse.up();
-
-    // Poll the strict probe for non-empty selectionText.
-    await expect
-      .poll(async () => (await getBrowserState(page, sessionId)).selectionText ?? "", {
-        timeout: 5000,
-        intervals: [200, 500, 1000],
-      })
-      .not.toBe("");
-
-    const finalState = await getBrowserState(page, sessionId);
-    // Should match part of "Example Domain". Tolerant — drag-select edges may
-    // not snap to word boundaries.
-    expect(finalState.selectionText ?? "").toMatch(/[A-Za-z]{3,}/);
-    expect((finalState.selectionText ?? "").toLowerCase()).toMatch(/example|domain|mple/);
 
     await cleanupSession(page, sessionId);
   });
@@ -587,70 +601,73 @@ test.describe("Browser interactivity (strict)", () => {
     test.slow();
     // Navigate via the SPA address-bar to example.com (real https URL —
     // avoids the BrowserViewer's url-normalization clobbering data: URLs by
-    // prepending https://). Then inject a 5000px body via /browser/eval so
-    // we have something scrollable to assert on.
+    // prepending https://). Then inject a 5000px body via the binary-WS
+    // 0x11 eval (#61) so we have something scrollable to assert on.
     const { sessionId, canvasBox } = await prepareBrowserTab(
       page,
       "E2E Browser Wheel",
       "https://example.com",
     );
+    const probe = await openBrowserWs(page, sessionId);
 
-    // Wait until the in-container page is actually at example.com before
-    // injecting — under heavy parallel-load the navigation can land after
-    // canvas-paint, and the eval-inject would target the wrong document.
-    await expect
-      .poll(async () => (await getBrowserState(page, sessionId)).url ?? "", {
-        timeout: 10000,
-        intervals: [200, 500, 1000],
-      })
-      .toMatch(/example\.com/);
+    try {
+      // Wait until the in-container page is actually at example.com before
+      // injecting — under heavy parallel-load the navigation can land after
+      // canvas-paint, and the eval-inject would target the wrong document.
+      await expect
+        .poll(async () => (await getBrowserState(probe)).url ?? "", {
+          timeout: 10000,
+          intervals: [200, 500, 1000],
+        })
+        .toMatch(/example\.com/);
 
-    // Inject a tall body so scrollY can actually advance. Retry up to a few
-    // times — the SPA can sometimes re-trigger a resize after canvas-paint
-    // which lands a fresh navigate and clobbers our injection.
-    await expect
-      .poll(
-        async () => {
-          await page.request.post(`${getBaseUrl()}/api/sessions/${sessionId}/browser/eval`, {
-            data: {
+      // Inject a tall body so scrollY can actually advance. Retry up to a few
+      // times — the SPA can sometimes re-trigger a resize after canvas-paint
+      // which lands a fresh navigate and clobbers our injection.
+      await expect
+        .poll(
+          async () => {
+            await probe.request(REQUEST_OP.eval, {
               expression: `(() => {
                 document.body.innerHTML = '<div style="height:5000px;background:linear-gradient(180deg,#fee,#eef,#efe)"><h1>QA scroll target</h1></div>';
                 document.body.style.margin = '0';
                 document.body.style.padding = '0';
                 return { docHeight: document.body.scrollHeight };
               })()`,
-            },
-          });
-          const s = await getBrowserState(page, sessionId);
-          return s.docSize?.height ?? 0;
-        },
-        { timeout: 10000, intervals: [500, 1000, 2000] },
-      )
-      .toBeGreaterThan(4000);
+            });
+            const s = await getBrowserState(probe);
+            return s.docSize?.height ?? 0;
+          },
+          { timeout: 10000, intervals: [500, 1000, 2000] },
+        )
+        .toBeGreaterThan(4000);
 
-    const beforeState = await getBrowserState(page, sessionId);
-    const containerScrollBefore = beforeState.scrollY ?? 0;
-    const spaScrollBefore = await page.evaluate(() => window.scrollY);
+      const beforeState = await getBrowserState(probe);
+      const containerScrollBefore = beforeState.scrollY ?? 0;
+      const spaScrollBefore = await page.evaluate(() => window.scrollY);
 
-    // Fire wheel events at the canvas — must traverse the BrowserViewer's
-    // native (non-passive) wheel listener so we exercise the RAF batching
-    // and preventDefault paths added in #44.
-    await page.mouse.move(canvasBox.x + canvasBox.width / 2, canvasBox.y + canvasBox.height / 2);
-    for (let i = 0; i < 40; i++) {
-      await page.mouse.wheel(0, 60);
+      // Fire wheel events at the canvas — must traverse the BrowserViewer's
+      // native (non-passive) wheel listener so we exercise the RAF batching
+      // and preventDefault paths added in #44.
+      await page.mouse.move(canvasBox.x + canvasBox.width / 2, canvasBox.y + canvasBox.height / 2);
+      for (let i = 0; i < 40; i++) {
+        await page.mouse.wheel(0, 60);
+      }
+
+      // Poll for the in-container scroll to advance.
+      await expect
+        .poll(async () => (await getBrowserState(probe)).scrollY ?? 0, {
+          timeout: 5000,
+          intervals: [200, 500, 1000],
+        })
+        .toBeGreaterThan(containerScrollBefore + 1000);
+
+      // SPA itself must not have scrolled (passive:false + preventDefault).
+      const spaScrollAfter = await page.evaluate(() => window.scrollY);
+      expect(spaScrollAfter).toBe(spaScrollBefore);
+    } finally {
+      probe.close();
     }
-
-    // Poll for the in-container scroll to advance.
-    await expect
-      .poll(async () => (await getBrowserState(page, sessionId)).scrollY ?? 0, {
-        timeout: 5000,
-        intervals: [200, 500, 1000],
-      })
-      .toBeGreaterThan(containerScrollBefore + 1000);
-
-    // SPA itself must not have scrolled (passive:false + preventDefault).
-    const spaScrollAfter = await page.evaluate(() => window.scrollY);
-    expect(spaScrollAfter).toBe(spaScrollBefore);
 
     await cleanupSession(page, sessionId);
   });
