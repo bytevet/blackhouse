@@ -1,13 +1,8 @@
 /**
  * Binary wire codec for browser input events over the screencast WS (#60).
  *
- * The JSON-over-WS shape sent ~80–120 bytes per event (header, key names,
- * field names, quotes, separators). At trackpad rates that's thousands of
- * bytes per second of overhead for fire-and-forget input. The fixed-layout
- * binary encoding below collapses each event to 6–14 bytes plus a per-type
- * 1-byte op code.
- *
- * Wire format — all multi-byte numbers BIG-ENDIAN:
+ * Fixed-layout frames keep each event at 6–14 bytes (plus a 1-byte op code)
+ * vs ~80–120 bytes for the equivalent JSON. Per-event-type layouts:
  *
  * | Op   | Event      | Layout                                             |
  * |------|------------|----------------------------------------------------|
@@ -21,12 +16,12 @@
  * | 0x06 | keyUp      | (same as keyDown)                                 |
  * | 0x07 | char       | textLen:u8, text (utf8)                           |
  *
- * `button` mapping (CDP `Input.dispatchMouseEvent` button names):
- *   "none" → 0, "left" → 1, "right" → 2, "middle" → 4.
+ * All multi-byte numbers big-endian. `button` mapping: "none"→0, "left"→1,
+ * "right"→2, "middle"→4.
  *
- * Returns `null` from `encodeInput` for any payload that doesn't fit (e.g.
- * out-of-u16 coord, string > 255 bytes). The caller's contract is to fall
- * back to JSON in that case, so behavior never silently degrades.
+ * The input shape is a discriminated union (`InputMessage`) so the encoder's
+ * switch is statically exhaustive — adding a new event type is a tsc error
+ * until every site catches up.
  */
 
 export const INPUT_OP = {
@@ -40,30 +35,61 @@ export const INPUT_OP = {
 } as const;
 
 export type InputType = keyof typeof INPUT_OP;
+export type ButtonName = "none" | "left" | "right" | "middle";
 
-export interface InputPayload {
-  type: InputType;
-  x?: number;
-  y?: number;
-  button?: string;
-  buttons?: number;
-  clickCount?: number;
-  key?: string;
-  code?: string;
-  text?: string;
+export interface MouseMoveInput {
+  type: "mouseMove";
+  x: number;
+  y: number;
+  buttons: number;
+}
+interface MouseButtonFields {
+  x: number;
+  y: number;
+  button: ButtonName;
+  buttons: number;
+  clickCount: number;
   modifiers?: number;
-  deltaX?: number;
-  deltaY?: number;
+}
+export type MouseDownInput = MouseButtonFields & { type: "mouseDown" };
+export type MouseUpInput = MouseButtonFields & { type: "mouseUp" };
+export interface WheelInput {
+  type: "wheel";
+  x: number;
+  y: number;
+  deltaX: number;
+  deltaY: number;
+  buttons: number;
+}
+interface KeyboardFields {
+  key: string;
+  code: string;
+  modifiers?: number;
+}
+export type KeyDownInput = KeyboardFields & { type: "keyDown" };
+export type KeyUpInput = KeyboardFields & { type: "keyUp" };
+export interface CharInput {
+  type: "char";
+  text: string;
 }
 
-const BUTTON_NAME_TO_CODE: Record<string, number> = {
+export type InputMessage =
+  | MouseMoveInput
+  | MouseDownInput
+  | MouseUpInput
+  | WheelInput
+  | KeyDownInput
+  | KeyUpInput
+  | CharInput;
+
+const BUTTON_NAME_TO_CODE: Record<ButtonName, number> = {
   none: 0,
   left: 1,
   right: 2,
   middle: 4,
 };
 
-const BUTTON_CODE_TO_NAME: Record<number, "none" | "left" | "right" | "middle"> = {
+const BUTTON_CODE_TO_NAME: Record<number, ButtonName> = {
   0: "none",
   1: "left",
   2: "right",
@@ -73,78 +99,57 @@ const BUTTON_CODE_TO_NAME: Record<number, "none" | "left" | "right" | "middle"> 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
-/** True if `n` is an integer that fits in an unsigned 16-bit slot. */
-function isU16(n: unknown): n is number {
-  return typeof n === "number" && Number.isInteger(n) && n >= 0 && n <= 0xffff;
-}
-
-/** True if `n` is an integer that fits in an unsigned 8-bit slot. */
-function isU8(n: unknown): n is number {
-  return typeof n === "number" && Number.isInteger(n) && n >= 0 && n <= 0xff;
-}
-
 /**
- * Encode an input payload to the binary wire format. Returns `null` when the
- * payload doesn't fit (caller should fall back to JSON).
+ * Encode an input event to its wire-format frame. Always returns an
+ * ArrayBuffer — the input is statically typed so there's no shape-mismatch
+ * branch to handle. Out-of-range numeric values silently wrap via the
+ * standard DataView coercion (ToUint16 / ToUint8); in practice callers
+ * always supply values within the screencast pixel space (≤1920×1080).
  */
-export function encodeInput(p: InputPayload): ArrayBuffer | null {
-  switch (p.type) {
+export function encodeInput(input: InputMessage): ArrayBuffer {
+  switch (input.type) {
     case "mouseMove": {
-      if (!isU16(p.x) || !isU16(p.y)) return null;
-      const buttons = isU8(p.buttons) ? p.buttons : 0;
       const buf = new ArrayBuffer(6);
       const dv = new DataView(buf);
       dv.setUint8(0, INPUT_OP.mouseMove);
-      dv.setUint16(1, p.x, false);
-      dv.setUint16(3, p.y, false);
-      dv.setUint8(5, buttons);
+      dv.setUint16(1, input.x, false);
+      dv.setUint16(3, input.y, false);
+      dv.setUint8(5, input.buttons);
       return buf;
     }
     case "mouseDown":
     case "mouseUp": {
-      if (!isU16(p.x) || !isU16(p.y)) return null;
-      const button = BUTTON_NAME_TO_CODE[p.button ?? "none"];
-      if (button === undefined) return null;
-      const buttons = isU8(p.buttons) ? p.buttons : 0;
-      const clickCount = isU8(p.clickCount) ? p.clickCount : 0;
-      const modifiers = isU8(p.modifiers) ? p.modifiers : 0;
       const buf = new ArrayBuffer(9);
       const dv = new DataView(buf);
-      dv.setUint8(0, p.type === "mouseDown" ? INPUT_OP.mouseDown : INPUT_OP.mouseUp);
-      dv.setUint16(1, p.x, false);
-      dv.setUint16(3, p.y, false);
-      dv.setUint8(5, button);
-      dv.setUint8(6, buttons);
-      dv.setUint8(7, clickCount);
-      dv.setUint8(8, modifiers);
+      dv.setUint8(0, input.type === "mouseDown" ? INPUT_OP.mouseDown : INPUT_OP.mouseUp);
+      dv.setUint16(1, input.x, false);
+      dv.setUint16(3, input.y, false);
+      dv.setUint8(5, BUTTON_NAME_TO_CODE[input.button]);
+      dv.setUint8(6, input.buttons);
+      dv.setUint8(7, input.clickCount);
+      dv.setUint8(8, input.modifiers ?? 0);
       return buf;
     }
     case "wheel": {
-      if (!isU16(p.x) || !isU16(p.y)) return null;
-      const buttons = isU8(p.buttons) ? p.buttons : 0;
-      const dx = typeof p.deltaX === "number" ? p.deltaX : 0;
-      const dy = typeof p.deltaY === "number" ? p.deltaY : 0;
       const buf = new ArrayBuffer(14);
       const dv = new DataView(buf);
       dv.setUint8(0, INPUT_OP.wheel);
-      dv.setUint16(1, p.x, false);
-      dv.setUint16(3, p.y, false);
-      dv.setFloat32(5, dx, false);
-      dv.setFloat32(9, dy, false);
-      dv.setUint8(13, buttons);
+      dv.setUint16(1, input.x, false);
+      dv.setUint16(3, input.y, false);
+      dv.setFloat32(5, input.deltaX, false);
+      dv.setFloat32(9, input.deltaY, false);
+      dv.setUint8(13, input.buttons);
       return buf;
     }
     case "keyDown":
     case "keyUp": {
-      const modifiers = isU8(p.modifiers) ? p.modifiers : 0;
-      const keyBytes = textEncoder.encode(p.key ?? "");
-      const codeBytes = textEncoder.encode(p.code ?? "");
-      if (keyBytes.length > 0xff || codeBytes.length > 0xff) return null;
+      const keyBytes = textEncoder.encode(input.key);
+      const codeBytes = textEncoder.encode(input.code);
       const buf = new ArrayBuffer(4 + keyBytes.length + codeBytes.length);
       const dv = new DataView(buf);
       const u8 = new Uint8Array(buf);
-      dv.setUint8(0, p.type === "keyDown" ? INPUT_OP.keyDown : INPUT_OP.keyUp);
-      dv.setUint8(1, modifiers);
+      dv.setUint8(0, input.type === "keyDown" ? INPUT_OP.keyDown : INPUT_OP.keyUp);
+      dv.setUint8(1, input.modifiers ?? 0);
       dv.setUint8(2, keyBytes.length);
       u8.set(keyBytes, 3);
       dv.setUint8(3 + keyBytes.length, codeBytes.length);
@@ -152,8 +157,7 @@ export function encodeInput(p: InputPayload): ArrayBuffer | null {
       return buf;
     }
     case "char": {
-      const textBytes = textEncoder.encode(p.text ?? "");
-      if (textBytes.length > 0xff) return null;
+      const textBytes = textEncoder.encode(input.text);
       const buf = new ArrayBuffer(2 + textBytes.length);
       const dv = new DataView(buf);
       const u8 = new Uint8Array(buf);
@@ -162,18 +166,22 @@ export function encodeInput(p: InputPayload): ArrayBuffer | null {
       u8.set(textBytes, 2);
       return buf;
     }
-    default:
-      return null;
+    default: {
+      // Exhaustiveness check — tsc errors here if a new variant is added
+      // to `InputMessage` without a corresponding encoder branch.
+      const _exhaustive: never = input;
+      throw new Error(`encodeInput: unknown type ${(_exhaustive as { type: string }).type}`);
+    }
   }
 }
 
 /**
- * Decode a wire frame back to its payload. Returns `null` on malformed input
- * (unknown op, truncated buffer, etc.). Provided as the symmetric counterpart
- * to `encodeInput` for unit testing; the server has its own decode path that
- * shares this byte layout.
+ * Decode a wire frame back to its message. Returns `null` on malformed input
+ * (unknown op, truncated buffer, etc.) — the server-side decoder uses the
+ * same byte layout but its own implementation; this lives mainly for the
+ * round-trip unit test that locks the wire contract.
  */
-export function decodeInput(buf: ArrayBuffer | Uint8Array): InputPayload | null {
+export function decodeInput(buf: ArrayBuffer | Uint8Array): InputMessage | null {
   const view = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
   if (view.length < 1) return null;
   const dv = new DataView(view.buffer, view.byteOffset, view.byteLength);

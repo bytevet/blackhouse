@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/context-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { client } from "@/lib/api";
-import { encodeInput } from "@/lib/browser-input-codec";
+import { encodeInput, type InputMessage } from "@/lib/browser-input-codec";
 import { cn } from "@/lib/utils";
 
 interface BrowserViewerProps {
@@ -116,9 +116,9 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // ResizeObserver watches the wrapper's bounding box to drive viewport sync.
   const frameWrapperRef = useRef<HTMLDivElement>(null);
-  // Live screencast WS — kept in a ref so `sendInput` can write directly
-  // (text frames) without per-event HTTP overhead. Set on open, cleared on
-  // close. Reads check `readyState === OPEN` before sending.
+  // Live screencast WS — kept in a ref so `sendInput` can write binary
+  // input frames directly. Set on open, cleared on close. Reads check
+  // `readyState === OPEN` before sending.
   const wsRef = useRef<WebSocket | null>(null);
   const mouseMoveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -361,43 +361,23 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
     [sessionId],
   );
 
-  type InputBody = Parameters<
-    (typeof client.api.sessions)[":id"]["browser"]["input"]["$post"]
-  >[0]["json"];
-
   // Drop input frames once the WS send buffer climbs over this — a stale
   // mouseMove arriving 3s late is worse than no event. Generous enough to
   // absorb a normal scroll burst (~100B per event × ~600 events).
   const WS_INPUT_BACKPRESSURE_LIMIT = 64 * 1024;
 
-  // Prefer the live screencast WS as a fire-and-forget input channel —
-  // avoids per-event HTTPS overhead during rapid input (scroll, drag-select).
-  // Transport ladder, most-to-least preferred:
-  //   1. Binary frame over WS (encoded per `browser-input-codec.ts`).
-  //   2. JSON text frame over WS — fallback if the binary encoder rejects
-  //      the payload (out-of-range coord, oversize key/text). Server
-  //      handles both shapes.
-  //   3. REST `POST /browser/input` — fallback when the WS isn't open or
-  //      the send buffer is full (input drops are preferable to a 3-second
-  //      stale mousemove arriving).
-  const sendInput = useCallback(
-    (body: InputBody) => {
-      const ws = wsRef.current;
-      if (ws?.readyState === WebSocket.OPEN && ws.bufferedAmount < WS_INPUT_BACKPRESSURE_LIMIT) {
-        const buf = encodeInput(body);
-        if (buf) {
-          ws.send(buf);
-        } else {
-          ws.send(JSON.stringify({ type: "input", input: body }));
-        }
-        return;
-      }
-      client.api.sessions[":id"].browser.input
-        .$post({ param: { id: sessionId }, json: body })
-        .catch(() => {});
-    },
-    [sessionId],
-  );
+  // Single transport: binary frame over the live screencast WS, encoded
+  // per `browser-input-codec.ts`. If the WS isn't ready or the send buffer
+  // is over budget, we drop — fire-and-forget semantics, no REST fallback.
+  // `InputMessage` is a discriminated union so `encodeInput` is statically
+  // exhaustive; adding a new event type is a tsc error until both sides
+  // catch up.
+  const sendInput = useCallback((body: InputMessage) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (ws.bufferedAmount >= WS_INPUT_BACKPRESSURE_LIMIT) return;
+    ws.send(encodeInput(body));
+  }, []);
 
   // ─── Dynamic viewport: request server to re-encode at new size ─────────
   const sendResize = useCallback(
