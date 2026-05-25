@@ -18,7 +18,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "check:playwright": "node -e \"const a=require('playwright/package.json').version,b=require('@playwright/test/package.json').version;if(a!==b){console.error('[guard] playwright runtime',a,'!=','@playwright/test',b,'\\u2014 a foreign playwright is shadowing the lockfile. Run: npm install --no-save playwright@'+b);process.exit(1)}console.log('[guard] playwright runtime',a,'matches @playwright/test',b)\""
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
@@ -92,5 +93,8 @@
     "typescript-eslint": "^8.58.0",
     "vite": "^8.0.3",
     "vitest": "^4.1.2"
+  },
+  "overrides": {
+    "playwright": "$@playwright/test"
   }
 }
