@@ -11,7 +11,13 @@ import { rawDataToArrayBuffer } from "../lib/ws-binary.js";
  *
  * Client connects to `ws://server/api/browser-ws/:sessionId?token=<sess>`.
  * After auth, we open a server-side WS to the in-container browser-service
- * at `ws://127.0.0.1:<hostPort>/browser/ws` and binary-pipe both directions.
+ * at `ws://127.0.0.1:<hostPort>/browser/ws` and binary-pipe screencast
+ * frames to the client.
+ *
+ * For input events the client sends text JSON `{type:"input", input:{...}}`
+ * on the same WS; we forward those as fire-and-forget POSTs to the
+ * browser-service's `/browser/input` endpoint. This collapses what was
+ * ~300 HTTP round-trips per scroll into 0 — see #58.
  *
  * Single-peer per WS — code-server and the screencast both deliver to one
  * viewer at a time. We do not replicate the multi-peer/scrollback complexity
@@ -29,6 +35,14 @@ export function createBrowserWsRoute(
       const token = c.req.query("token");
 
       let upstream: WebSocket | null = null;
+      // Hoisted so `onMessage` can reuse the port lookup from `onOpen`
+      // instead of calling `getContainerHostPort` on every input event.
+      let upstreamPort: number | null = null;
+      // Serial chain: input events must reach the page in the order the
+      // user produced them (a `mouseMove` before its `mouseDown` is a
+      // hover, not a drag). Each handler awaits the previous before
+      // issuing its localhost POST.
+      let inputChain: Promise<unknown> = Promise.resolve();
 
       return {
         async onOpen(_evt, ws) {
@@ -43,9 +57,8 @@ export function createBrowserWsRoute(
             return;
           }
 
-          let port: number;
           try {
-            port = await getContainerHostPort(sessionId, 9223);
+            upstreamPort = await getContainerHostPort(sessionId, 9223);
           } catch (err) {
             try {
               ws.send(`[Browser unavailable: ${err instanceof Error ? err.message : String(err)}]`);
@@ -56,7 +69,7 @@ export function createBrowserWsRoute(
             return;
           }
 
-          upstream = new WebSocket(`ws://127.0.0.1:${port}/browser/ws`);
+          upstream = new WebSocket(`ws://127.0.0.1:${upstreamPort}/browser/ws`);
 
           upstream.on("open", () => {
             // Connection live; nothing else to do — frames flow inbound.
@@ -106,19 +119,40 @@ export function createBrowserWsRoute(
         },
 
         onMessage(evt, _ws: WSContext) {
-          if (!upstream || upstream.readyState !== WebSocket.OPEN) return;
+          // Only text frames are meaningful client→server today: a JSON
+          // `{type:"input", input:{...}}` envelope that we forward to the
+          // in-container browser-service's REST `/browser/input` endpoint.
+          // Binary frames have no protocol meaning yet and are dropped.
           const message: unknown = evt.data;
-          // Forward bytes to upstream as-is. Browser-service mainly receives
-          // input via REST; this is here for completeness and future use.
-          if (typeof message === "string") {
-            upstream.send(message);
-          } else if (Buffer.isBuffer(message)) {
-            upstream.send(message);
-          } else if (message instanceof ArrayBuffer) {
-            upstream.send(Buffer.from(message));
-          } else if (message instanceof Uint8Array) {
-            upstream.send(Buffer.from(message.buffer, message.byteOffset, message.byteLength));
+          if (typeof message !== "string") return;
+          if (upstreamPort == null) return; // onOpen hasn't completed
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(message);
+          } catch {
+            return;
           }
+          if (
+            !parsed ||
+            typeof parsed !== "object" ||
+            (parsed as { type?: unknown }).type !== "input"
+          ) {
+            return;
+          }
+          const input = (parsed as { input?: unknown }).input;
+          if (!input || typeof input !== "object") return;
+          const port = upstreamPort;
+          inputChain = inputChain.then(() =>
+            fetch(`http://127.0.0.1:${port}/browser/input`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(input),
+            }).catch(() => {
+              // Fire-and-forget; nothing the client could do about a
+              // failed input event anyway. The browser-service's own
+              // logging will surface real problems.
+            }),
+          );
         },
 
         onClose() {
