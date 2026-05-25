@@ -121,38 +121,72 @@ describe("decodeRequest — eval opcode 0x11", () => {
 });
 
 describe("decodeRequest — state opcode 0x12", () => {
-  // State flag bits: bit0=includeUrl, bit1=includeTitle, bit2=includeLoading
-  it("decodes all-flags-set", () => {
-    const buf = buildRequest(OP.STATE, 1, new Uint8Array([0b00000111]));
+  // State flag bits:
+  //   bit0=includeUrl, bit1=includeTitle, bit2=includeLoading,
+  //   bit3=includeSelection, bit4=includeScroll, bit5=includeContextMenu
+  const allFalse = {
+    includeUrl: false,
+    includeTitle: false,
+    includeLoading: false,
+    includeSelection: false,
+    includeScroll: false,
+    includeContextMenu: false,
+  };
+
+  it("decodes all six flags set", () => {
+    const buf = buildRequest(OP.STATE, 1, new Uint8Array([0b00111111]));
     expect(decodeRequest(buf).body).toEqual({
       includeUrl: true,
       includeTitle: true,
       includeLoading: true,
+      includeSelection: true,
+      includeScroll: true,
+      includeContextMenu: true,
     });
   });
-  it("decodes url-only", () => {
+
+  it("decodes url-only (bit0)", () => {
     const buf = buildRequest(OP.STATE, 1, new Uint8Array([0b00000001]));
-    expect(decodeRequest(buf).body).toEqual({
-      includeUrl: true,
-      includeTitle: false,
-      includeLoading: false,
-    });
+    expect(decodeRequest(buf).body).toEqual({ ...allFalse, includeUrl: true });
   });
-  it("decodes title+loading", () => {
+
+  it("decodes title+loading (bits 1+2)", () => {
     const buf = buildRequest(OP.STATE, 1, new Uint8Array([0b00000110]));
     expect(decodeRequest(buf).body).toEqual({
-      includeUrl: false,
+      ...allFalse,
       includeTitle: true,
       includeLoading: true,
     });
   });
-  it("ignores unknown high bits", () => {
-    const buf = buildRequest(OP.STATE, 1, new Uint8Array([0b11110000]));
+
+  it("decodes selection-only (bit3)", () => {
+    const buf = buildRequest(OP.STATE, 1, new Uint8Array([0b00001000]));
+    expect(decodeRequest(buf).body).toEqual({ ...allFalse, includeSelection: true });
+  });
+
+  it("decodes scroll-only (bit4)", () => {
+    const buf = buildRequest(OP.STATE, 1, new Uint8Array([0b00010000]));
+    expect(decodeRequest(buf).body).toEqual({ ...allFalse, includeScroll: true });
+  });
+
+  it("decodes contextMenu-only (bit5)", () => {
+    const buf = buildRequest(OP.STATE, 1, new Uint8Array([0b00100000]));
+    expect(decodeRequest(buf).body).toEqual({ ...allFalse, includeContextMenu: true });
+  });
+
+  it("decodes strict-probe combo (bits 3+4+5)", () => {
+    const buf = buildRequest(OP.STATE, 1, new Uint8Array([0b00111000]));
     expect(decodeRequest(buf).body).toEqual({
-      includeUrl: false,
-      includeTitle: false,
-      includeLoading: false,
+      ...allFalse,
+      includeSelection: true,
+      includeScroll: true,
+      includeContextMenu: true,
     });
+  });
+
+  it("ignores unknown high bits (6+7)", () => {
+    const buf = buildRequest(OP.STATE, 1, new Uint8Array([0b11000000]));
+    expect(decodeRequest(buf).body).toEqual(allFalse);
   });
 });
 

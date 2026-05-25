@@ -37,7 +37,8 @@
  * |      |           |   width:u16, height:u16                            |
  * | 0x11 | eval      | exprLen:u32, expression:utf8                      |
  * | 0x12 | state     | flags:u8 (bit0=includeUrl, bit1=includeTitle,     |
- * |      |           |   bit2=includeLoading)                             |
+ * |      |           |   bit2=includeLoading, bit3=includeSelection,      |
+ * |      |           |   bit4=includeScroll, bit5=includeContextMenu)     |
  *
  * RESPONSES + PUSHES (server→client)
  * | Op   | Frame          | Payload                                       |
@@ -328,6 +329,9 @@ export type ControlActionName = keyof typeof CONTROL_ACTION;
 const STATE_FLAG_INCLUDE_URL = 1 << 0;
 const STATE_FLAG_INCLUDE_TITLE = 1 << 1;
 const STATE_FLAG_INCLUDE_LOADING = 1 << 2;
+const STATE_FLAG_INCLUDE_SELECTION = 1 << 3;
+const STATE_FLAG_INCLUDE_SCROLL = 1 << 4;
+const STATE_FLAG_INCLUDE_CONTEXT_MENU = 1 << 5;
 
 export interface ControlBody {
   action: ControlActionName;
@@ -347,11 +351,19 @@ export interface EvalBody {
  * Bit-flags for the 0x12 state request. The 0x84 response projects only
  * the fields whose include-bit was set, so callers can ask for just what
  * they need (cheaper CDP probe on the server side).
+ *
+ * Setting `includeContextMenu` doubles as the legacy REST
+ * `?resetContextMenu=1` behavior — the server reads-and-clears the
+ * contextmenu slot in the same call, so back-to-back probes never see
+ * stale data.
  */
 export interface StateBody {
   includeUrl?: boolean;
   includeTitle?: boolean;
   includeLoading?: boolean;
+  includeSelection?: boolean;
+  includeScroll?: boolean;
+  includeContextMenu?: boolean;
 }
 
 /**
@@ -458,6 +470,9 @@ export function encodeRequest(
       if (b.includeUrl) flags |= STATE_FLAG_INCLUDE_URL;
       if (b.includeTitle) flags |= STATE_FLAG_INCLUDE_TITLE;
       if (b.includeLoading) flags |= STATE_FLAG_INCLUDE_LOADING;
+      if (b.includeSelection) flags |= STATE_FLAG_INCLUDE_SELECTION;
+      if (b.includeScroll) flags |= STATE_FLAG_INCLUDE_SCROLL;
+      if (b.includeContextMenu) flags |= STATE_FLAG_INCLUDE_CONTEXT_MENU;
       const buf = new ArrayBuffer(6);
       const dv = new DataView(buf);
       dv.setUint8(0, REQUEST_OP.state);

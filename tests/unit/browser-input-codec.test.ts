@@ -283,28 +283,55 @@ describe("browser-input-codec", () => {
   });
 
   describe("encodeRequest STATE (0x12) — include-bit flags", () => {
-    it("encodes all three include-bits set as flags=0b111", () => {
+    it("encodes all six include-bits set as flags=0b111111", () => {
       const buf = encodeRequest(REQUEST_OP.state, 1, {
         includeUrl: true,
         includeTitle: true,
         includeLoading: true,
+        includeSelection: true,
+        includeScroll: true,
+        includeContextMenu: true,
       });
-      expect(new Uint8Array(buf)).toEqual(new Uint8Array([0x12, 0, 0, 0, 1, 0b00000111]));
+      expect(new Uint8Array(buf)).toEqual(new Uint8Array([0x12, 0, 0, 0, 1, 0b00111111]));
     });
 
-    it("encodes includeUrl-only as flags=0b001", () => {
+    it("encodes includeUrl-only as flags=0b000001", () => {
       const buf = encodeRequest(REQUEST_OP.state, 1, { includeUrl: true });
       expect(new Uint8Array(buf)).toEqual(new Uint8Array([0x12, 0, 0, 0, 1, 0b00000001]));
     });
 
-    it("encodes includeTitle-only as flags=0b010", () => {
+    it("encodes includeTitle-only as flags=0b000010", () => {
       const buf = encodeRequest(REQUEST_OP.state, 1, { includeTitle: true });
       expect(new Uint8Array(buf)).toEqual(new Uint8Array([0x12, 0, 0, 0, 1, 0b00000010]));
     });
 
-    it("encodes includeLoading-only as flags=0b100", () => {
+    it("encodes includeLoading-only as flags=0b000100", () => {
       const buf = encodeRequest(REQUEST_OP.state, 1, { includeLoading: true });
       expect(new Uint8Array(buf)).toEqual(new Uint8Array([0x12, 0, 0, 0, 1, 0b00000100]));
+    });
+
+    it("encodes includeSelection-only as flags=0b001000", () => {
+      const buf = encodeRequest(REQUEST_OP.state, 1, { includeSelection: true });
+      expect(new Uint8Array(buf)).toEqual(new Uint8Array([0x12, 0, 0, 0, 1, 0b00001000]));
+    });
+
+    it("encodes includeScroll-only as flags=0b010000", () => {
+      const buf = encodeRequest(REQUEST_OP.state, 1, { includeScroll: true });
+      expect(new Uint8Array(buf)).toEqual(new Uint8Array([0x12, 0, 0, 0, 1, 0b00010000]));
+    });
+
+    it("encodes includeContextMenu-only as flags=0b100000", () => {
+      const buf = encodeRequest(REQUEST_OP.state, 1, { includeContextMenu: true });
+      expect(new Uint8Array(buf)).toEqual(new Uint8Array([0x12, 0, 0, 0, 1, 0b00100000]));
+    });
+
+    it("encodes strict-probe combo (selection+scroll+contextMenu) as flags=0b111000", () => {
+      const buf = encodeRequest(REQUEST_OP.state, 1, {
+        includeSelection: true,
+        includeScroll: true,
+        includeContextMenu: true,
+      });
+      expect(new Uint8Array(buf)).toEqual(new Uint8Array([0x12, 0, 0, 0, 1, 0b00111000]));
     });
 
     it("encodes empty body as flags=0", () => {

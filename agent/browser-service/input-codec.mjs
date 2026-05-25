@@ -30,8 +30,18 @@
 //                  width:u16, height:u16 (last two used by resize)
 //                  Implicit acks: resize → next 0x80; nav-class → next 0x86.
 //   0x11 eval      reqId != 0. exprLen:u32, expr:utf8
-//   0x12 state     reqId != 0. flags:u8 (bit0=includeUrl,
-//                  bit1=includeTitle, bit2=includeLoading)
+//   0x12 state     reqId != 0. flags:u8
+//                    bit0 = includeUrl
+//                    bit1 = includeTitle
+//                    bit2 = includeLoading
+//                    bit3 = includeSelection   (selectionText)
+//                    bit4 = includeScroll      (scrollX, scrollY,
+//                                               viewport, docSize)
+//                    bit5 = includeContextMenu (lastContextMenu;
+//                                               reads-and-clears the
+//                                               server-side slot — same
+//                                               semantics as the legacy
+//                                               REST `?resetContextMenu=1`)
 //
 // ── Responses + pushes (server→client) ──────────────────────────────────
 //   0x80 config        (reqId=0) codedWidth:u16, codedHeight:u16,
@@ -80,6 +90,9 @@ const CONTROL_ACTION = ["back", "forward", "reload", "navigate", "resize"];
 const STATE_FLAG_INCLUDE_URL = 1 << 0;
 const STATE_FLAG_INCLUDE_TITLE = 1 << 1;
 const STATE_FLAG_INCLUDE_LOADING = 1 << 2;
+const STATE_FLAG_INCLUDE_SELECTION = 1 << 3;
+const STATE_FLAG_INCLUDE_SCROLL = 1 << 4;
+const STATE_FLAG_INCLUDE_CONTEXT_MENU = 1 << 5;
 
 const BUTTON_NAME = ["none", "left", "right", undefined, "middle"];
 
@@ -289,6 +302,9 @@ export function decodeRequest(input) {
             includeUrl: (flags & STATE_FLAG_INCLUDE_URL) !== 0,
             includeTitle: (flags & STATE_FLAG_INCLUDE_TITLE) !== 0,
             includeLoading: (flags & STATE_FLAG_INCLUDE_LOADING) !== 0,
+            includeSelection: (flags & STATE_FLAG_INCLUDE_SELECTION) !== 0,
+            includeScroll: (flags & STATE_FLAG_INCLUDE_SCROLL) !== 0,
+            includeContextMenu: (flags & STATE_FLAG_INCLUDE_CONTEXT_MENU) !== 0,
           },
         };
       }

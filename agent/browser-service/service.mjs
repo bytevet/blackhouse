@@ -1260,25 +1260,62 @@ app.get("/browser/state", async (c) => {
 
 // ---------- WS state (opcode 0x12 dispatcher) --------------------------------
 //
-// New in #61: a leaner state projection driven by include-bit flags from the
-// opcode 0x12 payload. Returns ONLY the fields the caller asked for, JSON-
-// encoded into the 0x84 stateSnapshot frame. The richer REST `/browser/state`
-// probe (with selectionText / contextMenu / scroll positions) stays alive on
-// the side channel until qa migrates its probes.
+// Flag-driven projection of the page's observable state, JSON-encoded into
+// the 0x84 stateSnapshot frame. Only the requested fields appear in the
+// response — callers ask for exactly what they need.
+//
+// Flags (must stay in lockstep with input-codec.mjs STATE_FLAG_*):
+//   bit0 includeUrl           → `url`
+//   bit1 includeTitle         → `title`
+//   bit2 includeLoading       → `loading`
+//   bit3 includeSelection     → `selectionText`
+//   bit4 includeScroll        → `scrollX`, `scrollY`, `docSize`,  `viewport`
+//   bit5 includeContextMenu   → `lastContextMenu` (read-and-clears the
+//                                server-side slot; matches the legacy REST
+//                                `?resetContextMenu=1` behavior)
+//
+// One CDP `Runtime.evaluate` round-trip regardless of how many bits are
+// set. Missing flags evaluate to `undefined`, which JSON.stringify elides.
 async function runWsState(body) {
   const wantUrl = !!body?.includeUrl;
   const wantTitle = !!body?.includeTitle;
   const wantLoading = !!body?.includeLoading;
-  if (!wantUrl && !wantTitle && !wantLoading) return { ok: true };
+  const wantSelection = !!body?.includeSelection;
+  const wantScroll = !!body?.includeScroll;
+  const wantContextMenu = !!body?.includeContextMenu;
+  if (!wantUrl && !wantTitle && !wantLoading && !wantSelection && !wantScroll && !wantContextMenu) {
+    return { ok: true };
+  }
+  // The contextmenu listener is what populates `window.__lastCM`; make sure
+  // it's installed before the first probe. Idempotent — installDebugHooks
+  // guards with __bhDebugInstalled.
+  if (wantContextMenu) {
+    try {
+      await installDebugHooks(state.cdp);
+    } catch {
+      /* page not ready yet; the read below will return null */
+    }
+  }
   try {
-    // One CDP round-trip; missing flags produce JSON `undefined` which
-    // disappears after JSON.stringify.
     const evalResp = await state.cdp.send("Runtime.evaluate", {
-      expression: `({
-        url: ${wantUrl ? "location.href" : "undefined"},
-        title: ${wantTitle ? "document.title" : "undefined"},
-        loading: ${wantLoading ? "document.readyState !== 'complete'" : "undefined"},
-      })`,
+      expression: `(() => {
+        ${wantContextMenu ? "const __cm = window.__lastCM || null; window.__lastCM = null;" : ""}
+        return {
+          url: ${wantUrl ? "location.href" : "undefined"},
+          title: ${wantTitle ? "document.title" : "undefined"},
+          loading: ${wantLoading ? "document.readyState !== 'complete'" : "undefined"},
+          selectionText: ${wantSelection ? "(window.getSelection && window.getSelection().toString()) || ''" : "undefined"},
+          scrollX: ${wantScroll ? "window.scrollX" : "undefined"},
+          scrollY: ${wantScroll ? "window.scrollY" : "undefined"},
+          viewport: ${wantScroll ? "({ width: window.innerWidth, height: window.innerHeight })" : "undefined"},
+          docSize: ${
+            wantScroll
+              ? "({ width: Math.max(document.documentElement.scrollWidth, (document.body && document.body.scrollWidth) || 0), height: Math.max(document.documentElement.scrollHeight, (document.body && document.body.scrollHeight) || 0) })"
+              : "undefined"
+          },
+          lastContextMenu: ${wantContextMenu ? "__cm" : "undefined"},
+        };
+      })()`,
       returnByValue: true,
     });
     if (evalResp.exceptionDetails) {
@@ -1289,6 +1326,14 @@ async function runWsState(body) {
     if (wantUrl) out.url = v.url;
     if (wantTitle) out.title = v.title;
     if (wantLoading) out.loading = !!v.loading;
+    if (wantSelection) out.selectionText = v.selectionText ?? "";
+    if (wantScroll) {
+      out.scrollX = v.scrollX ?? 0;
+      out.scrollY = v.scrollY ?? 0;
+      out.viewport = v.viewport ?? null;
+      out.docSize = v.docSize ?? null;
+    }
+    if (wantContextMenu) out.lastContextMenu = v.lastContextMenu ?? null;
     return out;
   } catch (err) {
     return {
