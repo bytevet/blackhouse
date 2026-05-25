@@ -115,6 +115,10 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // ResizeObserver watches the wrapper's bounding box to drive viewport sync.
   const frameWrapperRef = useRef<HTMLDivElement>(null);
+  // Live screencast WS — kept in a ref so `sendInput` can write directly
+  // (text frames) without per-event HTTP overhead. Set on open, cleared on
+  // close. Reads check `readyState === OPEN` before sending.
+  const wsRef = useRef<WebSocket | null>(null);
   const mouseMoveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // True between mousedown and mouseup. While true, mouseMove skips its 50ms
@@ -152,12 +156,16 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
     ws.binaryType = "arraybuffer";
 
     ws.onopen = () => {
-      if (alive) setConnected(true);
+      if (!alive) return;
+      wsRef.current = ws;
+      setConnected(true);
     };
     ws.onclose = () => {
+      wsRef.current = null;
       if (alive) setConnected(false);
     };
     ws.onerror = () => {
+      wsRef.current = null;
       if (alive) setConnected(false);
     };
 
@@ -259,6 +267,7 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
 
     return () => {
       alive = false;
+      wsRef.current = null;
       ws.close();
       if (decoder) {
         try {
@@ -349,16 +358,25 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
     (typeof client.api.sessions)[":id"]["browser"]["input"]["$post"]
   >[0]["json"];
 
+  // Drop input frames once the WS send buffer climbs over this — a stale
+  // mouseMove arriving 3s late is worse than no event. Generous enough to
+  // absorb a normal scroll burst (~100B per event × ~600 events).
+  const WS_INPUT_BACKPRESSURE_LIMIT = 64 * 1024;
+
+  // Prefer the live screencast WS as a fire-and-forget input channel —
+  // avoids per-event HTTPS overhead during rapid input (scroll, drag-select).
+  // Falls back to REST when WS isn't ready (first events after navigation,
+  // reconnect window). REST also stays available as a backstop for tests.
   const sendInput = useCallback(
-    async (body: InputBody) => {
-      try {
-        await client.api.sessions[":id"].browser.input.$post({
-          param: { id: sessionId },
-          json: body,
-        });
-      } catch {
-        // swallow
+    (body: InputBody) => {
+      const ws = wsRef.current;
+      if (ws?.readyState === WebSocket.OPEN && ws.bufferedAmount < WS_INPUT_BACKPRESSURE_LIMIT) {
+        ws.send(JSON.stringify({ type: "input", input: body }));
+        return;
       }
+      client.api.sessions[":id"].browser.input
+        .$post({ param: { id: sessionId }, json: body })
+        .catch(() => {});
     },
     [sessionId],
   );
