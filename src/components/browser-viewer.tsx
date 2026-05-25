@@ -247,8 +247,19 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
           // Interactive screencast: skip the decoder's reorder buffer and
           // surface frames as soon as they finish.
           optimizeForLatency: true,
-          // GPU decode when available; falls back gracefully without H.264 HW.
-          hardwareAcceleration: "prefer-hardware",
+          // NOTE: `hardwareAcceleration: "prefer-hardware"` would seem
+          // ideal here but it's a footgun. Per the WebCodecs spec the
+          // hint is supposed to fall back gracefully to software when HW
+          // codecs aren't available, but Chromium (incl. Playwright
+          // headless and real Chrome without HW H.264) actually treats
+          // "prefer-hardware" as a hard reject: `configure()` returns
+          // sync-OK with `state="configured"`, then async-errors with
+          // `OperationError: Unsupported configuration` and transitions
+          // to `closed`, silently losing every subsequent `decode()`
+          // call. Default `"no-preference"` lets the browser pick what
+          // it actually has — fixes the e2e canvas-stays-black
+          // regression and matches what users with software-only H.264
+          // get anyway.
         });
       } catch (err) {
         console.error("[browser-viewer] VideoDecoder.configure failed", err);
