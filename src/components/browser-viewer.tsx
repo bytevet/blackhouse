@@ -25,11 +25,6 @@ import {
   type InputMessage,
 } from "@/lib/browser-input-codec";
 import { createWsRpc, type WsRpc } from "@/lib/browser-ws-rpc";
-// REST `/browser/state` is still alive on the server (selectionText /
-// scrollX/Y / lastContextMenu — not yet projected through 0x84). The FE
-// only uses it for the right-click "Copy" selectionText fetch; everything
-// else is on the WS.
-import { client } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 // Eval result payload returned by `agent/browser-service/service.mjs`'s
@@ -133,8 +128,9 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
   const [evalInput, setEvalInput] = useState("");
   const [evalHistory, setEvalHistory] = useState<string[]>([]);
   const [evalHistoryIdx, setEvalHistoryIdx] = useState<number | null>(null);
-  // Latest selection text from the in-container page, populated on context-menu
-  // open via GET /browser/state. null = menu closed / not yet fetched.
+  // Latest selection text from the in-container page, populated on
+  // context-menu open via 0x12 state w/ includeSelection. null = menu
+  // closed / not yet fetched.
   const [menuSelectionText, setMenuSelectionText] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -388,8 +384,7 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
 
   // Console + navigate events are now delivered as 0x85 / 0x86 push frames
   // over the same screencast WS — handled in the opcode demux above. No
-  // more SSE EventSource. (REST /browser/console SSE is still live on the
-  // server for backward compat; the FE just stops listening.)
+  // more SSE EventSource. (REST + SSE channels retired by #61 BE-cut2.)
 
   // ─── Control + Input via WS (#61) ──────────────────────────────────────
   // Control is fire-and-forget: we send 0x10 with reqId=0 and never await
@@ -556,31 +551,26 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
   };
 
   // Right-click → SPA-rendered ContextMenu (see #47). Fetches live page
-  // selectionText on open so the "Copy" item can conditionally appear.
-  //
-  // selectionText isn't in the 0x12/0x84 state response shape (be's
-  // runWsState only projects url/title/loading). The legacy REST
-  // /browser/state endpoint is unchanged and still emits selectionText —
-  // we keep using that until qa migrates the e2e probe.
-  const onContextMenuOpenChange = useCallback(
-    async (open: boolean) => {
-      if (!open) {
-        setMenuSelectionText(null);
-        return;
-      }
-      try {
-        const res = await client.api.sessions[":id"].browser.state.$get({
-          param: { id: sessionId },
-        });
-        if (!res.ok) return;
-        const data = (await res.json()) as { selectionText?: string };
-        setMenuSelectionText(typeof data.selectionText === "string" ? data.selectionText : "");
-      } catch {
-        // browser unavailable / network error — Copy will stay hidden
-      }
-    },
-    [sessionId],
-  );
+  // selectionText on open via the 0x12 state opcode with `includeSelection`
+  // (the bit-flag projection added in #61) so the "Copy" item can
+  // conditionally appear.
+  const onContextMenuOpenChange = useCallback(async (open: boolean) => {
+    if (!open) {
+      setMenuSelectionText(null);
+      return;
+    }
+    const rpc = rpcRef.current;
+    if (!rpc) return;
+    try {
+      const data = await rpc.request<{ ok: boolean; selectionText?: string }>(REQUEST_OP.state, {
+        includeSelection: true,
+      });
+      if (!data.ok) return;
+      setMenuSelectionText(typeof data.selectionText === "string" ? data.selectionText : "");
+    } catch {
+      // ws not connected / timeout — Copy stays hidden
+    }
+  }, []);
 
   const clipboardAvailable =
     typeof navigator !== "undefined" &&

@@ -4,32 +4,21 @@
  * Launches one headless Chromium page via Playwright and exposes endpoints
  * on 0.0.0.0:9223 (loopback-bound at the Docker hostport level):
  *
- *   GET  /browser/ws       — Sole transport after #61 parallel-paths. Binary
- *                            opcode framing on both directions; see
- *                            `input-codec.mjs` header for the wire format.
- *                            Server→client: 0x80 config (once at open + after
- *                            resize), 0x81 video frames, 0x83 evalResult,
- *                            0x84 stateSnapshot, 0x85 console push, 0x86
- *                            navigate push. Client→server: 0x01–0x07 input
- *                            events, 0x10 control (fire-and-forget), 0x11
- *                            eval / 0x12 state requests with u32 reqId.
+ *   GET  /browser/ws      — Sole transport. Binary opcode framing in both
+ *                           directions; see `input-codec.mjs` header for
+ *                           the full wire format. Server→client: 0x80
+ *                           config (at open + after resize), 0x81 video
+ *                           frames, 0x83 evalResult, 0x84 stateSnapshot,
+ *                           0x85 consoleEvent push, 0x86 navigateEvent
+ *                           push. Client→server: 0x01–0x07 input events
+ *                           (fire-and-forget), 0x10 control (fire-and-
+ *                           forget), 0x11 eval / 0x12 state requests with
+ *                           u32 reqId.
+ *   GET  /browser/health  — `{ok, url, streaming, codedWidth, codedHeight}`
  *
- *   The REST + SSE routes below stay live during the cut-over so fe can
- *   migrate one call site at a time. They go away in the follow-up commit
- *   after fe + qa switch to WS-only.
- *
- *   POST /browser/control  — { action: navigate|back|forward|reload, url? }
- *                            or { action: "resize", width, height } (200ms
- *                            debounced).
- *   POST /browser/eval     — Runtime.evaluate; result/error also broadcast
- *                            on the /browser/console SSE channel.
- *   GET  /browser/console  — SSE multiplex of `console`, `eval`, `navigate`,
- *                            and `ping` events.
- *   GET  /browser/health   — `{ok, url, streaming, codedWidth, codedHeight}`
- *   GET  /browser/state    — strict e2e probe: returns selectionText,
- *                            scrollX/Y, viewport, docSize, lastContextMenu,
- *                            etc. `?resetContextMenu=1` clears the
- *                            contextmenu slot before reading.
+ * That's it. The previous REST routes (control / eval / state) and the
+ * SSE channel (/browser/console) were retired by #61 — every operation
+ * now travels as a binary opcode on the WS above.
  *
  * Pipeline: CDP `Page.startScreencast` (jpeg q80) → ffmpeg per peer
  *   (`-f image2pipe -c:v mjpeg -i pipe:0` in, libx264 zerolatency Annex-B
@@ -45,7 +34,6 @@
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
-import { streamSSE } from "hono/streaming";
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
@@ -134,20 +122,12 @@ const H264_CODEC_STRING = "avc1.42E01F";
 // timestamps but doesn't care about real wall-clock alignment. ~30 FPS.
 const PTS_INCREMENT_US = 33_333n;
 
-// In-memory ring of recent events (console messages + navigations), replayed
-// on SSE connect so a late subscriber still sees what happened just before
-// they joined. Each entry is `{ type, payload }` where `type` becomes the
-// SSE event name on the wire (`console` | `navigate`).
-const EVENT_BUFFER_LIMIT = 200;
-const eventBuffer = [];
-const eventSubscribers = new Set();
-
 /**
  * Inject a one-shot debug hook into the current page that captures
  * `contextmenu` events on `window.__lastCM`. Re-injected after every main
- * frame navigation. /browser/state reads this back so e2e can verify
- * right-click actually synthesized a contextmenu in the DOM (instead of
- * just verifying that mouseDown:right reached the wire).
+ * frame navigation. `runWsState` reads this back so the strict e2e probe
+ * can verify right-click actually synthesized a contextmenu in the DOM
+ * (instead of only verifying that mouseDown:right reached the wire).
  */
 async function installDebugHooks(cdp) {
   await cdp.send("Runtime.evaluate", {
@@ -168,19 +148,6 @@ async function installDebugHooks(cdp) {
     })()`,
     returnByValue: true,
   });
-}
-
-function emitEvent(type, payload) {
-  const item = { type, payload };
-  eventBuffer.push(item);
-  if (eventBuffer.length > EVENT_BUFFER_LIMIT) eventBuffer.shift();
-  for (const subscriber of eventSubscribers) {
-    try {
-      subscriber(item);
-    } catch {
-      eventSubscribers.delete(subscriber);
-    }
-  }
 }
 
 async function startBrowser() {
@@ -214,9 +181,7 @@ async function startBrowser() {
     }
   }
 
-  // Console / exception → SSE `console` event (legacy) AND WS opcode 0x85
-  // push to all peers (new in #61). SSE goes away once REST/SSE are
-  // deleted in the follow-up commit.
+  // Console / exception → WS opcode 0x85 push to every peer.
   cdp.on("Runtime.consoleAPICalled", (params) => {
     const text = (params.args || [])
       .map((a) => a.value ?? a.description ?? a.unserializableValue ?? "")
@@ -225,7 +190,6 @@ async function startBrowser() {
     const url = params.stackTrace?.callFrames?.[0]?.url;
     const line = params.stackTrace?.callFrames?.[0]?.lineNumber;
     const ts = Date.now();
-    emitEvent("console", { level: kind, text, url, line, ts });
     broadcastBinary(encodeConsoleEvent({ kind, text, url, line, ts }));
   });
   cdp.on("Runtime.exceptionThrown", (params) => {
@@ -234,24 +198,20 @@ async function startBrowser() {
     const url = e?.url;
     const line = e?.lineNumber;
     const ts = Date.now();
-    emitEvent("console", { level: "error", text, url, line, ts });
     broadcastBinary(encodeConsoleEvent({ kind: "error", text, url, line, ts }));
   });
 
-  // Main-frame navigation → SSE `navigate` event (legacy) AND WS opcode
-  // 0x86 push (new in #61). `parentId` is undefined on the top frame; we
-  // filter sub-frame navigations (iframes, ads) so the address bar shows
-  // the page URL only.
+  // Main-frame navigation → WS opcode 0x86 push. `parentId` is undefined
+  // on the top frame; we filter sub-frame navigations (iframes, ads) so
+  // the address bar shows the page URL only.
   cdp.on("Page.frameNavigated", (params) => {
     if (params.frame?.parentId) return;
     const url = params.frame?.url;
     if (!url || url === "about:blank") return;
-    const ts = Date.now();
-    emitEvent("navigate", { url, ts });
-    broadcastBinary(encodeNavigateEvent({ url, ts }));
+    broadcastBinary(encodeNavigateEvent({ url, ts: Date.now() }));
     // Re-install the contextmenu listener after every navigation. Page
-    // navigations wipe DOM listeners; the listener is what /browser/state
-    // reads to verify right-click actually synthesized a contextmenu event.
+    // navigations wipe DOM listeners; the listener is what `runWsState`
+    // reads to verify right-click synthesized a real contextmenu event.
     // Fire-and-forget; harmless if injection fails.
     installDebugHooks(cdp).catch(() => {});
   });
@@ -261,15 +221,11 @@ async function startBrowser() {
     if (screencastRunning) return;
     screencastRunning = true;
     await cdp.send("Page.startScreencast", makeScreencastConfig());
-    // Push the current page URL as a synthetic `navigate` so the React
+    // Push the current page URL as a synthetic 0x86 navigate so the React
     // address bar populates immediately on first connect — even when the
     // page is still on the default `about:blank` (which the real
-    // `Page.frameNavigated` handler filters out to avoid noise). SSE
-    // replay buffer also seeds this for late subscribers.
-    const synthUrl = page.url();
-    const synthTs = Date.now();
-    emitEvent("navigate", { url: synthUrl, ts: synthTs });
-    broadcastBinary(encodeNavigateEvent({ url: synthUrl, ts: synthTs }));
+    // `Page.frameNavigated` handler filters out to avoid noise).
+    broadcastBinary(encodeNavigateEvent({ url: page.url(), ts: Date.now() }));
   }
 
   async function stopScreencastIfIdle() {
@@ -1013,13 +969,12 @@ async function dispatchInput(body) {
   }
 }
 
-// ---------- POST /browser/control --------------------------------------------
+// ---------- Control (WS opcode 0x10) -----------------------------------------
 
-// Shared in-process control dispatcher. Both the REST `POST /browser/control`
-// route and the WS opcode 0x10 handler call this. REST returns the result as
-// JSON; WS is fire-and-forget — the WS dispatcher logs `!ok` and moves on,
-// trusting the implicit ack via 0x80 (resize) or 0x86 (nav-class). The
-// returned `{ok, …}` shape is therefore only consumed by REST + log lines.
+// In-process control dispatcher invoked by the 0x10 WS branch in onMessage.
+// Fire-and-forget on the wire: the implicit ack comes via 0x80 config (resize)
+// or 0x86 navigateEvent (nav-class). The `{ok, …}` return shape feeds the
+// `!ok` log line in the WS dispatcher.
 async function runControl(body) {
   if (!body || typeof body !== "object" || typeof body.action !== "string") {
     return { ok: false, error: "invalid_body" };
@@ -1057,23 +1012,11 @@ async function runControl(body) {
   }
 }
 
-app.post("/browser/control", async (c) => {
-  const body = await c.req.json().catch(() => null);
-  const result = await runControl(body);
-  if (result.ok) return c.json(result);
-  return c.json(result, result.error === "nav_failed" ? 500 : 400);
-});
-
-// ---------- POST /browser/eval -----------------------------------------------
+// ---------- Eval (WS opcode 0x11) --------------------------------------------
 //
 // Runs a JS expression in the embedded page via CDP `Runtime.evaluate` and
-// returns the stringified result. Also emits an `eval` SSE event so the
-// React Console panel can render the result inline with `console.log`
-// output — keeping the panel feeling like a real DevTools console.
-//
-// The FE echoes the *input* optimistically (one `eval` entry with
-// `kind:"input"`) — we don't re-emit it on the SSE channel to avoid
-// duplicates. We do emit a `result` or `error` entry.
+// returns the stringified result. The 0x11 dispatcher in onMessage encodes
+// the returned `{ok, result | error}` into a 0x83 evalResult frame.
 
 async function runEval(body) {
   if (!body || typeof body !== "object" || typeof body.expression !== "string") {
@@ -1101,7 +1044,6 @@ async function runEval(body) {
             ?.map((f) => `  at ${f.functionName || "<anonymous>"} (${f.url}:${f.lineNumber})`)
             .join("\n")
         : undefined;
-      emitEvent("eval", { kind: "error", text: description, ts: Date.now() });
       return { ok: false, error: { description, stack } };
     }
 
@@ -1121,64 +1063,12 @@ async function runEval(body) {
     } else {
       text = remote.description || remote.type;
     }
-    emitEvent("eval", { kind: "result", text, ts: Date.now() });
     return { ok: true, result: text };
   } catch (err) {
     const description = err instanceof Error ? err.message : String(err);
-    emitEvent("eval", { kind: "error", text: description, ts: Date.now() });
     return { ok: false, error: { description } };
   }
 }
-
-app.post("/browser/eval", async (c) => {
-  const body = await c.req.json().catch(() => null);
-  const result = await runEval(body);
-  if (result.ok) return c.json(result);
-  // invalid_body → 400, anything else (exception/cdp_error) → 500-ish but
-  // the body itself carries the structured error. Keep 200 for thrown
-  // expressions (those are "successful evaluations that produced an
-  // exception") to match the original REST contract.
-  return c.json(result, result.error?.description === "invalid_body" ? 400 : 200);
-});
-
-// ---------- GET /browser/console (SSE) ---------------------------------------
-//
-// Despite the legacy `/console` path, this stream multiplexes multiple SSE
-// event types — the client distinguishes via `event:` names:
-//   - `console`  — `{level, text, url?, line?, ts}`
-//   - `navigate` — `{url, ts}` (main-frame navigations)
-//   - `eval`     — `{kind: "result" | "error", text, ts}` (results of
-//                   `POST /browser/eval` invocations; `input` echoes are
-//                   produced FE-side and not sent on the wire)
-//   - `ping`     — heartbeat (no payload)
-
-app.get("/browser/console", (c) =>
-  streamSSE(c, async (stream) => {
-    // Replay buffer first so a new subscriber sees recent events.
-    for (const item of eventBuffer) {
-      await stream.writeSSE({ data: JSON.stringify(item.payload), event: item.type });
-    }
-    // Live subscription. Pump each event through writeSSE; remove on error.
-    const writer = (item) => {
-      stream.writeSSE({ data: JSON.stringify(item.payload), event: item.type }).catch(() => {
-        eventSubscribers.delete(writer);
-      });
-    };
-    eventSubscribers.add(writer);
-    // Hold the connection open until the client disconnects (Hono closes the
-    // generator on abort, which throws inside the await below).
-    try {
-      // Heartbeat every 15s keeps proxies (and any nginx between us and the
-      // Blackhouse server) from idling out.
-      for (;;) {
-        await stream.sleep(15000);
-        await stream.writeSSE({ data: "", event: "ping" });
-      }
-    } finally {
-      eventSubscribers.delete(writer);
-    }
-  }),
-);
 
 // ---------- Health ------------------------------------------------------------
 
@@ -1194,71 +1084,7 @@ app.get("/browser/health", (c) =>
   }),
 );
 
-// ---------- State (strict e2e probe) -----------------------------------------
-//
-// Returns Chromium's actual page state queried via CDP `Runtime.evaluate`.
-// Used by the strict e2e tests to assert that a gesture actually moved
-// state (text was selected, page scrolled, contextmenu fired) — instead
-// of only asserting that the right wire shape reached the input endpoint.
-//
-// `?resetContextMenu=1` clears `window.__lastCM` before reading so a test
-// can synchronize "right click, then probe" without seeing stale data.
-
-async function runState(body) {
-  // Make sure the debug hook is installed (idempotent — installDebugHooks
-  // guards with __bhDebugInstalled). Covers the case where the page has
-  // never navigated since process start.
-  try {
-    await installDebugHooks(state.cdp);
-  } catch {
-    /* page not ready yet; reads below may still succeed */
-  }
-  const reset = body?.resetContextMenu === true;
-  try {
-    const evalResp = await state.cdp.send("Runtime.evaluate", {
-      expression: `(() => {
-        const reset = ${reset ? "true" : "false"};
-        const cm = window.__lastCM || null;
-        if (reset) window.__lastCM = null;
-        let selectionText = "";
-        try { selectionText = (window.getSelection()?.toString() || ""); } catch (e) {}
-        return {
-          url: location.href,
-          title: document.title,
-          selectionText,
-          scrollY: window.scrollY,
-          scrollX: window.scrollX,
-          viewport: { width: window.innerWidth, height: window.innerHeight },
-          docSize: {
-            width: Math.max(document.documentElement.scrollWidth, document.body?.scrollWidth || 0),
-            height: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0),
-          },
-          lastContextMenu: cm,
-          activeElementTag: document.activeElement?.tagName || null,
-        };
-      })()`,
-      returnByValue: true,
-    });
-    if (evalResp.exceptionDetails) {
-      return { ok: false, error: "eval_failed", details: evalResp.exceptionDetails };
-    }
-    return { ok: true, ...(evalResp.result?.value || {}) };
-  } catch (err) {
-    return {
-      ok: false,
-      error: "cdp_error",
-      message: err instanceof Error ? err.message : String(err),
-    };
-  }
-}
-
-app.get("/browser/state", async (c) => {
-  const result = await runState({ resetContextMenu: c.req.query("resetContextMenu") === "1" });
-  if (result.ok) return c.json(result);
-  return c.json(result, 500);
-});
-
-// ---------- WS state (opcode 0x12 dispatcher) --------------------------------
+// ---------- State (WS opcode 0x12 dispatcher) --------------------------------
 //
 // Flag-driven projection of the page's observable state, JSON-encoded into
 // the 0x84 stateSnapshot frame. Only the requested fields appear in the

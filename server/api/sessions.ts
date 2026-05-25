@@ -16,7 +16,6 @@ import {
   type SQL,
 } from "drizzle-orm";
 import { getDockerClient, getContainerHostPort } from "../lib/docker.js";
-import { streamSSE } from "hono/streaming";
 import type { AuthEnv } from "../middleware/auth.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { paginationQuery } from "../lib/pagination.js";
@@ -32,39 +31,6 @@ const sessionSummary = {
 /** Strip resultHtml from a raw DB row and add hasResult boolean. */
 function toSessionSummary<T extends { resultHtml?: string | null }>({ resultHtml, ...rest }: T) {
   return { ...rest, hasResult: resultHtml != null };
-}
-
-/**
- * Forward a request to the in-container browser-service (port 9223) and
- * mirror its status + content-type + body back to the caller. On any
- * failure (port lookup, fetch, upstream error) responds with `502`
- * `{error: "browser_unavailable", ...}`. Callers handle auth/ownership
- * before invoking.
- */
-async function proxyBrowser(
-  c: import("hono").Context,
-  sessionId: string,
-  upstreamPath: string,
-  init?: RequestInit,
-) {
-  try {
-    const port = await getContainerHostPort(sessionId, 9223);
-    const res = await fetch(`http://127.0.0.1:${port}${upstreamPath}`, init);
-    const text = await res.text();
-    return c.body(text, res.status as 200, {
-      "content-type": res.headers.get("content-type") || "application/json",
-    });
-  } catch (err) {
-    return c.json(
-      { error: "browser_unavailable", message: err instanceof Error ? err.message : String(err) },
-      502,
-    );
-  }
-}
-
-const JSON_HEADERS = { "content-type": "application/json" };
-function jsonPost(body: unknown): RequestInit {
-  return { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(body) };
 }
 
 const app = new Hono<AuthEnv>()
@@ -608,114 +574,12 @@ const app = new Hono<AuthEnv>()
       .where(eq(schema.codingSessions.id, id));
 
     return c.json({ success: true });
-  })
-
-  // ---------------------------------------------------------------------------
-  // Browser proxy — forwards to the in-container browser-service on port 9223.
-  // All routes are auth-gated and ownership-checked via `requireSessionAccess`.
-  // ---------------------------------------------------------------------------
-
-  // POST /api/sessions/:id/browser/control
-  .post(
-    "/:id/browser/control",
-    authMiddleware,
-    zValidator(
-      "json",
-      z.object({
-        action: z.enum(["navigate", "back", "forward", "reload", "resize"]),
-        url: z.string().optional(),
-        // `resize` carries even-rounded pixel dimensions; clamped server-side
-        // in browser-service (320..3840 × 240..2160 per #41 spec).
-        width: z.number().int().positive().optional(),
-        height: z.number().int().positive().optional(),
-      }),
-    ),
-    async (c) => {
-      const id = c.req.param("id");
-      await requireSessionAccess(id, c.get("session").user);
-      return proxyBrowser(c, id, "/browser/control", jsonPost(c.req.valid("json")));
-    },
-  )
-
-  // POST /api/sessions/:id/browser/eval — run a JS expression in the page.
-  .post(
-    "/:id/browser/eval",
-    authMiddleware,
-    zValidator("json", z.object({ expression: z.string().min(1).max(10_000) })),
-    async (c) => {
-      const id = c.req.param("id");
-      await requireSessionAccess(id, c.get("session").user);
-      return proxyBrowser(c, id, "/browser/eval", jsonPost(c.req.valid("json")));
-    },
-  )
-
-  // GET /api/sessions/:id/browser/state — strict e2e probe forwarded from the
-  // in-container browser-service. Returns the live page's selectionText,
-  // scrollX/Y, lastContextMenu, viewport/docSize — i.e. observable Chromium
-  // state, not just the CDP wire shape. Query params (e.g. `?resetContextMenu=1`)
-  // are passed through.
-  .get("/:id/browser/state", authMiddleware, async (c) => {
-    const id = c.req.param("id");
-    await requireSessionAccess(id, c.get("session").user);
-    const search = new URL(c.req.url).search;
-    return proxyBrowser(c, id, `/browser/state${search}`);
-  })
-
-  // GET /api/sessions/:id/browser/console — SSE re-broadcast.
-  // We open the container service's SSE stream, parse each `data:` line, and
-  // forward as our own SSE so the client doesn't have to know about the
-  // upstream container port.
-  .get("/:id/browser/console", authMiddleware, async (c) => {
-    const id = c.req.param("id");
-    await requireSessionAccess(id, c.get("session").user);
-
-    let port: number;
-    try {
-      port = await getContainerHostPort(id, 9223);
-    } catch (err) {
-      return c.json(
-        { error: "browser_unavailable", message: err instanceof Error ? err.message : String(err) },
-        502,
-      );
-    }
-
-    return streamSSE(c, async (stream) => {
-      const upstream = await fetch(`http://127.0.0.1:${port}/browser/console`, {
-        headers: { accept: "text/event-stream" },
-        // Important: do not buffer; SSE is a long-lived response.
-        // node's undici fetch streams the body by default.
-      });
-      if (!upstream.body) {
-        await stream.writeSSE({ event: "error", data: "no_upstream_body" });
-        return;
-      }
-      const reader = upstream.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-      try {
-        for (;;) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          // SSE messages are separated by a blank line (\n\n).
-          let idx: number;
-          while ((idx = buf.indexOf("\n\n")) >= 0) {
-            const block = buf.slice(0, idx);
-            buf = buf.slice(idx + 2);
-            // Pass through verbatim — preserves event:/data:/id: fields.
-            await stream.write(block + "\n\n");
-          }
-        }
-      } catch {
-        // upstream closed
-      } finally {
-        try {
-          await reader.cancel();
-        } catch {
-          /* ignore */
-        }
-      }
-    });
   });
+
+// Browser pane now talks to the in-container service exclusively over the
+// binary WebSocket at `/api/browser-ws/:sessionId` (see `server/ws/browser.ts`).
+// The previous REST routes (POST /browser/control, POST /browser/eval,
+// GET /browser/state) and SSE channel (GET /browser/console) were retired by
+// #61 — every operation now travels as a binary opcode on that one WS.
 
 export default app;
