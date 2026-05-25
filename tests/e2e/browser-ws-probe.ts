@@ -13,10 +13,8 @@
  *   - `request(opcode, body)` — request/response for 0x11 eval / 0x12 state,
  *     resolves with the decoded JSON payload (typed via `T` at call site).
  *   - `send(opcode, body)` — fire-and-forget for 0x10 control (resize / nav).
- *     The implicit ack is the next 0x80 (resize) or 0x86 (nav-class) which
- *     can be observed via `on(...)`.
- *   - `on(opcode, handler)` — subscribe to server-push frames (0x80 config,
- *     0x81 video, 0x85 console, 0x86 navigate). Returns an unsubscribe fn.
+ *     The implicit ack is the next 0x80 (resize) or 0x86 (nav-class) push,
+ *     which the FE's BrowserViewer observes on its own WS.
  *   - `close()` — reject pending requests + close the socket.
  *
  * Projection: as of 87578f8 the 0x84 stateSnapshot carries every field this
@@ -52,7 +50,6 @@ import type { Page } from "@playwright/test";
 import {
   REQUEST_OP,
   RESPONSE_OP,
-  PUSH_OP,
   encodeRequest,
   decodeResponse,
   type ControlBody,
@@ -60,8 +57,6 @@ import {
   type StateBody,
 } from "../../src/lib/browser-input-codec";
 import { getBaseUrl } from "./helpers";
-
-type PushOpcode = (typeof PUSH_OP)[keyof typeof PUSH_OP];
 
 interface Pending {
   resolve: (value: unknown) => void;
@@ -82,20 +77,9 @@ export interface BrowserWsProbe {
   /**
    * Fire-and-forget — used for 0x10 control. The implicit ack is the next
    * push frame on the corresponding channel (0x80 for resize, 0x86 for
-   * nav-class). Observe those via `on(...)` if you need to wait.
+   * nav-class), observable from the FE's own WS.
    */
   send(opcode: typeof REQUEST_OP.control, body: ControlBody): void;
-
-  /**
-   * Subscribe to a server-pushed opcode. Handler receives the RAW frame
-   * bytes — caller decodes via the matching `decodeConfig` / `decodeVideoFrame`
-   * / `decodeConsoleEvent` / `decodeNavigateEvent` helper from
-   * `browser-input-codec`. Raw because most probes only need *presence*,
-   * not the parsed fields; the few that need fields decode locally.
-   *
-   * Returns an unsubscribe fn that the caller can defer.
-   */
-  on(opcode: PushOpcode, handler: (buf: Uint8Array) => void): () => void;
 
   /** Reject all pending requests and close the socket. */
   close(): void;
@@ -152,9 +136,8 @@ export async function openBrowserWs(
     });
   });
 
-  // ── pending request map + push listener registry ─────────────────────────
+  // ── pending request map ──────────────────────────────────────────────────
   const pending = new Map<number, Pending>();
-  const listeners = new Map<PushOpcode, Set<(buf: Uint8Array) => void>>();
   let nextReqId = 1;
   let disposed = false;
 
@@ -187,29 +170,25 @@ export async function openBrowserWs(
     if (view.byteLength < 1) return;
     const opcode = view[0];
 
-    // 0x83 / 0x84 — request/response. Correlate by reqId.
-    if (opcode === RESPONSE_OP.evalResult || opcode === RESPONSE_OP.stateSnapshot) {
-      const decoded = decodeResponse(view);
-      if (!decoded) return;
-      const p = pending.get(decoded.reqId);
-      if (!p) return; // late / unknown — silently drop
-      if (decoded.opcode !== p.expectedOpcode) {
-        rejectPending(
-          decoded.reqId,
-          new Error(
-            `ws_rpc_opcode_mismatch expected=0x${p.expectedOpcode.toString(16)} ` +
-              `got=0x${decoded.opcode.toString(16)}`,
-          ),
-        );
-        return;
-      }
-      resolvePending(decoded.reqId, decoded.payload);
+    // We only consume 0x83 / 0x84 (request/response). Push opcodes
+    // (0x80/0x81/0x85/0x86) arrive on the FE's own WS — we silently drop
+    // them here.
+    if (opcode !== RESPONSE_OP.evalResult && opcode !== RESPONSE_OP.stateSnapshot) return;
+    const decoded = decodeResponse(view);
+    if (!decoded) return;
+    const p = pending.get(decoded.reqId);
+    if (!p) return; // late / unknown — silently drop
+    if (decoded.opcode !== p.expectedOpcode) {
+      rejectPending(
+        decoded.reqId,
+        new Error(
+          `ws_rpc_opcode_mismatch expected=0x${p.expectedOpcode.toString(16)} ` +
+            `got=0x${decoded.opcode.toString(16)}`,
+        ),
+      );
       return;
     }
-
-    // Push opcodes (0x80/0x81/0x85/0x86) — fan out to subscribers verbatim.
-    const subs = listeners.get(opcode as PushOpcode);
-    if (subs) for (const fn of subs) fn(view);
+    resolvePending(decoded.reqId, decoded.payload);
   });
 
   ws.on("close", () => {
@@ -217,7 +196,6 @@ export async function openBrowserWs(
     disposed = true;
     for (const [reqId] of pending) rejectPending(reqId, new Error("ws_closed"));
     pending.clear();
-    listeners.clear();
   });
 
   function request<T>(
@@ -260,25 +238,11 @@ export async function openBrowserWs(
     ws.send(Buffer.from(encodeRequest(opcode, 0, body)));
   }
 
-  function on(opcode: PushOpcode, handler: (buf: Uint8Array) => void): () => void {
-    let set = listeners.get(opcode);
-    if (!set) {
-      set = new Set();
-      listeners.set(opcode, set);
-    }
-    set.add(handler);
-    return () => {
-      set!.delete(handler);
-      if (set!.size === 0) listeners.delete(opcode);
-    };
-  }
-
   function close(): void {
     if (disposed) return;
     disposed = true;
     for (const [reqId] of pending) rejectPending(reqId, new Error("ws_probe_closed"));
     pending.clear();
-    listeners.clear();
     try {
       ws.close();
     } catch {
@@ -286,24 +250,5 @@ export async function openBrowserWs(
     }
   }
 
-  return { request, send, on, close } as BrowserWsProbe;
-}
-
-/**
- * Convenience: open a probe, run `expression` via 0x11 eval, return the
- * `{ok, result?}` payload, close the probe. Use this for one-shot eval
- * probes; for tests that fire multiple evals in a row, open one probe and
- * reuse it via `request(REQUEST_OP.eval, ...)`.
- */
-export async function evalOnce(
-  page: Page,
-  sessionId: string,
-  expression: string,
-): Promise<{ ok: boolean; result?: string; error?: { description?: string } }> {
-  const probe = await openBrowserWs(page, sessionId);
-  try {
-    return await probe.request(REQUEST_OP.eval, { expression });
-  } finally {
-    probe.close();
-  }
+  return { request, send, close } as BrowserWsProbe;
 }
