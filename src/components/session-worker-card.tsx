@@ -48,7 +48,7 @@ export function SessionWorkerCard({
   onRecreate,
 }: SessionWorkerCardProps) {
   const { t } = useTranslation();
-  const status = (session.status as SessionStatus) || "pending";
+  const status: SessionStatus = session.status || "pending";
   const config = sessionStatusConfig[status] || sessionStatusConfig.pending;
   const slug = codename(session.id);
   const avatarSrc = avatarUrl(session.id, session.preset);

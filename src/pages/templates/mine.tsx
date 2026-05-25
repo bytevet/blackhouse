@@ -47,7 +47,6 @@ export function MyTemplatesPage() {
   const perPage = 12;
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<Template | null>(null);
   const [deletingTemplate, setDeletingTemplate] = useState<Template | null>(null);
   const [saving, setSaving] = useState(false);
@@ -142,10 +141,7 @@ export function MyTemplatesPage() {
     setDialogOpen(open);
   };
 
-  const openDelete = (template: Template) => {
-    setDeletingTemplate(template);
-    setDeleteDialogOpen(true);
-  };
+  const openDelete = (template: Template) => setDeletingTemplate(template);
 
   const handleSave = async () => {
     if (!formData.name.trim()) return;
@@ -180,7 +176,6 @@ export function MyTemplatesPage() {
     await client.api.templates[":id"].$delete({
       param: { id: deletingTemplate.id },
     });
-    setDeleteDialogOpen(false);
     setDeletingTemplate(null);
     await refreshTemplates();
   };
@@ -433,7 +428,7 @@ export function MyTemplatesPage() {
       </Dialog>
 
       {/* Archive Confirmation Dialog */}
-      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+      <Dialog open={!!deletingTemplate} onOpenChange={(o) => !o && setDeletingTemplate(null)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("briefings.archiveDialogTitle")}</DialogTitle>
@@ -442,7 +437,7 @@ export function MyTemplatesPage() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
+            <Button variant="outline" onClick={() => setDeletingTemplate(null)}>
               {t("common.cancel")}
             </Button>
             <Button variant="destructive" onClick={handleDelete}>

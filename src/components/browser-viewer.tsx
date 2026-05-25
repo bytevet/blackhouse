@@ -49,7 +49,7 @@ type PanelEntry = (ConsoleEntry & { _t: "console" }) | (EvalEntry & { _t: "eval"
 
 type ControlAction = "navigate" | "back" | "forward" | "reload" | "resize";
 
-// Viewport bounds for the dynamic-resize handshake (#41).
+// Viewport bounds for the dynamic-resize handshake with the server.
 // H.264 requires even W/H; we round to even before sending.
 const MIN_VIEWPORT_W = 320;
 const MIN_VIEWPORT_H = 240;
@@ -112,29 +112,25 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
   // open via GET /browser/state. null = menu closed / not yet fetched.
   const [menuSelectionText, setMenuSelectionText] = useState<string | null>(null);
 
-  const wsRef = useRef<WebSocket | null>(null);
-  const sseRef = useRef<EventSource | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  // The visible bounding box; ResizeObserver watches this for #41.
+  // ResizeObserver watches the wrapper's bounding box to drive viewport sync.
   const frameWrapperRef = useRef<HTMLDivElement>(null);
-  // Live VideoDecoder — created/replaced on each WS `config` text message.
-  const decoderRef = useRef<VideoDecoder | null>(null);
   const mouseMoveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // True between mousedown and mouseup. While true, mouseMove events skip the
-  // 50ms debounce — the agent-side selection highlight needs a continuous
-  // stream of moves to render correctly via screencast frames.
+  // True between mousedown and mouseup. While true, mouseMove skips its 50ms
+  // debounce — the agent-side selection highlight needs a continuous stream
+  // of moves to render correctly via screencast frames.
   const isDraggingRef = useRef(false);
-  // Active window-level mouseup listener installed during drag, so we still
-  // get the up event when the user releases outside the frame.
+  // Window-level mouseup installed during drag so we still get the up event
+  // when the user releases outside the frame.
   const windowMouseUpRef = useRef<((e: MouseEvent) => void) | null>(null);
-  // CDP buttons bitmask — OR of all currently-pressed buttons. Sent with
-  // every mouse input event so the agent-side dispatcher knows the
-  // mouseMove during a drag should extend a selection, not be a hover (#44).
+  // CDP `buttons` bitmask — OR of all currently-pressed buttons. Sent with
+  // every mouse input so the agent recognizes a mouseMove during a drag as a
+  // selection extension rather than a hover.
   const buttonsRef = useRef(0);
 
   // ─── WebSocket frame stream (H.264 via WebCodecs VideoDecoder) ──────────
-  // Wire protocol (see task #39/#40):
+  // Wire protocol:
   //   - First message (TEXT, JSON): { type: "config", codec, codedWidth, codedHeight }
   //   - Subsequent messages (BINARY): 9-byte header [type:u8, pts:u64 BE] +
   //     Annex-B H.264 payload. type=0 → keyframe, type=1 → delta.
@@ -236,7 +232,6 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
           if (canvas.height !== msg.codedHeight) canvas.height = msg.codedHeight;
         }
         decoder = next;
-        decoderRef.current = next;
         return;
       }
 
@@ -262,12 +257,9 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
       }
     };
 
-    wsRef.current = ws;
-
     return () => {
       alive = false;
       ws.close();
-      wsRef.current = null;
       if (decoder) {
         try {
           decoder.close();
@@ -276,12 +268,16 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
         }
         decoder = null;
       }
-      decoderRef.current = null;
-      // If the user unmounts mid-drag, drop the window-level mouseup
-      // listener so it doesn't leak (or fire against a stale closure).
+      // If the user unmounts mid-drag, drop the window-level mouseup listener
+      // so it doesn't leak (or fire against a stale closure). Also clear the
+      // pending mouseMove debounce timer for the same reason.
       if (windowMouseUpRef.current) {
         window.removeEventListener("mouseup", windowMouseUpRef.current);
         windowMouseUpRef.current = null;
+      }
+      if (mouseMoveTimerRef.current) {
+        clearTimeout(mouseMoveTimerRef.current);
+        mouseMoveTimerRef.current = null;
       }
       isDraggingRef.current = false;
       setHasFrame(false);
@@ -329,11 +325,8 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
         // ignore malformed entries
       }
     });
-    sseRef.current = es;
-
     return () => {
       es.close();
-      sseRef.current = null;
     };
   }, [sessionId, status]);
 
@@ -370,7 +363,7 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
     [sessionId],
   );
 
-  // ─── Dynamic viewport (#41): request server to re-encode at new size ────
+  // ─── Dynamic viewport: request server to re-encode at new size ─────────
   const sendResize = useCallback(
     async (width: number, height: number) => {
       try {
@@ -466,7 +459,7 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    // Right-click (button 2) is owned by the SPA ContextMenu (#47), not
+    // Right-click (button 2) is owned by the SPA ContextMenu, not
     // forwarded to the in-container CDP. If a page has its own custom
     // contextmenu handler (Google Maps, etc.) it won't fire — accepted
     // tradeoff; the SPA menu is what users expect.
@@ -753,7 +746,7 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
           `data-browser-frame` is qa's stable e2e selector. Initial intrinsic
           dims (1280x720) are overwritten by the WS config message; the
           ResizeObserver on this wrapper drives the dynamic-resize handshake
-          (#41) so the in-container browser viewport matches the panel. */}
+          so the in-container browser viewport matches the panel. */}
       <div
         ref={frameWrapperRef}
         className="relative flex-1 min-h-0 overflow-hidden bg-black"

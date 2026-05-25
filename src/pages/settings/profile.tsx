@@ -50,7 +50,7 @@ export function ProfilePage() {
     if (!result.success) {
       const errs: Record<string, string> = {};
       for (const issue of result.error.issues) {
-        errs[issue.path[0] as string] = issue.message;
+        errs[String(issue.path[0])] = issue.message;
       }
       setNameErrors(errs);
       return;
@@ -70,7 +70,7 @@ export function ProfilePage() {
     if (!result.success) {
       const errs: Record<string, string> = {};
       for (const issue of result.error.issues) {
-        errs[issue.path[0] as string] = issue.message;
+        errs[String(issue.path[0])] = issue.message;
       }
       setPasswordErrors(errs);
       return;

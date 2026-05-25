@@ -198,8 +198,8 @@ export function DashboardPage() {
 
   const totalPages = Math.ceil(sessionsTotal / sessionsPerPage);
 
-  const previewTemplate = templates.find((t) => t.id === formData.templateId);
-  const selectedTemplate = templates.find((t) => t.id === formData.templateId);
+  const selectedTemplate = templates.find((tpl) => tpl.id === formData.templateId);
+  const previewTemplate = selectedTemplate;
   const gitRequired = selectedTemplate?.gitRequired ?? false;
 
   if (loading) {
@@ -424,7 +424,7 @@ export function DashboardPage() {
         <Select
           value={filterResult || "__all__"}
           onValueChange={(v) => {
-            setFilterResult(v === "__all__" ? "" : v!);
+            setFilterResult(v == null || v === "__all__" ? "" : v);
             setSessionsPage(1);
           }}
           items={[
@@ -445,7 +445,7 @@ export function DashboardPage() {
         <Select
           value={filterAgent || "__all__"}
           onValueChange={(v) => {
-            setFilterAgent(v === "__all__" ? "" : v!);
+            setFilterAgent(v == null || v === "__all__" ? "" : v);
             setSessionsPage(1);
           }}
           items={[
@@ -469,7 +469,7 @@ export function DashboardPage() {
           <Select
             value={filterTemplate || "__all__"}
             onValueChange={(v) => {
-              setFilterTemplate(v === "__all__" ? "" : v!);
+              setFilterTemplate(v == null || v === "__all__" ? "" : v);
               setSessionsPage(1);
             }}
             items={[

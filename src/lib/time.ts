@@ -5,19 +5,38 @@ import i18n from "@/i18n";
  * zh-CN (and any future locale) gets correct phrasing for free ("5分钟前",
  * "il y a 3 heures", etc.) without per-locale strings in our JSON.
  *
- * Falls back gracefully on environments without `Intl.RelativeTimeFormat`
- * (none of our target browsers actually lack it, but defensive cheap).
+ * Falls back gracefully on environments without `Intl.RelativeTimeFormat`.
  */
+
+// Formatter construction does a locale-data lookup; cache per language so a
+// dashboard rendering N worker cards doesn't construct N formatters.
+const rtfCache = new Map<string, Intl.RelativeTimeFormat>();
+if (typeof i18n.on === "function") {
+  i18n.on("languageChanged", () => rtfCache.clear());
+}
+
+function getFormatter(lang: string): Intl.RelativeTimeFormat | null {
+  if (typeof Intl === "undefined" || typeof Intl.RelativeTimeFormat === "undefined") {
+    return null;
+  }
+  let rtf = rtfCache.get(lang);
+  if (!rtf) {
+    rtf = new Intl.RelativeTimeFormat(lang, { numeric: "auto" });
+    rtfCache.set(lang, rtf);
+  }
+  return rtf;
+}
+
 export function timeAgo(date: Date | string): string {
   const now = Date.now();
   const then = new Date(date).getTime();
   const diffSec = Math.floor((now - then) / 1000);
 
   const lang = i18n.resolvedLanguage || i18n.language || "en";
-  if (typeof Intl === "undefined" || typeof Intl.RelativeTimeFormat === "undefined") {
+  const rtf = getFormatter(lang);
+  if (!rtf) {
     return fallback(diffSec);
   }
-  const rtf = new Intl.RelativeTimeFormat(lang, { numeric: "auto" });
 
   // Pick the largest unit that yields an integer ≥ 1; rtf wants a negative
   // number for "in the past", positive for the future.

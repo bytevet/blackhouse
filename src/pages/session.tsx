@@ -34,7 +34,7 @@ import { TerminalPanel } from "@/components/terminal";
 import { IdeViewer } from "@/components/ide-viewer";
 import { ResultViewer } from "@/components/result-viewer";
 import { BrowserViewer } from "@/components/browser-viewer";
-import type { CodingSession, SessionStatus } from "@/db/schema";
+import type { CodingSession } from "@/db/schema";
 import { sessionStatusConfig } from "@/lib/session-status";
 
 export function SessionPage() {
@@ -227,17 +227,14 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
         <Badge variant="outline" className="text-xs">
           {session.preset}
         </Badge>
-        <Badge
-          variant="outline"
-          className={sessionStatusConfig[session.status as SessionStatus]?.className ?? ""}
-        >
+        <Badge variant="outline" className={sessionStatusConfig[session.status]?.className ?? ""}>
           {actionLoading ? (
             <span className="flex items-center gap-1">
               <Loader2 className="size-3 animate-spin" />
               {session.status === "running" ? t("worker.sendingOffDuty") : t("worker.waking")}
             </span>
           ) : (
-            t(sessionStatusConfig[session.status as SessionStatus]?.labelKey ?? "status.pending")
+            t(sessionStatusConfig[session.status]?.labelKey ?? "status.pending")
           )}
         </Badge>
         <span className="hidden text-xs text-muted-foreground sm:inline">{session.gitRepoUrl}</span>
@@ -374,7 +371,7 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
               </TabsList>
 
               <TabsContent value="ide" className="m-0 flex-1 overflow-hidden">
-                <IdeViewer sessionId={session.id} status={session.status as SessionStatus} />
+                <IdeViewer sessionId={session.id} status={session.status} />
               </TabsContent>
 
               <TabsContent value="result" className="m-0 flex-1 overflow-hidden">

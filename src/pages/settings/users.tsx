@@ -71,7 +71,6 @@ export function UsersPage() {
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<UserRow | null>(null);
   const [deletingUser, setDeletingUser] = useState<UserRow | null>(null);
   const [saving, setSaving] = useState(false);
@@ -138,7 +137,7 @@ export function UsersPage() {
     const result = createUserSchema.safeParse(createForm);
     if (!result.success) {
       const errs: Record<string, string> = {};
-      for (const issue of result.error.issues) errs[issue.path[0] as string] = issue.message;
+      for (const issue of result.error.issues) errs[String(issue.path[0])] = issue.message;
       setFormErrors(errs);
       return;
     }
@@ -166,7 +165,7 @@ export function UsersPage() {
     const result = editUserSchema.safeParse(editForm);
     if (!result.success) {
       const errs: Record<string, string> = {};
-      for (const issue of result.error.issues) errs[issue.path[0] as string] = issue.message;
+      for (const issue of result.error.issues) errs[String(issue.path[0])] = issue.message;
       setFormErrors(errs);
       return;
     }
@@ -192,7 +191,6 @@ export function UsersPage() {
   const handleDelete = async () => {
     if (!deletingUser) return;
     await client.api.settings.users[":id"].$delete({ param: { id: deletingUser.id } });
-    setDeleteDialogOpen(false);
     setDeletingUser(null);
     await refresh();
   };
@@ -267,14 +265,7 @@ export function UsersPage() {
                           <Edit className="size-3" />
                         </Button>
                         {!isSelf && (
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            onClick={() => {
-                              setDeletingUser(u);
-                              setDeleteDialogOpen(true);
-                            }}
-                          >
+                          <Button variant="ghost" size="icon-sm" onClick={() => setDeletingUser(u)}>
                             <Trash2 className="size-3" />
                           </Button>
                         )}
@@ -446,7 +437,7 @@ export function UsersPage() {
       </Dialog>
 
       {/* Off-board Confirmation Dialog */}
-      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+      <Dialog open={!!deletingUser} onOpenChange={(o) => !o && setDeletingUser(null)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("settings.team.offboardUser")}</DialogTitle>
@@ -455,7 +446,7 @@ export function UsersPage() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
+            <Button variant="outline" onClick={() => setDeletingUser(null)}>
               {t("common.cancel")}
             </Button>
             <Button variant="destructive" onClick={handleDelete}>
