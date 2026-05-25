@@ -5,8 +5,13 @@ import {
   INPUT_OP,
   encodeRequest,
   decodeResponse,
+  decodeConfig,
+  decodeConsoleEvent,
+  decodeNavigateEvent,
+  decodeVideoFrame,
   REQUEST_OP,
   RESPONSE_OP,
+  PUSH_OP,
   CONTROL_ACTION,
   type InputMessage,
 } from "@/lib/browser-input-codec";
@@ -164,14 +169,14 @@ describe("browser-input-codec", () => {
 
   // ─── #61 request/response codec ─────────────────────────────────────────
 
-  describe("encodeRequest CONTROL (0x10)", () => {
+  describe("encodeRequest CONTROL (0x10) — fire-and-forget, reqId=0", () => {
     it("encodes navigate with url, width=0, height=0", () => {
-      const buf = encodeRequest(REQUEST_OP.control, 42, {
+      const buf = encodeRequest(REQUEST_OP.control, 0, {
         action: "navigate",
         url: "https://x.y",
       });
-      // op=0x10, reqId=42 (u32 BE), action=1 (navigate), urlLen=11 (u16 BE),
-      // url="https://x.y", width=0 (u16), height=0 (u16) → 23 bytes total.
+      // op=0x10, reqId=0, action=3 (navigate, 0-indexed), urlLen=11 (u16 BE),
+      // url="https://x.y", width=0, height=0 → 23 bytes total.
       const url = new TextEncoder().encode("https://x.y");
       expect(new Uint8Array(buf)).toEqual(
         new Uint8Array([
@@ -179,8 +184,8 @@ describe("browser-input-codec", () => {
           0,
           0,
           0,
-          42, // reqId
-          1, // action: navigate
+          0, // reqId=0 (fire-and-forget)
+          3, // action: navigate (be's CONTROL_ACTION index)
           0,
           url.length, // urlLen=11
           ...url,
@@ -193,7 +198,7 @@ describe("browser-input-codec", () => {
     });
 
     it("encodes resize with width/height, empty url", () => {
-      const buf = encodeRequest(REQUEST_OP.control, 99, {
+      const buf = encodeRequest(REQUEST_OP.control, 0, {
         action: "resize",
         width: 1280,
         height: 720,
@@ -204,8 +209,8 @@ describe("browser-input-codec", () => {
           0,
           0,
           0,
-          99, // reqId
-          5, // action: resize
+          0, // reqId
+          4, // action: resize
           0,
           0, // urlLen=0
           0x05,
@@ -217,15 +222,15 @@ describe("browser-input-codec", () => {
     });
 
     it("encodes back with no url and no dims (all zero filler)", () => {
-      const buf = encodeRequest(REQUEST_OP.control, 7, { action: "back" });
+      const buf = encodeRequest(REQUEST_OP.control, 0, { action: "back" });
       expect(new Uint8Array(buf)).toEqual(
         new Uint8Array([
           0x10,
           0,
           0,
           0,
-          7, // reqId
-          2, // action: back
+          0, // reqId
+          0, // action: back (index 0)
           0,
           0, // urlLen=0
           0,
@@ -236,11 +241,11 @@ describe("browser-input-codec", () => {
       );
     });
 
-    it("encodes high reqId as u32 BE (not u16)", () => {
-      const buf = encodeRequest(REQUEST_OP.control, 0x01020304, { action: "reload" });
-      const bytes = new Uint8Array(buf);
-      expect(bytes.slice(0, 5)).toEqual(new Uint8Array([0x10, 0x01, 0x02, 0x03, 0x04]));
-      expect(bytes[5]).toBe(4); // reload
+    it("forward and reload encode to the documented indices", () => {
+      expect(new Uint8Array(encodeRequest(REQUEST_OP.control, 0, { action: "forward" }))[5]).toBe(
+        1,
+      );
+      expect(new Uint8Array(encodeRequest(REQUEST_OP.control, 0, { action: "reload" }))[5]).toBe(2);
     });
   });
 
@@ -277,52 +282,50 @@ describe("browser-input-codec", () => {
     });
   });
 
-  describe("encodeRequest STATE (0x12)", () => {
-    it("encodes resetContextMenu=true as flags bit0", () => {
-      const buf = encodeRequest(REQUEST_OP.state, 1, { resetContextMenu: true });
+  describe("encodeRequest STATE (0x12) — include-bit flags", () => {
+    it("encodes all three include-bits set as flags=0b111", () => {
+      const buf = encodeRequest(REQUEST_OP.state, 1, {
+        includeUrl: true,
+        includeTitle: true,
+        includeLoading: true,
+      });
+      expect(new Uint8Array(buf)).toEqual(new Uint8Array([0x12, 0, 0, 0, 1, 0b00000111]));
+    });
+
+    it("encodes includeUrl-only as flags=0b001", () => {
+      const buf = encodeRequest(REQUEST_OP.state, 1, { includeUrl: true });
       expect(new Uint8Array(buf)).toEqual(new Uint8Array([0x12, 0, 0, 0, 1, 0b00000001]));
     });
 
-    it("encodes resetContextMenu=false as flags=0", () => {
-      const buf = encodeRequest(REQUEST_OP.state, 1, { resetContextMenu: false });
+    it("encodes includeTitle-only as flags=0b010", () => {
+      const buf = encodeRequest(REQUEST_OP.state, 1, { includeTitle: true });
+      expect(new Uint8Array(buf)).toEqual(new Uint8Array([0x12, 0, 0, 0, 1, 0b00000010]));
+    });
+
+    it("encodes includeLoading-only as flags=0b100", () => {
+      const buf = encodeRequest(REQUEST_OP.state, 1, { includeLoading: true });
+      expect(new Uint8Array(buf)).toEqual(new Uint8Array([0x12, 0, 0, 0, 1, 0b00000100]));
+    });
+
+    it("encodes empty body as flags=0", () => {
+      const buf = encodeRequest(REQUEST_OP.state, 1, {});
       expect(new Uint8Array(buf)).toEqual(new Uint8Array([0x12, 0, 0, 0, 1, 0]));
     });
   });
 
   describe("CONTROL_ACTION constants exposed for be parity", () => {
-    it("matches be's CONTROL_ACTION = ['', 'navigate', 'back', 'forward', 'reload', 'resize']", () => {
+    it("matches be's 0-indexed CONTROL_ACTION = ['back', 'forward', 'reload', 'navigate', 'resize']", () => {
       expect(CONTROL_ACTION).toEqual({
-        navigate: 1,
-        back: 2,
-        forward: 3,
-        reload: 4,
-        resize: 5,
+        back: 0,
+        forward: 1,
+        reload: 2,
+        navigate: 3,
+        resize: 4,
       });
     });
   });
 
-  describe("decodeResponse 0x82/0x83 (with ok byte)", () => {
-    it("decodes a controlAck with ok=true and JSON payload", () => {
-      // Build a frame matching be's encodeResponse contract:
-      // [op=0x82, reqId u32 BE = 42, ok=1, payloadLen u32 BE, payload]
-      const json = '{"url":"https://x.y"}';
-      const payload = new TextEncoder().encode(json);
-      const buf = new Uint8Array(10 + payload.length);
-      buf[0] = 0x82;
-      buf[4] = 42; // reqId low byte
-      buf[5] = 1; // ok=true
-      buf[9] = payload.length; // payloadLen low byte
-      buf.set(payload, 10);
-
-      const decoded = decodeResponse(buf);
-      expect(decoded).toEqual({
-        opcode: RESPONSE_OP.controlAck,
-        reqId: 42,
-        ok: true,
-        payload: { url: "https://x.y" },
-      });
-    });
-
+  describe("decodeResponse 0x83 evalResult (with ok byte)", () => {
     it("decodes an evalResult with ok=false and error payload", () => {
       const json = '{"ok":false,"error":{"description":"boom"}}';
       const payload = new TextEncoder().encode(json);
@@ -347,7 +350,7 @@ describe("browser-input-codec", () => {
     it("reads u32 BE reqId across all four bytes", () => {
       const payload = new TextEncoder().encode("{}");
       const buf = new Uint8Array(10 + payload.length);
-      buf[0] = 0x82;
+      buf[0] = 0x83;
       buf[1] = 0x01;
       buf[2] = 0x02;
       buf[3] = 0x03;
@@ -357,12 +360,26 @@ describe("browser-input-codec", () => {
       buf.set(payload, 10);
       expect(decodeResponse(buf)?.reqId).toBe(0x01020304);
     });
+
+    it("returns null for the dropped 0x82 controlAck opcode", () => {
+      // 0x82 is no longer a recognised response opcode (#61 cut2). The
+      // server may still emit briefly during the BE-cut2 transition; the
+      // decoder treats them as unknown → silent drop at the call site.
+      const payload = new TextEncoder().encode('{"ok":true}');
+      const buf = new Uint8Array(10 + payload.length);
+      buf[0] = 0x82;
+      buf[4] = 1;
+      buf[5] = 1;
+      buf[9] = payload.length;
+      buf.set(payload, 10);
+      expect(decodeResponse(buf)).toBeNull();
+    });
   });
 
   describe("decodeResponse 0x84 (no ok byte)", () => {
     it("decodes a stateSnapshot — ok lives inside the JSON, not before payloadLen", () => {
       // [op=0x84, reqId u32 BE = 1, payloadLen u32 BE, payload]   (no ok byte)
-      const json = '{"ok":true,"url":"https://x.y","selectionText":"hi"}';
+      const json = '{"ok":true,"url":"https://x.y","title":"hi","loading":false}';
       const payload = new TextEncoder().encode(json);
       const buf = new Uint8Array(9 + payload.length);
       buf[0] = 0x84;
@@ -374,7 +391,7 @@ describe("browser-input-codec", () => {
       expect(decoded).toEqual({
         opcode: RESPONSE_OP.stateSnapshot,
         reqId: 1,
-        payload: { ok: true, url: "https://x.y", selectionText: "hi" },
+        payload: { ok: true, url: "https://x.y", title: "hi", loading: false },
       });
       // Discriminated union: no `ok` field on the 0x84 variant.
       expect(decoded && "ok" in decoded).toBe(false);
@@ -403,16 +420,16 @@ describe("browser-input-codec", () => {
 
   describe("decodeResponse returns null for malformed buffers", () => {
     it("rejects buffer shorter than 5 bytes (no reqId yet)", () => {
-      expect(decodeResponse(new Uint8Array([0x82, 0, 0, 0]))).toBeNull();
+      expect(decodeResponse(new Uint8Array([0x83, 0, 0, 0]))).toBeNull();
     });
 
     it("rejects unknown opcode", () => {
       expect(decodeResponse(new Uint8Array([0x99, 0, 0, 0, 0, 0, 0, 0, 0, 0]))).toBeNull();
     });
 
-    it("rejects truncated 0x82 (header says payloadLen exceeds buffer)", () => {
-      // op=0x82, reqId=1, ok=1, payloadLen=100 but no payload bytes
-      const buf = new Uint8Array([0x82, 0, 0, 0, 1, 1, 0, 0, 0, 100]);
+    it("rejects truncated 0x83 (header says payloadLen exceeds buffer)", () => {
+      // op=0x83, reqId=1, ok=1, payloadLen=100 but no payload bytes
+      const buf = new Uint8Array([0x83, 0, 0, 0, 1, 1, 0, 0, 0, 100]);
       expect(decodeResponse(buf)).toBeNull();
     });
 
@@ -420,7 +437,7 @@ describe("browser-input-codec", () => {
       // Valid header, invalid JSON body
       const bad = new TextEncoder().encode("{not json");
       const buf = new Uint8Array(10 + bad.length);
-      buf[0] = 0x82;
+      buf[0] = 0x83;
       buf[5] = 1;
       buf[9] = bad.length;
       buf.set(bad, 10);
@@ -428,14 +445,163 @@ describe("browser-input-codec", () => {
     });
   });
 
-  describe("REQUEST_OP / RESPONSE_OP constants", () => {
+  describe("REQUEST_OP / RESPONSE_OP / PUSH_OP constants", () => {
     it("matches the documented op table", () => {
       expect(REQUEST_OP).toEqual({ control: 0x10, eval: 0x11, state: 0x12 });
-      expect(RESPONSE_OP).toEqual({
-        controlAck: 0x82,
-        evalResult: 0x83,
-        stateSnapshot: 0x84,
+      expect(RESPONSE_OP).toEqual({ evalResult: 0x83, stateSnapshot: 0x84 });
+      expect(PUSH_OP).toEqual({
+        config: 0x80,
+        videoFrame: 0x81,
+        consoleEvent: 0x85,
+        navigateEvent: 0x86,
       });
+    });
+  });
+
+  // ─── #61 push-frame decoders (0x80/0x81/0x85/0x86) ──────────────────────
+
+  describe("decodeConfig (0x80)", () => {
+    it("decodes the screencast config frame", () => {
+      // [op=0x80, reqId=0 (u32), codedWidth=1280 (u16), codedHeight=720 (u16),
+      //  codecLen=10 (u8), codec="avc1.42E01F"]
+      const codec = new TextEncoder().encode("avc1.42E01F");
+      const buf = new Uint8Array(10 + codec.length);
+      buf[0] = 0x80;
+      // reqId 0
+      buf[5] = (1280 >>> 8) & 0xff;
+      buf[6] = 1280 & 0xff;
+      buf[7] = (720 >>> 8) & 0xff;
+      buf[8] = 720 & 0xff;
+      buf[9] = codec.length;
+      buf.set(codec, 10);
+
+      expect(decodeConfig(buf)).toEqual({
+        codedWidth: 1280,
+        codedHeight: 720,
+        codec: "avc1.42E01F",
+      });
+    });
+
+    it("returns null for unknown opcode", () => {
+      expect(decodeConfig(new Uint8Array([0x99, 0, 0, 0, 0, 0, 0, 0, 0, 0]))).toBeNull();
+    });
+
+    it("returns null when codecLen exceeds buffer", () => {
+      const buf = new Uint8Array(10);
+      buf[0] = 0x80;
+      buf[9] = 99; // codecLen
+      expect(decodeConfig(buf)).toBeNull();
+    });
+  });
+
+  describe("decodeVideoFrame (0x81)", () => {
+    it("decodes the 14-byte header + NALU bytes", () => {
+      // [op=0x81, reqId=0, type=0 (key), pts=0x0102030405060708 (u64), nalu...]
+      const nalu = new Uint8Array([0x00, 0x00, 0x00, 0x01, 0x65, 0xaa, 0xbb]);
+      const buf = new Uint8Array(14 + nalu.length);
+      buf[0] = 0x81;
+      // pts BE
+      buf[6] = 0x01;
+      buf[7] = 0x02;
+      buf[8] = 0x03;
+      buf[9] = 0x04;
+      buf[10] = 0x05;
+      buf[11] = 0x06;
+      buf[12] = 0x07;
+      buf[13] = 0x08;
+      buf.set(nalu, 14);
+
+      const decoded = decodeVideoFrame(buf);
+      expect(decoded).not.toBeNull();
+      expect(decoded?.isKey).toBe(true);
+      expect(decoded?.pts).toBe(0x0102030405060708n);
+      expect(Array.from(decoded?.nalu ?? [])).toEqual(Array.from(nalu));
+    });
+
+    it("decodes a delta frame", () => {
+      const buf = new Uint8Array(14);
+      buf[0] = 0x81;
+      buf[5] = 1; // type=1 (delta)
+      expect(decodeVideoFrame(buf)?.isKey).toBe(false);
+    });
+
+    it("returns null for truncated header", () => {
+      expect(decodeVideoFrame(new Uint8Array([0x81, 0, 0, 0, 0, 0]))).toBeNull();
+    });
+  });
+
+  describe("decodeConsoleEvent (0x85)", () => {
+    it("decodes a console event with all fields populated", () => {
+      const kind = new TextEncoder().encode("warn");
+      const text = new TextEncoder().encode("uh oh");
+      const url = new TextEncoder().encode("https://x.y");
+      // header: op(1) + reqId(4) + kindLen(1) + kind + textLen(4) + text +
+      //         urlLen(2) + url + line(4) + ts(8)
+      const buf = new Uint8Array(
+        1 + 4 + 1 + kind.length + 4 + text.length + 2 + url.length + 4 + 8,
+      );
+      const dv = new DataView(buf.buffer);
+      let off = 0;
+      dv.setUint8(off, 0x85);
+      off += 1;
+      dv.setUint32(off, 0, false);
+      off += 4; // reqId
+      dv.setUint8(off, kind.length);
+      off += 1;
+      buf.set(kind, off);
+      off += kind.length;
+      dv.setUint32(off, text.length, false);
+      off += 4;
+      buf.set(text, off);
+      off += text.length;
+      dv.setUint16(off, url.length, false);
+      off += 2;
+      buf.set(url, off);
+      off += url.length;
+      dv.setUint32(off, 42, false);
+      off += 4; // line
+      dv.setFloat64(off, 1_700_000_000_000, false); // ts
+
+      expect(decodeConsoleEvent(buf)).toEqual({
+        kind: "warn",
+        text: "uh oh",
+        url: "https://x.y",
+        line: 42,
+        ts: 1_700_000_000_000,
+      });
+    });
+
+    it("returns null for truncated buffer", () => {
+      expect(decodeConsoleEvent(new Uint8Array([0x85, 0, 0, 0, 0, 1]))).toBeNull();
+    });
+  });
+
+  describe("decodeNavigateEvent (0x86)", () => {
+    it("decodes a navigate event", () => {
+      const url = new TextEncoder().encode("https://example.com/path");
+      const buf = new Uint8Array(1 + 4 + 2 + url.length + 8);
+      const dv = new DataView(buf.buffer);
+      dv.setUint8(0, 0x86);
+      dv.setUint32(1, 0, false); // reqId
+      dv.setUint16(5, url.length, false);
+      buf.set(url, 7);
+      dv.setFloat64(7 + url.length, 1_700_000_000_000, false);
+
+      expect(decodeNavigateEvent(buf)).toEqual({
+        url: "https://example.com/path",
+        ts: 1_700_000_000_000,
+      });
+    });
+
+    it("returns null for unknown opcode", () => {
+      expect(decodeNavigateEvent(new Uint8Array(15))).toBeNull();
+    });
+
+    it("returns null when urlLen exceeds buffer", () => {
+      const buf = new Uint8Array(15);
+      buf[0] = 0x86;
+      buf[5] = 0x10; // urlLen high byte = 4096, way past buffer
+      expect(decodeNavigateEvent(buf)).toBeNull();
     });
   });
 });

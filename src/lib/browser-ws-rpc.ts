@@ -1,11 +1,16 @@
 /**
  * Request/response RPC over the live browser screencast WebSocket.
  *
- * Replaces the REST POST + JSON-response round trip for `control` / `eval`
- * / `state` (#61). Each request gets a u32 `reqId`; the server echoes it
- * back in its 0x82/0x83/0x84 response so we can correlate via a per-WS
+ * Replaces the REST POST + JSON-response round trip for `eval` / `state`
+ * (#61). Each request gets a u32 `reqId`; the server echoes it back in
+ * its 0x83/0x84 response so we can correlate via a per-WS
  * `Map<reqId, Pending>`. WS close (unmount, reconnect) rejects all
  * outstanding requests with `ws_closed`.
+ *
+ * Control (0x10) is NOT exposed here — control is fire-and-forget, sent
+ * directly via `ws.send(encodeRequest(REQUEST_OP.control, 0, body))` at
+ * the call site. Saves a pending-map entry + timeout + decoder branch
+ * per call; matters because resize fires constantly during window-drag.
  *
  * One factory per WebSocket instance — `pending` and `nextReqId` are
  * scoped to that instance so a reconnect doesn't inherit stale state.
@@ -16,7 +21,6 @@ import {
   RESPONSE_OP,
   decodeResponse,
   encodeRequest,
-  type ControlBody,
   type EvalBody,
   type StateBody,
 } from "./browser-input-codec";
@@ -26,7 +30,7 @@ interface Pending {
   reject: (err: Error) => void;
   timer: ReturnType<typeof setTimeout>;
   /**
-   * Expected opcode in the response. Used to reject if the server returns
+   * Expected opcode in the response. Used to reject if the server echoes
    * the wrong opcode for this reqId — shouldn't happen, but be paranoid.
    */
   expectedOpcode: (typeof RESPONSE_OP)[keyof typeof RESPONSE_OP];
@@ -41,17 +45,16 @@ export interface WsRpc {
    * Caller provides `T` as the expected JSON payload shape — be's
    * `run*` dispatchers define the contract.
    */
-  request<T>(opcode: typeof REQUEST_OP.control, body: ControlBody, timeoutMs?: number): Promise<T>;
   request<T>(opcode: typeof REQUEST_OP.eval, body: EvalBody, timeoutMs?: number): Promise<T>;
   request<T>(opcode: typeof REQUEST_OP.state, body: StateBody, timeoutMs?: number): Promise<T>;
 
   /**
-   * Hand off an incoming binary frame. Returns true if the frame was a
-   * response (0x82/0x83/0x84) and was dispatched to a pending request;
-   * false if it's not a response frame and caller should keep handling
-   * it (likely a video chunk for the decoder).
+   * Hand off an incoming response frame (opcode 0x83 or 0x84). Decodes,
+   * looks up the pending entry by reqId, and resolves/rejects. Caller
+   * is responsible for opcode-dispatching from the WS `onmessage`
+   * handler — this method assumes `buf` starts with a response opcode.
    */
-  handleBinary(buf: ArrayBuffer): boolean;
+  handleResponse(buf: ArrayBuffer): void;
 
   /**
    * Reject all outstanding requests with `ws_closed` and clear timers.
@@ -65,7 +68,8 @@ const DEFAULT_TIMEOUT_MS = 5000;
 
 export function createWsRpc(ws: WebSocket): WsRpc {
   const pending = new Map<number, Pending>();
-  // Skip 0 so a `null`/uninitialized reqId can't accidentally match.
+  // Skip 0 so a `null`/uninitialized reqId can't accidentally match
+  // (and to leave 0 reserved for fire-and-forget frames).
   let nextReqId = 1;
   let disposed = false;
 
@@ -92,8 +96,8 @@ export function createWsRpc(ws: WebSocket): WsRpc {
   }
 
   function request<T>(
-    opcode: (typeof REQUEST_OP)[keyof typeof REQUEST_OP],
-    body: ControlBody | EvalBody | StateBody,
+    opcode: typeof REQUEST_OP.eval | typeof REQUEST_OP.state,
+    body: EvalBody | StateBody,
     timeoutMs: number = DEFAULT_TIMEOUT_MS,
   ): Promise<T> {
     if (disposed) return Promise.reject(new Error("ws_rpc_disposed"));
@@ -102,11 +106,7 @@ export function createWsRpc(ws: WebSocket): WsRpc {
     }
     const reqId = allocReqId();
     const expectedOpcode =
-      opcode === REQUEST_OP.control
-        ? RESPONSE_OP.controlAck
-        : opcode === REQUEST_OP.eval
-          ? RESPONSE_OP.evalResult
-          : RESPONSE_OP.stateSnapshot;
+      opcode === REQUEST_OP.eval ? RESPONSE_OP.evalResult : RESPONSE_OP.stateSnapshot;
 
     return new Promise<T>((resolveCb, rejectCb) => {
       const timer = setTimeout(() => {
@@ -119,16 +119,10 @@ export function createWsRpc(ws: WebSocket): WsRpc {
         expectedOpcode,
       });
       try {
-        // Type narrowing across overloads — opcode + body align by
-        // construction (caller's overload selection).
-        let frame: ArrayBuffer;
-        if (opcode === REQUEST_OP.control) {
-          frame = encodeRequest(opcode, reqId, body as ControlBody);
-        } else if (opcode === REQUEST_OP.eval) {
-          frame = encodeRequest(opcode, reqId, body as EvalBody);
-        } else {
-          frame = encodeRequest(opcode, reqId, body as StateBody);
-        }
+        const frame =
+          opcode === REQUEST_OP.eval
+            ? encodeRequest(opcode, reqId, body as EvalBody)
+            : encodeRequest(opcode, reqId, body as StateBody);
         ws.send(frame);
       } catch (err) {
         reject(reqId, err instanceof Error ? err : new Error(String(err)));
@@ -136,20 +130,11 @@ export function createWsRpc(ws: WebSocket): WsRpc {
     });
   }
 
-  function handleBinary(buf: ArrayBuffer): boolean {
-    if (buf.byteLength < 1) return false;
-    const firstByte = new DataView(buf).getUint8(0);
-    // Response opcodes are 0x82, 0x83, 0x84.
-    if (firstByte < 0x82 || firstByte > 0x84) return false;
-
+  function handleResponse(buf: ArrayBuffer): void {
     const decoded = decodeResponse(buf);
-    if (!decoded) {
-      // Bytes claimed to be a response opcode but framing is malformed.
-      // Swallow — we still report `true` to keep video-decode out.
-      return true;
-    }
+    if (!decoded) return; // malformed framing — silent drop
     const p = pending.get(decoded.reqId);
-    if (!p) return true; // Unknown / late reqId — silently drop.
+    if (!p) return; // unknown / late reqId
 
     if (decoded.opcode !== p.expectedOpcode) {
       reject(
@@ -159,10 +144,9 @@ export function createWsRpc(ws: WebSocket): WsRpc {
             `got=0x${decoded.opcode.toString(16)}`,
         ),
       );
-      return true;
+      return;
     }
     resolve(decoded.reqId, decoded.payload);
-    return true;
   }
 
   function dispose(reason: string = "ws_closed"): void {
@@ -174,5 +158,5 @@ export function createWsRpc(ws: WebSocket): WsRpc {
     pending.clear();
   }
 
-  return { request, handleBinary, dispose };
+  return { request, handleResponse, dispose };
 }

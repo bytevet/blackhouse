@@ -3,9 +3,13 @@ import { createWsRpc } from "@/lib/browser-ws-rpc";
 import { REQUEST_OP, RESPONSE_OP } from "@/lib/browser-input-codec";
 
 /**
- * Behavioural tests for the per-WS RPC helper. We stub out the WebSocket
- * with a tiny shim that captures the bytes `request()` sends, then feed
- * synthetic responses back through `handleBinary` to check correlation.
+ * Behavioural tests for the per-WS RPC helper. We stub the WebSocket with
+ * a tiny shim that captures the bytes `request()` sends, then feed
+ * synthetic responses back through `handleResponse` to check correlation.
+ *
+ * `control` (0x10) is intentionally NOT exposed on the rpc helper —
+ * control is fire-and-forget post-#61-cut2. Tests here exercise eval
+ * (0x83 response) and state (0x84 response, no ok byte).
  */
 
 interface SentFrame {
@@ -33,11 +37,11 @@ function makeFakeWs(initialState = OPEN): FakeWs {
   };
 }
 
-/** Build a synthetic 0x82 controlAck frame for a given reqId + JSON. */
-function buildControlAck(reqId: number, ok: boolean, json: string): ArrayBuffer {
+/** Build a synthetic 0x83 evalResult frame for a given reqId + JSON. */
+function buildEvalResult(reqId: number, ok: boolean, json: string): ArrayBuffer {
   const payload = new TextEncoder().encode(json);
   const buf = new Uint8Array(10 + payload.length);
-  buf[0] = 0x82;
+  buf[0] = 0x83;
   buf[1] = (reqId >>> 24) & 0xff;
   buf[2] = (reqId >>> 16) & 0xff;
   buf[3] = (reqId >>> 8) & 0xff;
@@ -51,25 +55,53 @@ function buildControlAck(reqId: number, ok: boolean, json: string): ArrayBuffer 
   return buf.buffer;
 }
 
+/** Build a synthetic 0x84 stateSnapshot frame — no ok byte, JSON carries it. */
+function buildStateSnapshot(reqId: number, json: string): ArrayBuffer {
+  const payload = new TextEncoder().encode(json);
+  const buf = new Uint8Array(9 + payload.length);
+  buf[0] = 0x84;
+  buf[1] = (reqId >>> 24) & 0xff;
+  buf[2] = (reqId >>> 16) & 0xff;
+  buf[3] = (reqId >>> 8) & 0xff;
+  buf[4] = reqId & 0xff;
+  buf[5] = (payload.length >>> 24) & 0xff;
+  buf[6] = (payload.length >>> 16) & 0xff;
+  buf[7] = (payload.length >>> 8) & 0xff;
+  buf[8] = payload.length & 0xff;
+  buf.set(payload, 9);
+  return buf.buffer;
+}
+
 afterEach(() => {
   vi.useRealTimers();
 });
 
 describe("createWsRpc", () => {
-  it("resolves with decoded payload when a matching response arrives", async () => {
+  it("resolves an eval request with the decoded payload", async () => {
     const ws = makeFakeWs();
-    // The rpc tests typecheck the WebSocket shape it needs; cast for the stub.
     const rpc = createWsRpc(ws as unknown as WebSocket);
 
-    const promise = rpc.request(REQUEST_OP.control, { action: "navigate", url: "https://x.y" });
+    const promise = rpc.request(REQUEST_OP.eval, { expression: "1 + 2" });
 
-    // First request gets reqId=1 (rpc skips 0).
+    // First request gets reqId=1 (rpc skips 0 to leave it for fire-and-forget).
     expect(ws.sent).toHaveLength(1);
-    expect(ws.sent[0].bytes[0]).toBe(0x10);
-    // reqId 1 in u32 BE = [0,0,0,1]
+    expect(ws.sent[0].bytes[0]).toBe(0x11);
     expect(Array.from(ws.sent[0].bytes.slice(1, 5))).toEqual([0, 0, 0, 1]);
 
-    rpc.handleBinary(buildControlAck(1, true, '{"ok":true,"url":"https://x.y"}'));
+    rpc.handleResponse(buildEvalResult(1, true, '{"ok":true,"result":"3"}'));
+
+    await expect(promise).resolves.toEqual({ ok: true, result: "3" });
+  });
+
+  it("resolves a state request and the response carries no ok byte", async () => {
+    const ws = makeFakeWs();
+    const rpc = createWsRpc(ws as unknown as WebSocket);
+
+    const promise = rpc.request(REQUEST_OP.state, { includeUrl: true });
+    expect(ws.sent[0].bytes[0]).toBe(0x12);
+    expect(ws.sent[0].bytes[5]).toBe(0b00000001); // includeUrl bit only
+
+    rpc.handleResponse(buildStateSnapshot(1, '{"ok":true,"url":"https://x.y"}'));
 
     await expect(promise).resolves.toEqual({ ok: true, url: "https://x.y" });
   });
@@ -78,22 +110,22 @@ describe("createWsRpc", () => {
     const ws = makeFakeWs();
     const rpc = createWsRpc(ws as unknown as WebSocket);
 
-    const p1 = rpc.request(REQUEST_OP.control, { action: "back" });
-    const p2 = rpc.request(REQUEST_OP.control, { action: "forward" });
+    const p1 = rpc.request(REQUEST_OP.eval, { expression: "a" });
+    const p2 = rpc.request(REQUEST_OP.eval, { expression: "b" });
 
-    // Respond to p2 first — its reqId is 2, not the order it was sent.
-    rpc.handleBinary(buildControlAck(2, true, '{"ok":true,"action":"forward"}'));
-    rpc.handleBinary(buildControlAck(1, true, '{"ok":true,"action":"back"}'));
+    // Respond to p2 first — its reqId is 2.
+    rpc.handleResponse(buildEvalResult(2, true, '{"ok":true,"result":"B"}'));
+    rpc.handleResponse(buildEvalResult(1, true, '{"ok":true,"result":"A"}'));
 
-    await expect(p1).resolves.toMatchObject({ action: "back" });
-    await expect(p2).resolves.toMatchObject({ action: "forward" });
+    await expect(p1).resolves.toMatchObject({ result: "A" });
+    await expect(p2).resolves.toMatchObject({ result: "B" });
   });
 
   it("rejects pending requests when dispose() is called", async () => {
     const ws = makeFakeWs();
     const rpc = createWsRpc(ws as unknown as WebSocket);
 
-    const p = rpc.request(REQUEST_OP.state, { resetContextMenu: false });
+    const p = rpc.request(REQUEST_OP.state, { includeUrl: true });
     rpc.dispose("ws_unmount");
 
     await expect(p).rejects.toThrow("ws_unmount");
@@ -104,7 +136,7 @@ describe("createWsRpc", () => {
     const ws = makeFakeWs();
     const rpc = createWsRpc(ws as unknown as WebSocket);
 
-    const p = rpc.request(REQUEST_OP.state, { resetContextMenu: false }, 1000);
+    const p = rpc.request(REQUEST_OP.eval, { expression: "x" }, 1000);
     const expectation = expect(p).rejects.toThrow(/timeout/);
     vi.advanceTimersByTime(1001);
     await expectation;
@@ -113,48 +145,32 @@ describe("createWsRpc", () => {
   it("rejects request when WS is not OPEN", async () => {
     const ws = makeFakeWs(CLOSED);
     const rpc = createWsRpc(ws as unknown as WebSocket);
-    await expect(rpc.request(REQUEST_OP.state, { resetContextMenu: false })).rejects.toThrow(
-      "ws_not_open",
-    );
+    await expect(rpc.request(REQUEST_OP.eval, { expression: "x" })).rejects.toThrow("ws_not_open");
   });
 
-  it("returns false from handleBinary for non-response frames (lets video path proceed)", () => {
+  it("silently drops late/orphan reqIds nobody is waiting on", () => {
     const ws = makeFakeWs();
     const rpc = createWsRpc(ws as unknown as WebSocket);
-    // Video keyframe: first byte = 0
-    const videoFrame = new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 1, 0xde, 0xad]).buffer;
-    expect(rpc.handleBinary(videoFrame)).toBe(false);
-    // Input frame echoed back somehow (defensive — shouldn't happen on this socket)
-    const inputFrame = new Uint8Array([0x01, 0, 0, 0, 0, 0]).buffer;
-    expect(rpc.handleBinary(inputFrame)).toBe(false);
-  });
-
-  it("returns true from handleBinary for response opcodes even if reqId is unknown", () => {
-    const ws = makeFakeWs();
-    const rpc = createWsRpc(ws as unknown as WebSocket);
-    // Late-arriving response for a reqId nobody is waiting on — swallow,
-    // but report `true` so caller doesn't accidentally feed bytes to the
-    // video decoder.
-    const orphan = buildControlAck(9999, true, "{}");
-    expect(rpc.handleBinary(orphan)).toBe(true);
+    // Should not throw — orphan response just no-ops.
+    rpc.handleResponse(buildEvalResult(9999, true, "{}"));
+    expect(ws.sent).toHaveLength(0);
   });
 
   it("rejects with opcode-mismatch when server echoes wrong response opcode", async () => {
     const ws = makeFakeWs();
     const rpc = createWsRpc(ws as unknown as WebSocket);
 
-    const p = rpc.request(REQUEST_OP.state, { resetContextMenu: false });
-    // We expected 0x84 (stateSnapshot); server sends 0x82 (controlAck).
-    rpc.handleBinary(buildControlAck(1, true, "{}"));
+    const p = rpc.request(REQUEST_OP.state, { includeUrl: true });
+    // We expected 0x84 (stateSnapshot); server sends 0x83 (evalResult).
+    rpc.handleResponse(buildEvalResult(1, true, "{}"));
 
     await expect(p).rejects.toThrow(/opcode_mismatch/);
   });
 
   it("RESPONSE_OP constants are stable for cross-side parity", () => {
-    // Defensive: the rpc relies on these numeric values to fork on
-    // expected/actual opcodes. Sanity-check.
-    expect(RESPONSE_OP.controlAck).toBe(0x82);
     expect(RESPONSE_OP.evalResult).toBe(0x83);
     expect(RESPONSE_OP.stateSnapshot).toBe(0x84);
+    // 0x82 controlAck was dropped in #61 cut2 — assert absence.
+    expect("controlAck" in RESPONSE_OP).toBe(false);
   });
 });

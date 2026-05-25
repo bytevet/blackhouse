@@ -1,15 +1,19 @@
 /**
  * Binary wire codec for the browser screencast WS (#60 + #61).
  *
- * Two opcode ranges share the same socket:
+ * Single-transport protocol: all client↔server traffic rides one binary
+ * WS. Three opcode ranges share the socket:
  *
- *   0x01–0x07: input events. Fire-and-forget, no reqId. Encoded by
- *              `encodeInput` / decoded by `decodeInput`.
+ *   0x01–0x07  Input events (client→server, no reqId, fire-and-forget).
+ *   0x10–0x12  Requests    (client→server, u32 reqId).
+ *   0x80–0x86  Responses + server-pushed events (reqId echoed for
+ *              responses, 0 for broadcasts).
  *
- *   0x10–0x12 (client→server) + 0x82–0x84 (server→client): request /
- *              response pairs with a 4-byte big-endian `reqId` for
- *              correlation. Encoded by `encodeRequest` / decoded by
- *              `decodeResponse`.
+ * Universal layout for 0x10+: `opcode(u8) + reqId(u32 BE) + payload`.
+ * Input opcodes (0x01–0x07) inherited their pre-#61 wireframe and do NOT
+ * carry a reqId. Control (0x10) is also fire-and-forget — the FE sends
+ * `reqId=0` and never awaits a response; the implicit ack is the next
+ * 0x80 (after resize) or 0x86 (after nav/back/forward/reload).
  *
  * Wire layouts (all multi-byte numbers BIG-ENDIAN):
  *
@@ -26,25 +30,36 @@
  * | 0x06 | keyUp      | (same as keyDown)                                 |
  * | 0x07 | char       | textLen:u8, text (utf8)                           |
  *
- * `button` mapping: "none"→0, "left"→1, "right"→2, "middle"→4. The input
- * shape is a discriminated union (`InputMessage`) so the encoder's switch
- * is statically exhaustive.
+ * REQUESTS (client→server, payload follows the universal 5-byte header)
+ * | Op   | Request   | Payload                                            |
+ * |------|-----------|----------------------------------------------------|
+ * | 0x10 | control   | action:u8, urlLen:u16, url:utf8,                  |
+ * |      |           |   width:u16, height:u16                            |
+ * | 0x11 | eval      | exprLen:u32, expression:utf8                      |
+ * | 0x12 | state     | flags:u8 (bit0=includeUrl, bit1=includeTitle,     |
+ * |      |           |   bit2=includeLoading)                             |
  *
- * REQUEST / RESPONSE
- * | Op   | Direction       | Layout                                       |
- * |------|-----------------|----------------------------------------------|
- * | 0x10 | client→ control | reqId:u32, action:u8, urlLen:u16, url:utf8,  |
- * |      |                 |   width:u16, height:u16                      |
- * | 0x11 | client→ eval    | reqId:u32, exprLen:u32, expression:utf8      |
- * | 0x12 | client→ state   | reqId:u32, flags:u8  (bit0 = resetContextMenu) |
- * | 0x82 | server→ ctrlAck | reqId:u32, ok:u8, payloadLen:u32, json:utf8  |
- * | 0x83 | server→ evalRes | reqId:u32, ok:u8, payloadLen:u32, json:utf8  |
- * | 0x84 | server→ stateSn | reqId:u32, payloadLen:u32, json:utf8         |
+ * RESPONSES + PUSHES (server→client)
+ * | Op   | Frame          | Payload                                       |
+ * |------|----------------|-----------------------------------------------|
+ * | 0x80 | config         | codedWidth:u16, codedHeight:u16, codecLen:u8, |
+ * |      |                |   codec:utf8   (reqId=0)                       |
+ * | 0x81 | videoFrame     | type:u8 (0=key, 1=delta), pts:u64,            |
+ * |      |                |   naluBytes  (reqId=0)                         |
+ * | 0x83 | evalResult     | ok:u8, payloadLen:u32, json:utf8              |
+ * | 0x84 | stateSnapshot  | payloadLen:u32, json:utf8 (ok inside json)    |
+ * | 0x85 | consoleEvent   | kindLen:u8, kind:utf8, textLen:u32, text:utf8,|
+ * |      |                |   urlLen:u16, url:utf8, line:u32, ts:f64       |
+ * | 0x86 | navigateEvent  | urlLen:u16, url:utf8, ts:f64                  |
  *
- * `action` byte for control: 1=navigate, 2=back, 3=forward, 4=reload,
- * 5=resize. The server-side authority (`agent/browser-service/input-codec.mjs`)
- * is the contract; this file mirrors it. Note 0x84 has NO `ok` byte — its
- * "ok" lives inside the JSON payload.
+ * `button` mapping: "none"→0, "left"→1, "right"→2, "middle"→4.
+ * `action` byte for control: 0=back, 1=forward, 2=reload, 3=navigate,
+ * 4=resize (0-indexed — must match
+ * `agent/browser-service/input-codec.mjs`'s `CONTROL_ACTION` array).
+ *
+ * The 0x82 controlAck opcode was dropped in #61 cut2 — control is
+ * fire-and-forget. Server may still emit 0x82 briefly during the
+ * BE-cut2 transition; the FE silently drops it.
  */
 
 export const INPUT_OP = {
@@ -275,7 +290,7 @@ export function decodeInput(buf: ArrayBuffer | Uint8Array): InputMessage | null 
   }
 }
 
-// ─── Request / response codec (0x10–0x12 + 0x82–0x84, #61) ───────────────────
+// ─── Request / response codec (0x10–0x12 + 0x83/0x84, #61) ───────────────────
 
 export const REQUEST_OP = {
   control: 0x10,
@@ -284,25 +299,35 @@ export const REQUEST_OP = {
 } as const;
 
 export const RESPONSE_OP = {
-  controlAck: 0x82,
   evalResult: 0x83,
   stateSnapshot: 0x84,
 } as const;
 
+export const PUSH_OP = {
+  config: 0x80,
+  videoFrame: 0x81,
+  consoleEvent: 0x85,
+  navigateEvent: 0x86,
+} as const;
+
 /**
- * Control-action byte enum, matching `agent/browser-service/input-codec.mjs`
- * (`CONTROL_ACTION = ["", "navigate", "back", "forward", "reload", "resize"]`).
- * 0 is reserved (decodes as "unknown action" on the server).
+ * Control-action byte enum. Matches `agent/browser-service/input-codec.mjs`'s
+ * `CONTROL_ACTION = ["back", "forward", "reload", "navigate", "resize"]`
+ * — be is the wire-format authority. Indices are 0-based.
  */
 export const CONTROL_ACTION = {
-  navigate: 1,
-  back: 2,
-  forward: 3,
-  reload: 4,
-  resize: 5,
+  back: 0,
+  forward: 1,
+  reload: 2,
+  navigate: 3,
+  resize: 4,
 } as const;
 
 export type ControlActionName = keyof typeof CONTROL_ACTION;
+
+const STATE_FLAG_INCLUDE_URL = 1 << 0;
+const STATE_FLAG_INCLUDE_TITLE = 1 << 1;
+const STATE_FLAG_INCLUDE_LOADING = 1 << 2;
 
 export interface ControlBody {
   action: ControlActionName;
@@ -318,19 +343,58 @@ export interface EvalBody {
   expression: string;
 }
 
+/**
+ * Bit-flags for the 0x12 state request. The 0x84 response projects only
+ * the fields whose include-bit was set, so callers can ask for just what
+ * they need (cheaper CDP probe on the server side).
+ */
 export interface StateBody {
-  resetContextMenu: boolean;
+  includeUrl?: boolean;
+  includeTitle?: boolean;
+  includeLoading?: boolean;
 }
 
 /**
- * Response triple decoded from a server frame. 0x82/0x83 carry an `ok`
- * byte before the payload; 0x84 omits it (the JSON payload carries its
- * own `ok` field) so this union exposes `ok` as optional/per-variant.
+ * Response triple decoded from a request/response frame. 0x83 carries an
+ * `ok` byte before the payload; 0x84 omits it (the JSON payload carries
+ * its own `ok` field) so this union exposes `ok` as per-variant.
  */
 export type WsResponse =
-  | { opcode: typeof RESPONSE_OP.controlAck; reqId: number; ok: boolean; payload: unknown }
   | { opcode: typeof RESPONSE_OP.evalResult; reqId: number; ok: boolean; payload: unknown }
   | { opcode: typeof RESPONSE_OP.stateSnapshot; reqId: number; payload: unknown };
+
+/** Decoded screencast config (opcode 0x80). */
+export interface ConfigPush {
+  codedWidth: number;
+  codedHeight: number;
+  codec: string;
+}
+
+/** Decoded video-frame header + raw Annex-B payload (opcode 0x81). */
+export interface VideoFramePush {
+  isKey: boolean;
+  pts: bigint;
+  /**
+   * Annex-B-encoded NALU bytes. View into the original ArrayBuffer — do
+   * NOT mutate; copy into an `EncodedVideoChunk` as `data`.
+   */
+  nalu: Uint8Array;
+}
+
+/** Decoded console-event push (opcode 0x85). */
+export interface ConsoleEventPush {
+  kind: string;
+  text: string;
+  url: string;
+  line: number;
+  ts: number;
+}
+
+/** Decoded navigate-event push (opcode 0x86). */
+export interface NavigateEventPush {
+  url: string;
+  ts: number;
+}
 
 /**
  * Encode a request frame for opcodes 0x10/0x11/0x12. The three overloads
@@ -390,11 +454,15 @@ export function encodeRequest(
     }
     case REQUEST_OP.state: {
       const b = body as StateBody;
+      let flags = 0;
+      if (b.includeUrl) flags |= STATE_FLAG_INCLUDE_URL;
+      if (b.includeTitle) flags |= STATE_FLAG_INCLUDE_TITLE;
+      if (b.includeLoading) flags |= STATE_FLAG_INCLUDE_LOADING;
       const buf = new ArrayBuffer(6);
       const dv = new DataView(buf);
       dv.setUint8(0, REQUEST_OP.state);
       dv.setUint32(1, reqId, false);
-      dv.setUint8(5, b.resetContextMenu ? 0b00000001 : 0);
+      dv.setUint8(5, flags);
       return buf;
     }
     default: {
@@ -421,7 +489,6 @@ export function decodeResponse(buf: ArrayBuffer | Uint8Array): WsResponse | null
 
   try {
     switch (opcode) {
-      case RESPONSE_OP.controlAck:
       case RESPONSE_OP.evalResult: {
         // header = op(1) + reqId(4) + ok(1) + payloadLen(4) = 10 bytes
         if (view.length < 10) return null;
@@ -430,9 +497,7 @@ export function decodeResponse(buf: ArrayBuffer | Uint8Array): WsResponse | null
         if (view.length < 10 + payloadLen) return null;
         const payload = parseJsonPayload(view.subarray(10, 10 + payloadLen));
         if (payload === SENTINEL_BAD_JSON) return null;
-        return opcode === RESPONSE_OP.controlAck
-          ? { opcode: RESPONSE_OP.controlAck, reqId, ok, payload }
-          : { opcode: RESPONSE_OP.evalResult, reqId, ok, payload };
+        return { opcode: RESPONSE_OP.evalResult, reqId, ok, payload };
       }
       case RESPONSE_OP.stateSnapshot: {
         // header = op(1) + reqId(4) + payloadLen(4) = 9 bytes  (no ok byte)
@@ -461,5 +526,102 @@ function parseJsonPayload(bytes: Uint8Array): unknown {
     return JSON.parse(textDecoder.decode(bytes));
   } catch {
     return SENTINEL_BAD_JSON;
+  }
+}
+
+// ─── Server-pushed frame decoders (0x80/0x81/0x85/0x86, #61) ─────────────────
+
+/**
+ * Decode an opcode-0x80 `config` frame, sent once at WS open and after
+ * every viewport resize. The FE re-creates its VideoDecoder with these
+ * params. Returns `null` on truncation or unknown layout.
+ */
+export function decodeConfig(buf: ArrayBuffer | Uint8Array): ConfigPush | null {
+  const view = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  if (view.length < 10) return null;
+  const dv = new DataView(view.buffer, view.byteOffset, view.byteLength);
+  if (dv.getUint8(0) !== PUSH_OP.config) return null;
+  try {
+    const codedWidth = dv.getUint16(5, false);
+    const codedHeight = dv.getUint16(7, false);
+    const codecLen = dv.getUint8(9);
+    if (view.length < 10 + codecLen) return null;
+    const codec = textDecoder.decode(view.subarray(10, 10 + codecLen));
+    return { codedWidth, codedHeight, codec };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Decode an opcode-0x81 video-frame header. The 14-byte header carries
+ * type/pts; the rest of the buffer is the Annex-B NALU payload that the
+ * caller hands to `VideoDecoder.decode(...)`. Returns `null` on truncation.
+ */
+export function decodeVideoFrame(buf: ArrayBuffer | Uint8Array): VideoFramePush | null {
+  const view = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  if (view.length < 14) return null;
+  const dv = new DataView(view.buffer, view.byteOffset, view.byteLength);
+  if (dv.getUint8(0) !== PUSH_OP.videoFrame) return null;
+  try {
+    const typeByte = dv.getUint8(5);
+    const pts = dv.getBigUint64(6, false);
+    const nalu = view.subarray(14);
+    return { isKey: typeByte === 0, pts, nalu };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Decode an opcode-0x85 console-event push. Coerces missing tail fields
+ * to safe defaults so a malformed trailer never crashes the consumer —
+ * console-event push must never break the screencast.
+ */
+export function decodeConsoleEvent(buf: ArrayBuffer | Uint8Array): ConsoleEventPush | null {
+  const view = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  if (view.length < 6) return null;
+  const dv = new DataView(view.buffer, view.byteOffset, view.byteLength);
+  if (dv.getUint8(0) !== PUSH_OP.consoleEvent) return null;
+  try {
+    let off = 5;
+    const kindLen = dv.getUint8(off);
+    off += 1;
+    if (view.length < off + kindLen + 4) return null;
+    const kind = textDecoder.decode(view.subarray(off, off + kindLen));
+    off += kindLen;
+    const textLen = dv.getUint32(off, false);
+    off += 4;
+    if (view.length < off + textLen + 2) return null;
+    const text = textDecoder.decode(view.subarray(off, off + textLen));
+    off += textLen;
+    const urlLen = dv.getUint16(off, false);
+    off += 2;
+    if (view.length < off + urlLen + 4 + 8) return null;
+    const url = textDecoder.decode(view.subarray(off, off + urlLen));
+    off += urlLen;
+    const line = dv.getUint32(off, false);
+    off += 4;
+    const ts = dv.getFloat64(off, false);
+    return { kind, text, url, line, ts };
+  } catch {
+    return null;
+  }
+}
+
+/** Decode an opcode-0x86 navigate-event push. */
+export function decodeNavigateEvent(buf: ArrayBuffer | Uint8Array): NavigateEventPush | null {
+  const view = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  if (view.length < 15) return null;
+  const dv = new DataView(view.buffer, view.byteOffset, view.byteLength);
+  if (dv.getUint8(0) !== PUSH_OP.navigateEvent) return null;
+  try {
+    const urlLen = dv.getUint16(5, false);
+    if (view.length < 7 + urlLen + 8) return null;
+    const url = textDecoder.decode(view.subarray(7, 7 + urlLen));
+    const ts = dv.getFloat64(7 + urlLen, false);
+    return { url, ts };
+  } catch {
+    return null;
   }
 }

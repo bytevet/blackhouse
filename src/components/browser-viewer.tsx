@@ -12,29 +12,32 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { encodeInput, REQUEST_OP, type InputMessage } from "@/lib/browser-input-codec";
+import {
+  decodeConfig,
+  decodeConsoleEvent,
+  decodeNavigateEvent,
+  decodeVideoFrame,
+  encodeInput,
+  encodeRequest,
+  PUSH_OP,
+  REQUEST_OP,
+  RESPONSE_OP,
+  type InputMessage,
+} from "@/lib/browser-input-codec";
 import { createWsRpc, type WsRpc } from "@/lib/browser-ws-rpc";
+// REST `/browser/state` is still alive on the server (selectionText /
+// scrollX/Y / lastContextMenu — not yet projected through 0x84). The FE
+// only uses it for the right-click "Copy" selectionText fetch; everything
+// else is on the WS.
+import { client } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-// Response payload shapes returned by `agent/browser-service/service.mjs`
-// `run*` dispatchers (#61). Permissive — only the fields the FE actually
-// reads are listed; extra keys land in the `unknown` body unobserved.
-interface ControlAckPayload {
-  ok: boolean;
-  url?: string;
-  width?: number;
-  height?: number;
-  error?: string;
-}
+// Eval result payload returned by `agent/browser-service/service.mjs`'s
+// runEval (#61). Permissive — only the fields the FE actually reads.
 interface EvalResultPayload {
   ok: boolean;
   result?: string;
   error?: { description?: string; stack?: string };
-}
-interface StateSnapshotPayload {
-  ok: boolean;
-  url?: string;
-  selectionText?: string;
 }
 
 interface BrowserViewerProps {
@@ -159,13 +162,18 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
   // selection extension rather than a hover.
   const buttonsRef = useRef(0);
 
-  // ─── WebSocket frame stream (H.264 via WebCodecs VideoDecoder) ──────────
-  // Wire protocol:
-  //   - First message (TEXT, JSON): { type: "config", codec, codedWidth, codedHeight }
-  //   - Subsequent messages (BINARY): 9-byte header [type:u8, pts:u64 BE] +
-  //     Annex-B H.264 payload. type=0 → keyframe, type=1 → delta.
-  // The decoder is recreated on every config message so be #41 (window resize)
-  // can re-broadcast a new config to switch codedWidth/codedHeight cleanly.
+  // ─── WebSocket frame stream (binary opcode protocol, #61) ──────────────
+  // All frames are binary; the opcode byte at offset 0 routes the frame:
+  //   0x80 config         → reconfigure VideoDecoder
+  //   0x81 videoFrame     → decode key/delta chunk into the canvas
+  //   0x82 (legacy ack)   → silently dropped (control is fire-and-forget)
+  //   0x83 evalResult     → rpc.handleResponse → resolve pending eval
+  //   0x84 stateSnapshot  → rpc.handleResponse → resolve pending state
+  //   0x85 consoleEvent   → append to the console panel
+  //   0x86 navigateEvent  → sync the address bar's url
+  // The decoder is rebuilt on every 0x80 so a viewport resize (server
+  // re-broadcasts 0x80 after the encoder restarts) switches codedWidth/
+  // codedHeight cleanly.
   useEffect(() => {
     if (status !== "running") return;
     if (decoderError) return; // capability check failed — skip WS entirely
@@ -198,111 +206,153 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
       if (alive) setConnected(false);
     };
 
+    // Hoisted so the 0x80 handler can call it; re-runs after every resize
+    // (server re-broadcasts 0x80 once the encoder restarts at new dims).
+    function configureDecoder(codedWidth: number, codedHeight: number, codec: string) {
+      // Tear down any previous decoder before configuring a new one.
+      if (decoder) {
+        try {
+          decoder.close();
+        } catch {
+          /* already closed */
+        }
+        decoder = null;
+      }
+      const next = new VideoDecoder({
+        output: (frame) => {
+          const canvas = canvasRef.current;
+          if (!alive || !canvas) {
+            frame.close();
+            return;
+          }
+          const ctx = canvas.getContext("2d", { alpha: false });
+          if (!ctx) {
+            frame.close();
+            return;
+          }
+          // Use canvas's intrinsic size as the dest box; CSS `object-contain`
+          // letterboxes the displayed surface to preserve aspect ratio.
+          ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
+          // VideoFrames are GPU-backed and leak fast if not closed.
+          frame.close();
+          setHasFrame(true);
+        },
+        error: (err) => {
+          console.error("[browser-viewer] VideoDecoder error", err);
+          // Don't tear down — the next keyframe from the server will recover
+          // the stream. Fatal errors will surface via decoder.state.
+        },
+      });
+      try {
+        next.configure({
+          codec,
+          codedWidth,
+          codedHeight,
+          // Interactive screencast: skip the decoder's reorder buffer and
+          // surface frames as soon as they finish.
+          optimizeForLatency: true,
+          // GPU decode when available; falls back gracefully without H.264 HW.
+          hardwareAcceleration: "prefer-hardware",
+        });
+      } catch (err) {
+        console.error("[browser-viewer] VideoDecoder.configure failed", err);
+        setDecoderError(
+          `Decoder configure failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return;
+      }
+      // Sync canvas intrinsic dimensions so coord scaling and drawImage
+      // both use the codec's pixel space.
+      const canvas = canvasRef.current;
+      if (canvas) {
+        if (canvas.width !== codedWidth) canvas.width = codedWidth;
+        if (canvas.height !== codedHeight) canvas.height = codedHeight;
+      }
+      decoder = next;
+    }
+
     ws.onmessage = (event) => {
       if (!alive) return;
 
-      // ─ TEXT: codec configuration ─────────────────────────────────────
+      // Single-transport wire — text frames are not part of the protocol
+      // anymore (be #61: replaced by 0x80 binary config). Drop them.
       if (typeof event.data === "string") {
-        let msg: { type?: string; codec?: string; codedWidth?: number; codedHeight?: number };
-        try {
-          msg = JSON.parse(event.data);
-        } catch {
-          console.warn("[browser-viewer] malformed WS text message");
-          return;
-        }
-        if (msg.type !== "config" || !msg.codec || !msg.codedWidth || !msg.codedHeight) {
-          console.warn("[browser-viewer] unexpected WS text message:", msg);
-          return;
-        }
-        // Tear down any previous decoder before configuring a new one.
-        if (decoder) {
-          try {
-            decoder.close();
-          } catch {
-            /* already closed */
-          }
-          decoder = null;
-        }
-        const next = new VideoDecoder({
-          output: (frame) => {
-            const canvas = canvasRef.current;
-            if (!alive || !canvas) {
-              frame.close();
-              return;
-            }
-            const ctx = canvas.getContext("2d", { alpha: false });
-            if (!ctx) {
-              frame.close();
-              return;
-            }
-            // Use canvas's intrinsic size as the dest box; CSS `object-contain`
-            // letterboxes the displayed surface to preserve aspect ratio.
-            ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
-            // VideoFrames are GPU-backed and leak fast if not closed.
-            frame.close();
-            setHasFrame(true);
-          },
-          error: (err) => {
-            console.error("[browser-viewer] VideoDecoder error", err);
-            // Don't tear down — the next keyframe from the server will recover
-            // the stream. Fatal errors will surface via decoder.state.
-          },
-        });
-        try {
-          next.configure({
-            codec: msg.codec,
-            codedWidth: msg.codedWidth,
-            codedHeight: msg.codedHeight,
-            // Interactive screencast: skip the decoder's reorder buffer and
-            // surface frames as soon as they finish. Default optimizes for
-            // throughput, which adds latency we can't afford here.
-            optimizeForLatency: true,
-            // GPU decode when available; falls back gracefully without H.264 HW.
-            hardwareAcceleration: "prefer-hardware",
-          });
-        } catch (err) {
-          console.error("[browser-viewer] VideoDecoder.configure failed", err);
-          setDecoderError(
-            `Decoder configure failed: ${err instanceof Error ? err.message : String(err)}`,
-          );
-          return;
-        }
-        // Sync canvas intrinsic dimensions so coord scaling and drawImage
-        // both use the codec's pixel space.
-        const canvas = canvasRef.current;
-        if (canvas) {
-          if (canvas.width !== msg.codedWidth) canvas.width = msg.codedWidth;
-          if (canvas.height !== msg.codedHeight) canvas.height = msg.codedHeight;
-        }
-        decoder = next;
+        console.warn("[browser-viewer] unexpected WS text frame; dropping");
         return;
       }
+      if (!(event.data instanceof ArrayBuffer)) return;
+      if (event.data.byteLength < 1) return;
 
-      // ─ BINARY: video chunk OR rpc response ───────────────────────────
-      if (event.data instanceof ArrayBuffer) {
-        // Response opcodes (0x82–0x84) ride the same socket; hand them
-        // off to the RPC dispatcher before treating bytes as video.
-        if (rpc.handleBinary(event.data)) return;
-
-        // Otherwise: 9-byte header + Annex-B H.264 payload.
-        // type=0 → keyframe, type=1 → delta.
-        if (!decoder) return; // chunks arriving before config — drop; next keyframe recovers
-        if (event.data.byteLength < 9) return;
-        const view = new DataView(event.data);
-        const typeByte = view.getUint8(0);
-        const pts = Number(view.getBigUint64(1));
-        const payload = new Uint8Array(event.data, 9);
-        try {
-          decoder.decode(
-            new EncodedVideoChunk({
-              type: typeByte === 0 ? "key" : "delta",
-              timestamp: pts,
-              data: payload,
-            }),
-          );
-        } catch (err) {
-          console.warn("[browser-viewer] decode() threw", err);
+      // Opcode demux. Every frame after #61 starts with a 1-byte opcode.
+      const opcode = new DataView(event.data).getUint8(0);
+      switch (opcode) {
+        case PUSH_OP.config: {
+          const cfg = decodeConfig(event.data);
+          if (!cfg) {
+            console.warn("[browser-viewer] malformed 0x80 config frame");
+            return;
+          }
+          configureDecoder(cfg.codedWidth, cfg.codedHeight, cfg.codec);
+          return;
         }
+        case PUSH_OP.videoFrame: {
+          if (!decoder) return; // chunks arriving before config — drop; next keyframe recovers
+          const vf = decodeVideoFrame(event.data);
+          if (!vf) return;
+          try {
+            decoder.decode(
+              new EncodedVideoChunk({
+                type: vf.isKey ? "key" : "delta",
+                // EncodedVideoChunk wants a Number, not bigint — codec pts are
+                // microseconds since stream start and easily fit in 53 bits.
+                timestamp: Number(vf.pts),
+                // Copy the view's underlying bytes into a fresh ArrayBuffer
+                // so the next message's bytes don't trample the in-flight chunk.
+                data: vf.nalu.slice(),
+              }),
+            );
+          } catch (err) {
+            console.warn("[browser-viewer] decode() threw", err);
+          }
+          return;
+        }
+        case 0x82:
+          // Legacy CONTROL_ACK — silently dropped (control is fire-and-forget
+          // now). Server may still emit briefly during be's BE-cut2 transition.
+          return;
+        case RESPONSE_OP.evalResult:
+        case RESPONSE_OP.stateSnapshot:
+          rpc.handleResponse(event.data);
+          return;
+        case PUSH_OP.consoleEvent: {
+          const ev = decodeConsoleEvent(event.data);
+          if (!ev) return;
+          // Map be's `kind` string to the ConsoleEntry `level` union.
+          const level = (
+            ["log", "info", "warn", "error", "debug"].includes(ev.kind) ? ev.kind : "log"
+          ) as ConsoleEntry["level"];
+          setPanelEntries((prev) => [
+            ...prev.slice(-499),
+            {
+              _t: "console",
+              level,
+              text: ev.text,
+              url: ev.url || undefined,
+              line: ev.line || undefined,
+              ts: ev.ts,
+            },
+          ]);
+          return;
+        }
+        case PUSH_OP.navigateEvent: {
+          const ev = decodeNavigateEvent(event.data);
+          if (!ev || !ev.url) return;
+          setUrl(ev.url);
+          setPendingUrl(ev.url);
+          return;
+        }
+        default:
+          console.warn(`[browser-viewer] unknown WS opcode 0x${opcode.toString(16)}`);
       }
     };
 
@@ -336,67 +386,22 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
     };
   }, [sessionId, status, decoderError]);
 
-  // ─── SSE event stream ───────────────────────────────────────────────────
-  // The endpoint is named "/browser/console" for legacy reasons but actually
-  // multiplexes multiple event types via SSE `event:` names. We subscribe to
-  // each by addEventListener (not onmessage):
-  //   - "console"  — page console.log / exceptions
-  //   - "navigate" — main-frame navigations (e.g. agent ran `browser.sh navigate`)
-  //
-  // The "eval" event is no longer consumed here — eval results come back via
-  // the WS-RPC response (#61). console + navigate stay on SSE until be ships
-  // push opcodes 0x85/0x86 (deferred follow-up, no console-event-loss window).
-  useEffect(() => {
-    if (status !== "running") return;
+  // Console + navigate events are now delivered as 0x85 / 0x86 push frames
+  // over the same screencast WS — handled in the opcode demux above. No
+  // more SSE EventSource. (REST /browser/console SSE is still live on the
+  // server for backward compat; the FE just stops listening.)
 
-    const es = new EventSource(`/api/sessions/${sessionId}/browser/console`);
-    es.addEventListener("console", (event) => {
-      try {
-        const entry = JSON.parse((event as MessageEvent).data) as ConsoleEntry;
-        setPanelEntries((prev) => [...prev.slice(-499), { ...entry, _t: "console" }]);
-      } catch {
-        // ignore malformed entries
-      }
-    });
-    es.addEventListener("navigate", (event) => {
-      try {
-        const { url: navUrl } = JSON.parse((event as MessageEvent).data) as {
-          url: string;
-          ts: number;
-        };
-        if (navUrl) {
-          setUrl(navUrl);
-          setPendingUrl(navUrl);
-        }
-      } catch {
-        // ignore malformed entries
-      }
-    });
-    return () => {
-      es.close();
-    };
-  }, [sessionId, status]);
-
-  // ─── Control + Input via WS-RPC (#61) ──────────────────────────────────
-  // Every control/eval/state call rides the live screencast WS now; the
-  // matching `requestOverWs` helper lives on the per-WS `rpc` instance.
-  // REST routes are still up on the server during the cutover but we
-  // never touch them — keeps the FE on a single transport.
-  const sendControl = useCallback(
-    async (action: Exclude<ControlAction, "resize">, navUrl?: string) => {
-      const rpc = rpcRef.current;
-      if (!rpc) return;
-      try {
-        await rpc.request<ControlAckPayload>(REQUEST_OP.control, {
-          action,
-          url: navUrl,
-        });
-      } catch {
-        // swallow — UI will reflect via WS disconnect / lack of new frames
-      }
-    },
-    [],
-  );
+  // ─── Control + Input via WS (#61) ──────────────────────────────────────
+  // Control is fire-and-forget: we send 0x10 with reqId=0 and never await
+  // a response. Implicit ack arrives as a 0x80 (after resize re-encodes)
+  // or 0x86 navigate event (after nav/back/forward/reload). Saves a
+  // pending-map entry + timeout per call — matters for resize which fires
+  // constantly during window-drag.
+  const sendControl = useCallback((action: Exclude<ControlAction, "resize">, navUrl?: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(encodeRequest(REQUEST_OP.control, 0, { action, url: navUrl }));
+  }, []);
 
   // Drop input frames once the WS send buffer climbs over this — a stale
   // mouseMove arriving 3s late is worse than no event. Generous enough to
@@ -417,21 +422,14 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
   }, []);
 
   // ─── Dynamic viewport: request server to re-encode at new size ─────────
-  const sendResize = useCallback(async (width: number, height: number) => {
-    const rpc = rpcRef.current;
-    if (!rpc) return;
-    try {
-      await rpc.request<ControlAckPayload>(REQUEST_OP.control, {
-        action: "resize",
-        width,
-        height,
-      });
-      // The server re-broadcasts a new `config` text message after the
-      // encoder restarts; the existing WS text-handler tears down the old
-      // VideoDecoder and configures a new one with the new dims.
-    } catch {
-      // swallow — next ResizeObserver tick will retry
-    }
+  // Fire-and-forget like sendControl. The server re-broadcasts a 0x80
+  // config frame once the encoder restarts; our binary opcode-demux
+  // handler tears down the old VideoDecoder and configures a new one
+  // with the new dims.
+  const sendResize = useCallback((width: number, height: number) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(encodeRequest(REQUEST_OP.control, 0, { action: "resize", width, height }));
   }, []);
 
   // Watch the visible frame wrapper. On size change, debounce 250ms then POST
@@ -559,24 +557,30 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
 
   // Right-click → SPA-rendered ContextMenu (see #47). Fetches live page
   // selectionText on open so the "Copy" item can conditionally appear.
-  // Errors silently — menu still shows, Copy just stays hidden.
-  const onContextMenuOpenChange = useCallback(async (open: boolean) => {
-    if (!open) {
-      setMenuSelectionText(null);
-      return;
-    }
-    const rpc = rpcRef.current;
-    if (!rpc) return;
-    try {
-      const data = await rpc.request<StateSnapshotPayload>(REQUEST_OP.state, {
-        resetContextMenu: false,
-      });
-      if (!data.ok) return;
-      setMenuSelectionText(typeof data.selectionText === "string" ? data.selectionText : "");
-    } catch {
-      // browser unavailable / rpc closed — Copy will stay hidden
-    }
-  }, []);
+  //
+  // selectionText isn't in the 0x12/0x84 state response shape (be's
+  // runWsState only projects url/title/loading). The legacy REST
+  // /browser/state endpoint is unchanged and still emits selectionText —
+  // we keep using that until qa migrates the e2e probe.
+  const onContextMenuOpenChange = useCallback(
+    async (open: boolean) => {
+      if (!open) {
+        setMenuSelectionText(null);
+        return;
+      }
+      try {
+        const res = await client.api.sessions[":id"].browser.state.$get({
+          param: { id: sessionId },
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as { selectionText?: string };
+        setMenuSelectionText(typeof data.selectionText === "string" ? data.selectionText : "");
+      } catch {
+        // browser unavailable / network error — Copy will stay hidden
+      }
+    },
+    [sessionId],
+  );
 
   const clipboardAvailable =
     typeof navigator !== "undefined" &&
