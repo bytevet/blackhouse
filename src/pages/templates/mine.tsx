@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { useSession } from "@/lib/auth-client";
 import { client, unwrap, type Paginated } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -37,6 +38,7 @@ import { timeAgo } from "@/lib/time";
 import type { Template } from "@/db/schema";
 
 export function MyTemplatesPage() {
+  const { t } = useTranslation();
   const { data: session } = useSession();
 
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -192,19 +194,15 @@ export function MyTemplatesPage() {
   return (
     <>
       <div className="flex items-center justify-between">
-        <p className="text-xs text-muted-foreground">
-          Create reusable prompt templates for your coding agent sessions.
-        </p>
+        <p className="text-xs text-muted-foreground">{t("briefings.myDescription")}</p>
         <Button size="sm" onClick={openCreate}>
           <Plus className="size-3" />
-          New Template
+          {t("briefings.newBriefing")}
         </Button>
       </div>
 
       {templates.length === 0 ? (
-        <p className="py-4 text-sm text-muted-foreground">
-          No templates yet. Create one to get started.
-        </p>
+        <p className="py-4 text-sm text-muted-foreground">{t("briefings.myEmptyState")}</p>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {templates.map((template) => (
@@ -213,9 +211,11 @@ export function MyTemplatesPage() {
                 <CardTitle className="flex items-center justify-between gap-2">
                   <span className="truncate">{template.name}</span>
                   <span className="flex shrink-0 gap-1">
-                    {template.gitRequired && <Badge className="shrink-0">Git Required</Badge>}
+                    {template.gitRequired && (
+                      <Badge className="shrink-0">{t("dashboard.form.gitRequired")}</Badge>
+                    )}
                     <Badge variant="outline" className="shrink-0">
-                      {template.isPublic ? "Public" : "Private"}
+                      {template.isPublic ? t("dashboard.form.public") : t("dashboard.form.private")}
                     </Badge>
                   </span>
                 </CardTitle>
@@ -225,18 +225,18 @@ export function MyTemplatesPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-xs text-muted-foreground">
-                  Created {timeAgo(template.createdAt)}
+                  {t("briefings.created", { when: timeAgo(template.createdAt) })}
                 </div>
               </CardContent>
               {isOwner(template) && (
                 <CardFooter className="gap-1.5">
                   <Button variant="outline" size="sm" onClick={() => openEdit(template)}>
                     <Edit className="size-3" />
-                    Edit
+                    {t("common.edit")}
                   </Button>
                   <Button variant="destructive" size="sm" onClick={() => openDelete(template)}>
                     <Trash2 className="size-3" />
-                    Delete
+                    {t("briefings.archive")}
                   </Button>
                 </CardFooter>
               )}
@@ -253,10 +253,10 @@ export function MyTemplatesPage() {
             disabled={page <= 1}
             onClick={() => setPage((p) => p - 1)}
           >
-            <ChevronLeft className="size-3" /> Prev
+            <ChevronLeft className="size-3" /> {t("common.prev")}
           </Button>
           <span className="text-xs text-muted-foreground">
-            Page {page} of {Math.ceil(total / perPage)}
+            {t("dashboard.pageOf", { current: page, total: Math.ceil(total / perPage) })}
           </span>
           <Button
             variant="outline"
@@ -264,7 +264,7 @@ export function MyTemplatesPage() {
             disabled={page >= Math.ceil(total / perPage)}
             onClick={() => setPage((p) => p + 1)}
           >
-            Next <ChevronRight className="size-3" />
+            {t("common.next")} <ChevronRight className="size-3" />
           </Button>
         </div>
       )}
@@ -273,9 +273,11 @@ export function MyTemplatesPage() {
       <Dialog open={dialogOpen} onOpenChange={handleDialogClose}>
         <DialogContent className="sm:max-w-4xl">
           <DialogHeader>
-            <DialogTitle>{editingTemplate ? "Edit Template" : "Create Template"}</DialogTitle>
+            <DialogTitle>
+              {editingTemplate ? t("briefings.editBriefing") : t("briefings.newBriefing")}
+            </DialogTitle>
             <DialogDescription>
-              {editingTemplate ? "Update your template details." : "Create a new prompt template."}
+              {editingTemplate ? t("briefings.editDescription") : t("briefings.newDescription")}
             </DialogDescription>
           </DialogHeader>
           <div className="max-h-[60vh] overflow-y-auto -mx-4 px-4">
@@ -283,7 +285,7 @@ export function MyTemplatesPage() {
               <Field>
                 <FieldLabel>Name</FieldLabel>
                 <Input
-                  placeholder="Template name"
+                  placeholder={t("briefings.form.namePlaceholder")}
                   value={formData.name}
                   onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
                 />
@@ -420,28 +422,31 @@ export function MyTemplatesPage() {
           </div>
           <DialogFooter>
             <Button onClick={handleSave} disabled={!formData.name.trim() || saving}>
-              {saving ? "Saving..." : editingTemplate ? "Update Template" : "Create Template"}
+              {saving
+                ? t("common.saving")
+                : editingTemplate
+                  ? t("briefings.updateBriefing")
+                  : t("briefings.newBriefing")}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmation Dialog */}
+      {/* Archive Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete Template</DialogTitle>
+            <DialogTitle>{t("briefings.archiveDialogTitle")}</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete "{deletingTemplate?.name}"? This action cannot be
-              undone.
+              {t("briefings.archiveDialogBody", { name: deletingTemplate?.name ?? "" })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button variant="destructive" onClick={handleDelete}>
-              Delete
+              {t("briefings.archive")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -451,14 +456,12 @@ export function MyTemplatesPage() {
       <Dialog open={confirmCloseOpen} onOpenChange={setConfirmCloseOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Discard Changes</DialogTitle>
-            <DialogDescription>
-              You have unsaved changes. Are you sure you want to discard them?
-            </DialogDescription>
+            <DialogTitle>{t("common.discardChanges")}</DialogTitle>
+            <DialogDescription>{t("common.unsavedChanges")}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmCloseOpen(false)}>
-              Keep Editing
+              {t("common.keepEditing")}
             </Button>
             <Button
               variant="destructive"

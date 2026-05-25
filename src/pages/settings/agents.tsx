@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router";
+import { useTranslation } from "react-i18next";
 import { useSession } from "@/lib/auth-client";
 import { client, unwrap } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -66,11 +67,8 @@ function BuildStatusBadge({
   switch (status) {
     case "building":
       return (
-        <Badge
-          className="border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
-          {...clickProps}
-        >
-          Building...
+        <Badge className="border-warning/30 bg-warning-bg text-warning-fg" {...clickProps}>
+          Provisioning...
         </Badge>
       );
     case "built":
@@ -79,9 +77,7 @@ function BuildStatusBadge({
           className={`flex items-center gap-2 ${onClick ? "cursor-pointer" : ""}`}
           {...clickProps}
         >
-          <Badge className="border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-400">
-            Built
-          </Badge>
+          <Badge className="border-success/30 bg-success-bg text-success-fg">Provisioned</Badge>
           {lastBuiltAt && (
             <span className="text-xs text-muted-foreground">{timeAgo(lastBuiltAt)}</span>
           )}
@@ -89,23 +85,21 @@ function BuildStatusBadge({
       );
     case "failed":
       return (
-        <Badge
-          className="border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400"
-          {...clickProps}
-        >
+        <Badge className="border-error/30 bg-error-bg text-error-fg" {...clickProps}>
           Failed
         </Badge>
       );
     default:
       return (
         <Badge variant="outline" {...clickProps}>
-          Not Built
+          Not Provisioned
         </Badge>
       );
   }
 }
 
 export function AgentsPage() {
+  const { t } = useTranslation();
   const { data: session } = useSession();
   const navigate = useNavigate();
   const isAdmin = session?.user?.role === "admin";
@@ -295,8 +289,8 @@ export function AgentsPage() {
         c.id === agentConfigId ? { ...c, imageBuildStatus: "building", imageBuildLog: null } : c,
       ),
     );
-    setBuildLogTitle(`Build Log: ${config?.displayName || "Agent"}`);
-    setBuildLogContent("Build started...");
+    setBuildLogTitle(`Provision Log: ${config?.displayName || "Agent"}`);
+    setBuildLogContent("Provisioning started...");
     setBuildLogAgentId(agentConfigId);
     setBuildLogDialogOpen(true);
   };
@@ -314,8 +308,8 @@ export function AgentsPage() {
   };
 
   const openBuildLog = (config: AgentConfig) => {
-    setBuildLogTitle(`Build Log: ${config.displayName}`);
-    setBuildLogContent(config.imageBuildLog || "No build log available.");
+    setBuildLogTitle(`Provision Log: ${config.displayName}`);
+    setBuildLogContent(config.imageBuildLog || "No provision log available.");
     setBuildLogAgentId(config.id);
     setBuildLogDialogOpen(true);
   };
@@ -329,15 +323,13 @@ export function AgentsPage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
-            Coding Agents
+            {t("settings.roles.title")}
             <Button size="sm" onClick={openCreate}>
               <Plus className="size-3" />
-              Add Agent
+              {t("settings.roles.addRole")}
             </Button>
           </CardTitle>
-          <CardDescription>
-            Configure coding agents with custom commands, Dockerfiles, and environment variables.
-          </CardDescription>
+          <CardDescription>{t("settings.roles.description")}</CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
@@ -345,7 +337,7 @@ export function AgentsPage() {
               <TableRow>
                 <TableHead>Display Name</TableHead>
                 <TableHead>Preset</TableHead>
-                <TableHead>Build Status</TableHead>
+                <TableHead>{t("settings.roles.table.provisionStatus")}</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -353,7 +345,7 @@ export function AgentsPage() {
               {configs.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={4} className="text-center text-muted-foreground">
-                    No agent configurations yet.
+                    No roles yet.
                   </TableCell>
                 </TableRow>
               ) : (
@@ -377,7 +369,7 @@ export function AgentsPage() {
                           size="icon-sm"
                           onClick={() => handleBuild(c.id)}
                           disabled={c.imageBuildStatus === "building"}
-                          title={c.imageBuildStatus === "built" ? "Rebuild" : "Build"}
+                          title={c.imageBuildStatus === "built" ? "Re-provision" : "Provision"}
                         >
                           <Hammer className="size-3" />
                         </Button>
@@ -401,8 +393,10 @@ export function AgentsPage() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>{editing ? "Edit Agent Config" : "Add Agent Config"}</DialogTitle>
-            <DialogDescription>Configure a coding agent for sessions.</DialogDescription>
+            <DialogTitle>
+              {editing ? t("settings.roles.editRole") : t("settings.roles.addRole")}
+            </DialogTitle>
+            <DialogDescription>{t("settings.roles.addDialogDescription")}</DialogDescription>
           </DialogHeader>
           <FieldGroup>
             <Field>
@@ -553,7 +547,7 @@ export function AgentsPage() {
       <Dialog open={!!deletingAgent} onOpenChange={(open) => !open && setDeletingAgent(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete Agent</DialogTitle>
+            <DialogTitle>{t("settings.roles.deleteRole")}</DialogTitle>
             <DialogDescription>
               Are you sure you want to delete agent &apos;{deletingAgent?.displayName}&apos;? This
               action cannot be undone.

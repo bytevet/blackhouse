@@ -2,18 +2,19 @@ import { test, expect } from "@playwright/test";
 import { signInAsAdmin } from "./helpers";
 
 test.describe("Settings", () => {
-  test("settings page shows all admin tabs", async ({ page }) => {
+  test("settings sidebar lists all admin items", async ({ page }) => {
     await signInAsAdmin(page);
-
-    await page.getByText("Settings").first().click();
-    await expect(page).toHaveURL(/\/settings/, { timeout: 5000 });
-    await page.waitForLoadState("networkidle");
-
-    await expect(page.getByRole("heading", { name: /settings/i })).toBeVisible();
-    await expect(page.getByText("Profile")).toBeVisible();
-    await expect(page.getByText("Coding Agents")).toBeVisible();
-    await expect(page.getByText("Docker")).toBeVisible();
-    await expect(page.getByText("Users")).toBeVisible();
+    // Post-#48: the "Settings" sub-nav is now in the left sidebar; the
+    // page-level Settings heading was removed (per fe's follow-up). Assert
+    // the sidebar lists the admin Settings items.
+    // Post-#54 thematic rename: sidebar admin items are "Profile" / "Roles"
+    // (was "Coding Agents") / "Docker" / "Team" (was "Users"). `exact: true`
+    // avoids substring collisions with the brand link "Blackhouse Coding
+    // agents" and similar tagline copy elsewhere on the page.
+    await expect(page.getByRole("link", { name: "Profile", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Agent Configs", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Docker", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Team", exact: true })).toBeVisible();
   });
 
   test("profile page shows display name and password forms", async ({ page }) => {
@@ -76,14 +77,19 @@ test.describe("Settings", () => {
     await page.goto("/settings/agents");
     await page.waitForLoadState("networkidle");
 
+    // Post-#56: CardTitle reads "Agent Configs" (was "Roles" briefly under
+    // the workforce rename, but "Role" implied a job function; the things
+    // here are actually tool/CLI configs). Button is "Add Agent Config".
     await expect(
-      page.locator("[data-slot='card-title']", { hasText: "Coding Agents" }),
+      page.locator("[data-slot='card-title']", { hasText: "Agent Configs" }),
     ).toBeVisible();
-    await expect(page.getByRole("button", { name: /add agent/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /add agent config/i })).toBeVisible();
 
-    // Default seed agents should be present
+    // Default seed agents (their `name` field in agent_configs) should be
+    // present in the table. The agent names themselves aren't renamed —
+    // only the page chrome that wraps them.
     await expect(page.getByRole("cell", { name: "Claude Code", exact: true })).toBeVisible();
-    await expect(page.getByRole("cell", { name: "Gemini", exact: true })).toBeVisible();
+    await expect(page.getByRole("cell", { name: "Antigravity", exact: true })).toBeVisible();
     await expect(page.getByRole("cell", { name: "Codex", exact: true })).toBeVisible();
   });
 
@@ -93,7 +99,8 @@ test.describe("Settings", () => {
     await page.goto("/settings/users");
     await page.waitForLoadState("networkidle");
 
-    await expect(page.getByRole("button", { name: /add user/i })).toBeVisible();
+    // Post-#54: button "Add User" → "Onboard User".
+    await expect(page.getByRole("button", { name: /onboard user/i })).toBeVisible();
     await expect(page.getByRole("cell", { name: "admin@blackhouse.local" })).toBeVisible();
   });
 
@@ -103,8 +110,11 @@ test.describe("Settings", () => {
     await page.goto("/settings/users");
     await page.waitForLoadState("networkidle");
 
-    // Create user
-    await page.getByRole("button", { name: /add user/i }).click();
+    // Post-#54: "Add User" → "Onboard User"; delete-confirm title is now
+    // "Off-board User" with primary button "Off-board". The "Create User"
+    // submit button in the create-dialog was NOT renamed — leaving it as-is
+    // matches the actual source.
+    await page.getByRole("button", { name: /onboard user/i }).click();
     await page.waitForTimeout(500);
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible({ timeout: 5000 });
@@ -119,13 +129,14 @@ test.describe("Settings", () => {
       timeout: 5000,
     });
 
-    // Delete user — click the last button (trash) in the row
+    // Delete user — click the last button (trash) in the row, then the
+    // "Off-board" confirm button.
     const row = page.getByRole("row").filter({ hasText: "test-e2e@blackhouse.local" });
     await row.getByRole("button").last().click();
     await page.waitForTimeout(500);
     await page
       .getByRole("dialog")
-      .getByRole("button", { name: /^delete$/i })
+      .getByRole("button", { name: /^off-board$/i })
       .click();
     await page.waitForLoadState("networkidle");
     await expect(page.getByRole("cell", { name: "test-e2e@blackhouse.local" })).not.toBeVisible({

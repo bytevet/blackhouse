@@ -21,8 +21,11 @@ logs
 
 # Test results
 test-results
+playwright-report
+.playwright-mcp
 
 # Legacy
 .output
 .vinxi
 dist-ssr
+tests/e2e/.auth/

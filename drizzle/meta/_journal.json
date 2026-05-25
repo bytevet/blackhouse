@@ -15,6 +15,27 @@
       "when": 1775139091515,
       "tag": "0001_dizzy_silver_fox",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1779744000000,
+      "tag": "0002_antigravity_cutover",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1779755000000,
+      "tag": "0003_antigravity_skip_permissions",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1779950000000,
+      "tag": "0004_antigravity_volume_path",
+      "breakpoints": true
     }
   ]
 }

@@ -14,8 +14,10 @@ export default defineConfig({
     host: "0.0.0.0",
     port: 5173,
     proxy: {
-      "/api/terminal": { target: "http://localhost:3000", ws: true },
-      "/api": "http://localhost:3000",
+      // ws:true is needed for both the terminal (xterm) WS and the IDE proxy
+      // (code-server upgrades to a WS for its renderer↔editor service) plus
+      // /api/browser-ws/* (JPEG frame stream from agent's browser-service).
+      "/api": { target: "http://localhost:3000", ws: true },
       "/.well-known": "http://localhost:3000",
     },
   },

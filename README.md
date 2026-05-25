@@ -4,11 +4,11 @@
 [![Docker](https://github.com/bytevet/blackhouse/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/bytevet/blackhouse/actions/workflows/docker-publish.yml)
 [![Docker Image](https://img.shields.io/badge/ghcr.io-bytevet%2Fblackhouse-blue?logo=docker&logoColor=white)](https://github.com/bytevet/blackhouse/pkgs/container/blackhouse)
 
-Coding agent management platform — spawn and manage Docker-containerized coding agents (Claude Code, Gemini, Codex) with real-time terminal access, file explorers, and result viewers.
+Digital workforce platform — hire and manage Docker-containerized coding agents (Claude Code, Antigravity, Codex) with real-time terminal access, IDE, embedded browser, and result viewers.
 
 ## Features
 
-- **Agent Presets** — Claude Code, Gemini, Codex with pre-configured Dockerfiles, commands, and credential volumes
+- **Agent Presets** — Claude Code, Antigravity, Codex with pre-configured Dockerfiles, commands, and credential volumes
 - **Interactive Terminal** — xterm.js with WebGL rendering, binary WebSocket protocol, multi-tab sync, and scrollback replay
 - **Session Management** — Create, stop, restart, destroy coding sessions with Docker containers
 - **File Explorer** — Browse files, view syntax-highlighted content, see git diffs and status indicators

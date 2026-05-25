@@ -1,9 +1,10 @@
 import { useParams, useNavigate } from "react-router";
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Square,
   Play,
-  Trash2,
+  UserX,
   PanelRightOpen,
   PanelRightClose,
   PanelBottomOpen,
@@ -11,6 +12,8 @@ import {
   Loader2,
   Copy,
   ExternalLink,
+  Globe,
+  Code2,
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { client, unwrap } from "@/lib/api";
@@ -28,13 +31,14 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { TerminalPanel } from "@/components/terminal";
-import { FileExplorer } from "@/components/file-explorer";
-import { FileViewer } from "@/components/file-viewer";
+import { IdeViewer } from "@/components/ide-viewer";
 import { ResultViewer } from "@/components/result-viewer";
+import { BrowserViewer } from "@/components/browser-viewer";
 import type { CodingSession, SessionStatus } from "@/db/schema";
 import { sessionStatusConfig } from "@/lib/session-status";
 
 export function SessionPage() {
+  const { t } = useTranslation();
   const { sessionId } = useParams<{ sessionId: string }>();
   const [session, setSession] = useState<CodingSession | null>(null);
   const [loading, setLoading] = useState(true);
@@ -62,10 +66,10 @@ export function SessionPage() {
     return (
       <div className="flex flex-1 items-center justify-center p-8">
         <div className="space-y-2 text-center">
-          <h2 className="text-lg font-semibold text-foreground">Session not found</h2>
-          <p className="text-sm text-muted-foreground">
-            This session may have been destroyed or does not exist.
-          </p>
+          <h2 className="text-xl font-bold tracking-tight text-foreground">
+            {t("worker.notFound")}
+          </h2>
+          <p className="text-sm text-muted-foreground">{t("worker.notFoundDescription")}</p>
         </div>
       </div>
     );
@@ -75,41 +79,76 @@ export function SessionPage() {
 }
 
 function SessionView({ initialSession }: { initialSession: CodingSession }) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const [session, setSession] = useState(initialSession);
   const [explorerOpen, setExplorerOpen] = useState(!!initialSession.hasResult);
-  const [selectedFile, setSelectedFile] = useState<string | undefined>();
   const [explorerTab, setExplorerTab] = useState<string>(
-    initialSession.hasResult ? "result" : "files",
+    initialSession.hasResult ? "result" : "ide",
   );
   const [actionLoading, setActionLoading] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ type: "stop" | "destroy" } | null>(null);
+  // One-shot URL to navigate the embedded browser to (e.g. from terminal link
+  // click — #46). Cleared by BrowserViewer via `onNavigated` so the same URL
+  // clicked twice in a row still re-fires.
+  const [pendingBrowserNav, setPendingBrowserNav] = useState<string | null>(null);
+
+  const openBrowserAt = useCallback((url: string) => {
+    setExplorerOpen(true);
+    setExplorerTab("browser");
+    setPendingBrowserNav(url);
+  }, []);
+
+  // Keep a ref to the latest session so the polling closure can diff against
+  // current state without putting the whole `session` object in the effect's
+  // dep array (which would tear down + recreate the interval on every tick).
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
 
   useEffect(() => {
     if (!session || session.status !== "running") return;
 
+    const sessionId = session.id;
     const interval = setInterval(async () => {
       try {
         const updated = await client.api.sessions[":id"]
-          .$get({ param: { id: session.id } })
+          .$get({ param: { id: sessionId } })
           .then((r) => unwrap<CodingSession>(r));
-        if (updated) {
-          const isNewResult =
-            updated.hasResult && (!session.hasResult || updated.updatedAt > session.updatedAt);
-          setSession(updated);
-          if (isNewResult) {
-            setExplorerOpen(true);
-            setExplorerTab("result");
-          }
+        if (!updated) return;
+
+        const prev = sessionRef.current;
+        // No-op if nothing the UI cares about has changed
+        if (
+          prev &&
+          updated.status === prev.status &&
+          updated.hasResult === prev.hasResult &&
+          updated.updatedAt === prev.updatedAt
+        ) {
+          return;
+        }
+
+        const isNewResult =
+          updated.hasResult && (!prev?.hasResult || updated.updatedAt > prev.updatedAt);
+        const resultDisappeared = prev?.hasResult && !updated.hasResult;
+        setSession(updated);
+        if (isNewResult) {
+          setExplorerOpen(true);
+          setExplorerTab("result");
+        } else if (resultDisappeared) {
+          // The user could be parked on the Result tab when the result is
+          // deleted; the trigger is now hidden, so fall back to the IDE tab.
+          setExplorerTab((cur) => (cur === "result" ? "ide" : cur));
         }
       } catch {
         // ignore polling errors
       }
-    }, 5000);
+    }, 10000);
 
     return () => clearInterval(interval);
-  }, [session]);
+    // Only re-run when the polled subject's identity changes — not on every
+    // data refresh. sessionRef gives us the live `session` inside the closure.
+  }, [session?.id, session?.status]);
 
   const handleAction = useCallback(
     async (action: "stop" | "destroy" | "restart") => {
@@ -181,7 +220,7 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Meta section */}
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2 md:gap-3 md:px-4">
-        <h1 className="text-sm font-semibold text-foreground">{session.name}</h1>
+        <h1 className="text-xl font-bold tracking-tight text-foreground">{session.name}</h1>
         {session.agentTitle && (
           <span className="text-xs text-muted-foreground">— {session.agentTitle}</span>
         )}
@@ -195,10 +234,10 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
           {actionLoading ? (
             <span className="flex items-center gap-1">
               <Loader2 className="size-3 animate-spin" />
-              {session.status === "running" ? "Stopping..." : "Restarting..."}
+              {session.status === "running" ? t("worker.sendingOffDuty") : t("worker.waking")}
             </span>
           ) : (
-            session.status
+            t(sessionStatusConfig[session.status as SessionStatus]?.labelKey ?? "status.pending")
           )}
         </Badge>
         <span className="hidden text-xs text-muted-foreground sm:inline">{session.gitRepoUrl}</span>
@@ -216,7 +255,9 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
               ) : (
                 <Square className="size-3" />
               )}
-              <span className="hidden sm:inline">{actionLoading ? "Stopping..." : "Stop"}</span>
+              <span className="hidden sm:inline">
+                {actionLoading ? t("worker.sendingOffDuty") : t("worker.sendOffDuty")}
+              </span>
             </Button>
           )}
           {session.status === "stopped" && (
@@ -232,14 +273,14 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
                 <Play className="size-3" />
               )}
               <span className="hidden sm:inline">
-                {actionLoading ? "Restarting..." : "Restart"}
+                {actionLoading ? t("worker.waking") : t("worker.wake")}
               </span>
             </Button>
           )}
           {session.status === "stopped" && (
             <Button variant="outline" size="sm" onClick={handleRecreate} disabled={actionLoading}>
               <Copy className="size-3" />
-              <span className="hidden sm:inline">Re-create</span>
+              <span className="hidden sm:inline">{t("worker.respawn")}</span>
             </Button>
           )}
           {session.status === "stopped" && (
@@ -249,8 +290,8 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
               onClick={() => setConfirmAction({ type: "destroy" })}
               disabled={actionLoading}
             >
-              <Trash2 className="size-3" />
-              <span className="hidden sm:inline">Destroy</span>
+              <UserX className="size-3" />
+              <span className="hidden sm:inline">{t("worker.dismiss")}</span>
             </Button>
           )}
           <Button
@@ -269,7 +310,9 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
             ) : (
               <PanelRightOpen className="size-3" />
             )}
-            <span className="hidden sm:inline">{explorerOpen ? "Hide Panel" : "Files"}</span>
+            <span className="hidden sm:inline">
+              {explorerOpen ? t("worker.panelHide") : t("worker.panelOpen")}
+            </span>
           </Button>
         </div>
       </div>
@@ -278,7 +321,11 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
       {explorerOpen ? (
         <ResizablePanelGroup orientation={isMobile ? "vertical" : "horizontal"} className="flex-1">
           <ResizablePanel id="terminal" defaultSize={50} minSize={20}>
-            <TerminalPanel sessionId={session.id} status={session.status} />
+            <TerminalPanel
+              sessionId={session.id}
+              status={session.status}
+              onLinkClick={openBrowserAt}
+            />
           </ResizablePanel>
           <ResizableHandle withHandle />
           <ResizablePanel id="sidebar" defaultSize={50} minSize={15}>
@@ -288,13 +335,14 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
               className="flex h-full flex-col"
             >
               <TabsList variant="line" className="w-full border-b">
-                <TabsTrigger value="files" className="text-xs">
-                  File Explorer
+                <TabsTrigger value="ide" className="text-xs">
+                  <Code2 className="mr-1 size-3" />
+                  {t("worker.tabs.ide")}
                 </TabsTrigger>
-                <TabsTrigger value="result" className="text-xs">
-                  Result
-                  {session.hasResult && <span className="ml-1 size-1.5 rounded-full bg-primary" />}
-                  {session.hasResult && (
+                {session.hasResult && (
+                  <TabsTrigger value="result" className="text-xs">
+                    {t("worker.tabs.result")}
+                    <span className="ml-1 size-1.5 rounded-full bg-primary" />
                     <Tooltip>
                       <TooltipTrigger
                         render={
@@ -315,49 +363,18 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
                       >
                         <ExternalLink className="size-3" />
                       </TooltipTrigger>
-                      <TooltipContent>Open in new tab</TooltipContent>
+                      <TooltipContent>{t("worker.openInNewTab")}</TooltipContent>
                     </Tooltip>
-                  )}
+                  </TabsTrigger>
+                )}
+                <TabsTrigger value="browser" className="text-xs">
+                  <Globe className="mr-1 size-3" />
+                  {t("worker.tabs.browser")}
                 </TabsTrigger>
               </TabsList>
 
-              <TabsContent value="files" className="flex-1 overflow-hidden">
-                <ResizablePanelGroup orientation="horizontal" className="h-full">
-                  <ResizablePanel id="file-tree" defaultSize={35} minSize={20}>
-                    <div className="h-full overflow-auto">
-                      <FileExplorer
-                        sessionId={session.id}
-                        onFileSelect={setSelectedFile}
-                        selectedFile={selectedFile}
-                        status={session.status}
-                        rootPath={
-                          session.gitRepoUrl
-                            ? `/workspace/${session.gitRepoUrl
-                                .replace(/\.git$/, "")
-                                .split("/")
-                                .pop()}`
-                            : "/workspace"
-                        }
-                      />
-                    </div>
-                  </ResizablePanel>
-                  <ResizableHandle withHandle />
-                  <ResizablePanel id="file-viewer" defaultSize={65} minSize={20}>
-                    <div className="h-full overflow-auto">
-                      {selectedFile ? (
-                        <FileViewer
-                          sessionId={session.id}
-                          filePath={selectedFile}
-                          status={session.status}
-                        />
-                      ) : (
-                        <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                          Select a file to view
-                        </div>
-                      )}
-                    </div>
-                  </ResizablePanel>
-                </ResizablePanelGroup>
+              <TabsContent value="ide" className="m-0 flex-1 overflow-hidden">
+                <IdeViewer sessionId={session.id} status={session.status as SessionStatus} />
               </TabsContent>
 
               <TabsContent value="result" className="m-0 flex-1 overflow-hidden">
@@ -377,35 +394,50 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
                   />
                 ) : (
                   <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                    No result yet. The coding agent can submit results via MCP.
+                    {t("worker.tabs.noResult")}
                   </div>
                 )}
+              </TabsContent>
+
+              <TabsContent value="browser" className="m-0 flex-1 overflow-hidden">
+                <BrowserViewer
+                  sessionId={session.id}
+                  status={session.status}
+                  navigateTo={pendingBrowserNav}
+                  onNavigated={() => setPendingBrowserNav(null)}
+                />
               </TabsContent>
             </Tabs>
           </ResizablePanel>
         </ResizablePanelGroup>
       ) : (
         <div className="flex-1">
-          <TerminalPanel sessionId={session.id} status={session.status} />
+          <TerminalPanel
+            sessionId={session.id}
+            status={session.status}
+            onLinkClick={openBrowserAt}
+          />
         </div>
       )}
 
-      {/* Confirm Stop / Destroy Dialog */}
+      {/* Confirm Send Off-Duty / Dismiss Dialog */}
       <Dialog open={!!confirmAction} onOpenChange={(open) => !open && setConfirmAction(null)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {confirmAction?.type === "stop" ? "Stop Session" : "Destroy Session"}
+              {confirmAction?.type === "stop"
+                ? t("worker.confirmDialog.sendOffDutyTitle")
+                : t("worker.confirmDialog.dismissTitle")}
             </DialogTitle>
             <DialogDescription>
               {confirmAction?.type === "stop"
-                ? "Are you sure you want to stop this session?"
-                : "Are you sure you want to destroy this session? This action cannot be undone."}
+                ? t("worker.confirmDialog.sendOffDutyBody", { name: session.name })
+                : t("worker.confirmDialog.dismissBody", { name: session.name })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmAction(null)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               variant="destructive"
@@ -416,7 +448,7 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
                 await handleAction(action);
               }}
             >
-              {confirmAction?.type === "stop" ? "Stop" : "Destroy"}
+              {confirmAction?.type === "stop" ? t("worker.sendOffDuty") : t("worker.dismiss")}
             </Button>
           </DialogFooter>
         </DialogContent>

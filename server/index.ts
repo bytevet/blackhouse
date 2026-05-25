@@ -13,10 +13,11 @@ import authRoutes from "./api/auth.js";
 import sessionsRoutes from "./api/sessions.js";
 import templatesRoutes from "./api/templates.js";
 import settingsRoutes from "./api/settings.js";
-import filesRoutes from "./api/files.js";
 import resultRoutes from "./api/result.js";
 import skillsRoutes from "./api/skills.js";
 import { createTerminalRoute } from "./ws/terminal.js";
+import { createBrowserWsRoute } from "./ws/browser.js";
+import { createIdeProxy } from "./proxy/ide.js";
 
 const app = new Hono();
 
@@ -44,11 +45,17 @@ const routes = app
   .route("/api/sessions", sessionsRoutes)
   .route("/api/templates", templatesRoutes)
   .route("/api/settings", settingsRoutes)
-  .route("/api/files", filesRoutes)
   .route("/.well-known/agent-skills", skillsRoutes);
 
 // WebSocket terminal
 app.route("/api/terminal", createTerminalRoute(upgradeWebSocket));
+
+// WebSocket browser screencast proxy (binary JPEG frames from container)
+app.route("/api/browser-ws", createBrowserWsRoute(upgradeWebSocket));
+
+// IDE proxy — HTTP + WS for code-server inside the agent container.
+// Mounted at /api/sessions/:id/ide/* (the sub-app sees that path verbatim).
+app.route("/", createIdeProxy(upgradeWebSocket));
 
 // Serve SPA static files in production
 app.use("/*", serveStatic({ root: "./dist/client" }));

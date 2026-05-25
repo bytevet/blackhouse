@@ -1,4 +1,4 @@
-export type PresetId = "claude-code" | "gemini" | "codex" | "custom";
+export type PresetId = "claude-code" | "antigravity" | "codex" | "custom";
 
 export interface AgentPreset {
   id: PresetId;
@@ -19,17 +19,20 @@ export const AGENT_PRESETS: Record<PresetId, AgentPreset> = {
     ],
     dockerfilePath: "agent/dockerfiles/claude-code.Dockerfile",
   },
-  gemini: {
-    id: "gemini",
-    displayName: "Gemini",
-    agentCommand: "gemini --yolo",
-    volumeMounts: [{ name: "gemini-config", mountPath: "/home/workspace/.gemini" }],
-    dockerfilePath: "agent/dockerfiles/gemini.Dockerfile",
+  antigravity: {
+    id: "antigravity",
+    displayName: "Antigravity",
+    agentCommand: "agy --dangerously-skip-permissions",
+    // `agy` (Antigravity CLI) writes config + auth to `~/.gemini`, not
+    // `~/.antigravity` — it inherits Gemini's config layout. Volume name
+    // stays `antigravity-config` (it's just the named-volume identifier).
+    volumeMounts: [{ name: "antigravity-config", mountPath: "/home/workspace/.gemini" }],
+    dockerfilePath: "agent/dockerfiles/antigravity.Dockerfile",
   },
   codex: {
     id: "codex",
     displayName: "Codex",
-    agentCommand: "codex --full-auto",
+    agentCommand: "codex --sandbox workspace-write --ask-for-approval on-request",
     volumeMounts: [{ name: "codex-config", mountPath: "/home/workspace/.codex" }],
     dockerfilePath: "agent/dockerfiles/codex.Dockerfile",
   },

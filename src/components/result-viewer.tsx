@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { Code, Eye, Trash2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { timeAgo } from "@/lib/time";
@@ -11,6 +12,7 @@ interface ResultViewerProps {
 }
 
 export function ResultViewer({ sessionId, updatedAt, onDelete }: ResultViewerProps) {
+  const { t } = useTranslation();
   const [showSource, setShowSource] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [sourceHtml, setSourceHtml] = useState<string | null>(null);
@@ -77,7 +79,9 @@ export function ResultViewer({ sessionId, updatedAt, onDelete }: ResultViewerPro
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
         {updatedAt && (
-          <span className="text-xs text-muted-foreground">Submitted {timeAgo(updatedAt)}</span>
+          <span className="text-xs text-muted-foreground">
+            {t("result.submitted", { when: timeAgo(updatedAt) })}
+          </span>
         )}
         <div className="ml-auto flex items-center gap-1">
           <Button
@@ -88,12 +92,12 @@ export function ResultViewer({ sessionId, updatedAt, onDelete }: ResultViewerPro
             {showSource ? (
               <>
                 <Code className="size-3" />
-                Source
+                {t("result.source")}
               </>
             ) : (
               <>
                 <Eye className="size-3" />
-                Preview
+                {t("result.preview")}
               </>
             )}
           </Button>
@@ -112,7 +116,7 @@ export function ResultViewer({ sessionId, updatedAt, onDelete }: ResultViewerPro
               }}
             >
               <Trash2 className="size-3" />
-              {confirmDelete && "Confirm?"}
+              {confirmDelete && t("result.confirmDelete")}
             </Button>
           )}
         </div>

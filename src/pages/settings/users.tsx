@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
+import { useTranslation } from "react-i18next";
 import { z } from "zod";
 import { useSession } from "@/lib/auth-client";
 import { client, unwrap, type Paginated } from "@/lib/api";
@@ -56,6 +57,7 @@ const editUserSchema = z.object({
 });
 
 export function UsersPage() {
+  const { t } = useTranslation();
   const { data: session } = useSession();
   const navigate = useNavigate();
   const isAdmin = session?.user?.role === "admin";
@@ -204,15 +206,13 @@ export function UsersPage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
-            Users
+            {t("settings.team.title")}
             <Button size="sm" onClick={openCreate}>
               <Plus className="size-3" />
-              Add User
+              {t("settings.team.onboardUser")}
             </Button>
           </CardTitle>
-          <CardDescription>
-            Manage platform users and their roles. Only admins can access this page.
-          </CardDescription>
+          <CardDescription>{t("settings.team.description")}</CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
@@ -316,8 +316,8 @@ export function UsersPage() {
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Add User</DialogTitle>
-            <DialogDescription>Create a new platform user.</DialogDescription>
+            <DialogTitle>{t("settings.team.onboardDialogTitle")}</DialogTitle>
+            <DialogDescription>{t("settings.team.onboardDialogDescription")}</DialogDescription>
           </DialogHeader>
           <FieldGroup>
             <Field data-invalid={!!formErrors.name || undefined}>
@@ -445,21 +445,21 @@ export function UsersPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmation Dialog */}
+      {/* Off-board Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete User</DialogTitle>
+            <DialogTitle>{t("settings.team.offboardUser")}</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete "{deletingUser?.name}"? This action cannot be undone.
+              {t("settings.team.offboardDialogBody", { name: deletingUser?.name ?? "" })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button variant="destructive" onClick={handleDelete}>
-              Delete
+              {t("settings.team.offboard")}
             </Button>
           </DialogFooter>
         </DialogContent>

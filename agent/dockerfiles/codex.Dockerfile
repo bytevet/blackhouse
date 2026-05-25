@@ -1,4 +1,4 @@
-ARG UBUNTU_IMAGE_VER=latest
+ARG UBUNTU_IMAGE_VER=24.04
 FROM ubuntu:${UBUNTU_IMAGE_VER}
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -14,6 +14,36 @@ ARG NODE_MAJOR_VER=24
 RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR_VER:-24}.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
+
+# --- Shared Blackhouse v-next additions ---------------------------------------
+# Identical block across all three agent images so the layer cache is reused.
+
+# code-server: browser IDE bound to 127.0.0.1:8443 inside the container,
+# proxied by the Blackhouse server to the IDE tab in the SPA.
+RUN curl -fsSL https://code-server.dev/install.sh | sh
+
+# Playwright + Chromium for the in-container browser service. Browsers live
+# under /opt/blackhouse/ms-playwright so the workspace user can read them
+# without owning a per-user playwright cache.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/blackhouse/ms-playwright
+COPY agent/browser-service /opt/blackhouse/browser-service
+RUN cd /opt/blackhouse/browser-service \
+    && npm install --omit=dev \
+    && npx playwright install --with-deps chromium \
+    && chmod -R a+rX /opt/blackhouse/browser-service /opt/blackhouse/ms-playwright
+
+# $BROWSER shim — tools that respect $BROWSER/xdg-open route into the
+# embedded browser tab via this script.
+COPY agent/skills/blackhouse/browser-shim.sh /opt/blackhouse/browser-shim.sh
+RUN chmod +x /opt/blackhouse/browser-shim.sh
+ENV BROWSER=/opt/blackhouse/browser-shim.sh
+
+# Default code-server user settings (dark theme to match the SPA). Seeded
+# into $HOME/.local/share/code-server/User/settings.json by entrypoint.sh
+# on first launch, with `cp -n` so a user-supplied override wins.
+COPY agent/code-server-config /opt/blackhouse/code-server-config
+
+# --- Agent-specific install ---------------------------------------------------
 
 # Install Codex CLI globally
 RUN npm install -g @openai/codex

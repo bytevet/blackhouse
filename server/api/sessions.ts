@@ -15,7 +15,8 @@ import {
   getTableColumns,
   type SQL,
 } from "drizzle-orm";
-import { getDockerClient } from "../lib/docker.js";
+import { getDockerClient, getContainerHostPort } from "../lib/docker.js";
+import { streamSSE } from "hono/streaming";
 import type { AuthEnv } from "../middleware/auth.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { paginationQuery } from "../lib/pagination.js";
@@ -329,11 +330,30 @@ const app = new Hono<AuthEnv>()
             "blackhouse.user_id": session.user.id,
             "blackhouse.managed": "true",
           },
+          // Expose the in-container services so the Blackhouse server can
+          // proxy them to the React SPA:
+          //   9223 — browser-service (Playwright screencast + control)
+          //   8443 — code-server (IDE)
+          // Empty HostPort tells Docker to assign an ephemeral port; we look
+          // it up on demand via `getContainerHostPort(sessionId, port)`.
+          ExposedPorts: {
+            "9223/tcp": {},
+            "8443/tcp": {},
+          },
           HostConfig: {
             Memory: 2 * 1024 * 1024 * 1024, // 2GB
             NanoCpus: 2_000_000_000, // 2 CPUs
             Binds: binds.length > 0 ? binds : undefined,
             ExtraHosts: ["host.docker.internal:host-gateway"],
+            // `HostIp: "127.0.0.1"` constrains the mapped ports to the host's
+            // loopback. The container itself binds 0.0.0.0 (needed for the
+            // port mapping to work — see entrypoint.sh / browser-service);
+            // without this HostIp, those services would be exposed on every
+            // host interface, including the LAN.
+            PortBindings: {
+              "9223/tcp": [{ HostIp: "127.0.0.1", HostPort: "" }],
+              "8443/tcp": [{ HostIp: "127.0.0.1", HostPort: "" }],
+            },
           },
         });
 
@@ -555,6 +575,229 @@ const app = new Hono<AuthEnv>()
       .where(eq(schema.codingSessions.id, id));
 
     return c.json({ success: true });
+  })
+
+  // ---------------------------------------------------------------------------
+  // Browser proxy — forwards to the in-container browser-service on port 9223.
+  // All routes are auth-gated and ownership-checked via `requireSessionAccess`.
+  // ---------------------------------------------------------------------------
+
+  // POST /api/sessions/:id/browser/control
+  .post(
+    "/:id/browser/control",
+    authMiddleware,
+    zValidator(
+      "json",
+      z.object({
+        action: z.enum(["navigate", "back", "forward", "reload", "resize"]),
+        url: z.string().optional(),
+        // `resize` carries even-rounded pixel dimensions; clamped server-side
+        // in browser-service (320..3840 × 240..2160 per #41 spec).
+        width: z.number().int().positive().optional(),
+        height: z.number().int().positive().optional(),
+      }),
+    ),
+    async (c) => {
+      const id = c.req.param("id");
+      await requireSessionAccess(id, c.get("session").user);
+      const body = c.req.valid("json");
+
+      try {
+        const port = await getContainerHostPort(id, 9223);
+        const res = await fetch(`http://127.0.0.1:${port}/browser/control`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const text = await res.text();
+        return c.body(text, res.status as 200, {
+          "content-type": res.headers.get("content-type") || "application/json",
+        });
+      } catch (err) {
+        return c.json(
+          {
+            error: "browser_unavailable",
+            message: err instanceof Error ? err.message : String(err),
+          },
+          502,
+        );
+      }
+    },
+  )
+
+  // POST /api/sessions/:id/browser/input — forwarded as-is to the service.
+  .post(
+    "/:id/browser/input",
+    authMiddleware,
+    zValidator(
+      "json",
+      z.object({
+        type: z.enum(["mouseMove", "mouseDown", "mouseUp", "wheel", "keyDown", "keyUp", "char"]),
+        x: z.number().optional(),
+        y: z.number().optional(),
+        button: z.string().optional(),
+        // CDP `buttons` bitmask (1=left, 2=right, 4=middle). Needed so the
+        // in-container browser recognizes mouseMove during a drag as a
+        // selection-extension rather than a hover (#44).
+        buttons: z.number().int().nonnegative().optional(),
+        clickCount: z.number().optional(),
+        key: z.string().optional(),
+        code: z.string().optional(),
+        text: z.string().optional(),
+        modifiers: z.number().optional(),
+        deltaX: z.number().optional(),
+        deltaY: z.number().optional(),
+      }),
+    ),
+    async (c) => {
+      const id = c.req.param("id");
+      await requireSessionAccess(id, c.get("session").user);
+      const body = c.req.valid("json");
+
+      try {
+        const port = await getContainerHostPort(id, 9223);
+        const res = await fetch(`http://127.0.0.1:${port}/browser/input`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const text = await res.text();
+        return c.body(text, res.status as 200, {
+          "content-type": res.headers.get("content-type") || "application/json",
+        });
+      } catch (err) {
+        return c.json(
+          {
+            error: "browser_unavailable",
+            message: err instanceof Error ? err.message : String(err),
+          },
+          502,
+        );
+      }
+    },
+  )
+
+  // POST /api/sessions/:id/browser/eval — run a JS expression in the page.
+  .post(
+    "/:id/browser/eval",
+    authMiddleware,
+    zValidator(
+      "json",
+      z.object({
+        expression: z.string().min(1).max(10_000),
+      }),
+    ),
+    async (c) => {
+      const id = c.req.param("id");
+      await requireSessionAccess(id, c.get("session").user);
+      const body = c.req.valid("json");
+
+      try {
+        const port = await getContainerHostPort(id, 9223);
+        const res = await fetch(`http://127.0.0.1:${port}/browser/eval`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const text = await res.text();
+        return c.body(text, res.status as 200, {
+          "content-type": res.headers.get("content-type") || "application/json",
+        });
+      } catch (err) {
+        return c.json(
+          {
+            error: "browser_unavailable",
+            message: err instanceof Error ? err.message : String(err),
+          },
+          502,
+        );
+      }
+    },
+  )
+
+  // GET /api/sessions/:id/browser/state — strict e2e probe forwarded from the
+  // in-container browser-service. Returns the live page's selectionText,
+  // scrollX/Y, lastContextMenu, viewport/docSize — i.e. observable Chromium
+  // state, not just the CDP wire shape. Query params (e.g. `?resetContextMenu=1`)
+  // are passed through.
+  .get("/:id/browser/state", authMiddleware, async (c) => {
+    const id = c.req.param("id");
+    await requireSessionAccess(id, c.get("session").user);
+    try {
+      const port = await getContainerHostPort(id, 9223);
+      const url = new URL(c.req.url);
+      const upstream = `http://127.0.0.1:${port}/browser/state${url.search}`;
+      const res = await fetch(upstream);
+      const text = await res.text();
+      return c.body(text, res.status as 200, {
+        "content-type": res.headers.get("content-type") || "application/json",
+      });
+    } catch (err) {
+      return c.json(
+        {
+          error: "browser_unavailable",
+          message: err instanceof Error ? err.message : String(err),
+        },
+        502,
+      );
+    }
+  })
+
+  // GET /api/sessions/:id/browser/console — SSE re-broadcast.
+  // We open the container service's SSE stream, parse each `data:` line, and
+  // forward as our own SSE so the client doesn't have to know about the
+  // upstream container port.
+  .get("/:id/browser/console", authMiddleware, async (c) => {
+    const id = c.req.param("id");
+    await requireSessionAccess(id, c.get("session").user);
+
+    let port: number;
+    try {
+      port = await getContainerHostPort(id, 9223);
+    } catch (err) {
+      return c.json(
+        { error: "browser_unavailable", message: err instanceof Error ? err.message : String(err) },
+        502,
+      );
+    }
+
+    return streamSSE(c, async (stream) => {
+      const upstream = await fetch(`http://127.0.0.1:${port}/browser/console`, {
+        headers: { accept: "text/event-stream" },
+        // Important: do not buffer; SSE is a long-lived response.
+        // node's undici fetch streams the body by default.
+      });
+      if (!upstream.body) {
+        await stream.writeSSE({ event: "error", data: "no_upstream_body" });
+        return;
+      }
+      const reader = upstream.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          // SSE messages are separated by a blank line (\n\n).
+          let idx: number;
+          while ((idx = buf.indexOf("\n\n")) >= 0) {
+            const block = buf.slice(0, idx);
+            buf = buf.slice(idx + 2);
+            // Pass through verbatim — preserves event:/data:/id: fields.
+            await stream.write(block + "\n\n");
+          }
+        }
+      } catch {
+        // upstream closed
+      } finally {
+        try {
+          await reader.cancel();
+        } catch {
+          /* ignore */
+        }
+      }
+    });
   });
 
 export default app;

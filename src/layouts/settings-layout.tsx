@@ -1,18 +1,14 @@
-import { useSession } from "@/lib/auth-client";
-import { User, Bot, Container, Users } from "lucide-react";
-import { TabbedLayout, type TabItem } from "@/components/tabbed-layout";
+import { Outlet } from "react-router";
 
-const allTabs: (TabItem & { adminOnly: boolean })[] = [
-  { to: "/settings/profile", label: "Profile", icon: User, adminOnly: false },
-  { to: "/settings/agents", label: "Coding Agents", icon: Bot, adminOnly: true },
-  { to: "/settings/docker", label: "Docker", icon: Container, adminOnly: true },
-  { to: "/settings/users", label: "Users", icon: Users, adminOnly: true },
-];
-
+/**
+ * Settings section layout — sub-nav (Profile/Agents/Docker/Users) lives in
+ * the sidebar now, so this is just a padded scroll container around the
+ * active page.
+ */
 export function SettingsLayout() {
-  const { data: session } = useSession();
-  const isAdmin = session?.user?.role === "admin";
-  const tabs = allTabs.filter((t) => !t.adminOnly || isAdmin);
-
-  return <TabbedLayout title="Settings" tabs={tabs} />;
+  return (
+    <div className="flex flex-1 flex-col overflow-auto p-4 md:p-6">
+      <Outlet />
+    </div>
+  );
 }

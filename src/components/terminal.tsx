@@ -1,10 +1,18 @@
 import { useEffect, useRef, useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { Terminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
 
 interface TerminalPanelProps {
   sessionId: string;
   status: string;
+  /**
+   * Called when the user clicks a URL in terminal output. If provided, the
+   * default xterm WebLinks behavior (`window.open` in a new tab) is bypassed
+   * — caller is fully responsible for handling the URL (e.g. routing it to
+   * the embedded browser). If omitted, the default new-tab behavior is used.
+   */
+  onLinkClick?: (url: string) => void;
 }
 
 // Resize message prefix byte (0x01) — distinguishes from terminal input
@@ -22,12 +30,17 @@ function encodeResize(cols: number, rows: number): ArrayBuffer {
   return buf.buffer as ArrayBuffer;
 }
 
-export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
+export function TerminalPanel({ sessionId, status, onLinkClick }: TerminalPanelProps) {
+  const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Mirror the latest `onLinkClick` into a ref so the WebLinksAddon callback
+  // — set once at terminal init — sees prop changes without tearing down xterm.
+  const onLinkClickRef = useRef(onLinkClick);
+  onLinkClickRef.current = onLinkClick;
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const [connected, setConnected] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -184,7 +197,17 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
 
       const fitAddon = new FitAddon();
       terminal.loadAddon(fitAddon);
-      terminal.loadAddon(new WebLinksAddon());
+      terminal.loadAddon(
+        new WebLinksAddon((event, uri) => {
+          const handler = onLinkClickRef.current;
+          if (handler) {
+            event.preventDefault();
+            handler(uri);
+          } else {
+            window.open(uri, "_blank", "noopener,noreferrer");
+          }
+        }),
+      );
       terminal.loadAddon(new Unicode11Addon());
       terminal.loadAddon(new ClipboardAddon());
       terminal.loadAddon(new ImageAddon());
@@ -259,7 +282,7 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
   if (status !== "running") {
     return (
       <div className="flex h-full items-center justify-center bg-terminal text-sm text-muted-foreground">
-        Session is {status}. Start the session to access the terminal.
+        {t("terminal.notRunning", { status })}
       </div>
     );
   }
@@ -272,13 +295,15 @@ export function TerminalPanel({ sessionId, status }: TerminalPanelProps) {
         onClick={() => terminalRef.current?.focus()}
       >
         <span className="flex items-center gap-1.5">
-          <span className={`size-1.5 rounded-full ${connected ? "bg-green-500" : "bg-red-500"}`} />
-          <span className="text-muted-foreground">{connected ? "Connected" : "Disconnected"}</span>
+          <span className={`size-1.5 rounded-full ${connected ? "bg-success" : "bg-error"}`} />
+          <span className="text-muted-foreground">
+            {connected ? t("terminal.connected") : t("terminal.disconnected")}
+          </span>
         </span>
         {focused ? (
           <RunningCat />
         ) : (
-          <span className="text-muted-foreground/50">Click to focus</span>
+          <span className="text-muted-foreground/50">{t("terminal.clickToFocus")}</span>
         )}
       </div>
     </div>

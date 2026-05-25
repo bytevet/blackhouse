@@ -5,3 +5,6 @@ dist
 drizzle
 src/routeTree.gen.ts
 package-lock.json
+.playwright-mcp
+test-results
+playwright-report
