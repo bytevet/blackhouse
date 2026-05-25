@@ -1,9 +1,19 @@
 /**
- * Binary wire codec for browser input events over the screencast WS (#60).
+ * Binary wire codec for the browser screencast WS (#60 + #61).
  *
- * Fixed-layout frames keep each event at 6–14 bytes (plus a 1-byte op code)
- * vs ~80–120 bytes for the equivalent JSON. Per-event-type layouts:
+ * Two opcode ranges share the same socket:
  *
+ *   0x01–0x07: input events. Fire-and-forget, no reqId. Encoded by
+ *              `encodeInput` / decoded by `decodeInput`.
+ *
+ *   0x10–0x12 (client→server) + 0x82–0x84 (server→client): request /
+ *              response pairs with a 4-byte big-endian `reqId` for
+ *              correlation. Encoded by `encodeRequest` / decoded by
+ *              `decodeResponse`.
+ *
+ * Wire layouts (all multi-byte numbers BIG-ENDIAN):
+ *
+ * INPUT EVENTS
  * | Op   | Event      | Layout                                             |
  * |------|------------|----------------------------------------------------|
  * | 0x01 | mouseMove  | x:u16, y:u16, buttons:u8                          |
@@ -16,12 +26,25 @@
  * | 0x06 | keyUp      | (same as keyDown)                                 |
  * | 0x07 | char       | textLen:u8, text (utf8)                           |
  *
- * All multi-byte numbers big-endian. `button` mapping: "none"→0, "left"→1,
- * "right"→2, "middle"→4.
+ * `button` mapping: "none"→0, "left"→1, "right"→2, "middle"→4. The input
+ * shape is a discriminated union (`InputMessage`) so the encoder's switch
+ * is statically exhaustive.
  *
- * The input shape is a discriminated union (`InputMessage`) so the encoder's
- * switch is statically exhaustive — adding a new event type is a tsc error
- * until every site catches up.
+ * REQUEST / RESPONSE
+ * | Op   | Direction       | Layout                                       |
+ * |------|-----------------|----------------------------------------------|
+ * | 0x10 | client→ control | reqId:u32, action:u8, urlLen:u16, url:utf8,  |
+ * |      |                 |   width:u16, height:u16                      |
+ * | 0x11 | client→ eval    | reqId:u32, exprLen:u32, expression:utf8      |
+ * | 0x12 | client→ state   | reqId:u32, flags:u8  (bit0 = resetContextMenu) |
+ * | 0x82 | server→ ctrlAck | reqId:u32, ok:u8, payloadLen:u32, json:utf8  |
+ * | 0x83 | server→ evalRes | reqId:u32, ok:u8, payloadLen:u32, json:utf8  |
+ * | 0x84 | server→ stateSn | reqId:u32, payloadLen:u32, json:utf8         |
+ *
+ * `action` byte for control: 1=navigate, 2=back, 3=forward, 4=reload,
+ * 5=resize. The server-side authority (`agent/browser-service/input-codec.mjs`)
+ * is the contract; this file mirrors it. Note 0x84 has NO `ok` byte — its
+ * "ok" lives inside the JSON payload.
  */
 
 export const INPUT_OP = {
@@ -249,5 +272,194 @@ export function decodeInput(buf: ArrayBuffer | Uint8Array): InputMessage | null 
     }
     default:
       return null;
+  }
+}
+
+// ─── Request / response codec (0x10–0x12 + 0x82–0x84, #61) ───────────────────
+
+export const REQUEST_OP = {
+  control: 0x10,
+  eval: 0x11,
+  state: 0x12,
+} as const;
+
+export const RESPONSE_OP = {
+  controlAck: 0x82,
+  evalResult: 0x83,
+  stateSnapshot: 0x84,
+} as const;
+
+/**
+ * Control-action byte enum, matching `agent/browser-service/input-codec.mjs`
+ * (`CONTROL_ACTION = ["", "navigate", "back", "forward", "reload", "resize"]`).
+ * 0 is reserved (decodes as "unknown action" on the server).
+ */
+export const CONTROL_ACTION = {
+  navigate: 1,
+  back: 2,
+  forward: 3,
+  reload: 4,
+  resize: 5,
+} as const;
+
+export type ControlActionName = keyof typeof CONTROL_ACTION;
+
+export interface ControlBody {
+  action: ControlActionName;
+  /** Required for `action: "navigate"`, ignored otherwise (encoded as empty). */
+  url?: string;
+  /** Required for `action: "resize"`, ignored otherwise (encoded as 0). */
+  width?: number;
+  /** Required for `action: "resize"`, ignored otherwise (encoded as 0). */
+  height?: number;
+}
+
+export interface EvalBody {
+  expression: string;
+}
+
+export interface StateBody {
+  resetContextMenu: boolean;
+}
+
+/**
+ * Response triple decoded from a server frame. 0x82/0x83 carry an `ok`
+ * byte before the payload; 0x84 omits it (the JSON payload carries its
+ * own `ok` field) so this union exposes `ok` as optional/per-variant.
+ */
+export type WsResponse =
+  | { opcode: typeof RESPONSE_OP.controlAck; reqId: number; ok: boolean; payload: unknown }
+  | { opcode: typeof RESPONSE_OP.evalResult; reqId: number; ok: boolean; payload: unknown }
+  | { opcode: typeof RESPONSE_OP.stateSnapshot; reqId: number; payload: unknown };
+
+/**
+ * Encode a request frame for opcodes 0x10/0x11/0x12. The three overloads
+ * pin the body shape per opcode so a caller passing the wrong body for a
+ * given opcode is a tsc error, not a runtime malformed frame.
+ *
+ * `reqId` is a u32 — caller is responsible for allocating it and tracking
+ * the pending request map (`browser-ws-rpc.ts`).
+ */
+export function encodeRequest(
+  opcode: typeof REQUEST_OP.control,
+  reqId: number,
+  body: ControlBody,
+): ArrayBuffer;
+export function encodeRequest(
+  opcode: typeof REQUEST_OP.eval,
+  reqId: number,
+  body: EvalBody,
+): ArrayBuffer;
+export function encodeRequest(
+  opcode: typeof REQUEST_OP.state,
+  reqId: number,
+  body: StateBody,
+): ArrayBuffer;
+export function encodeRequest(
+  opcode: (typeof REQUEST_OP)[keyof typeof REQUEST_OP],
+  reqId: number,
+  body: ControlBody | EvalBody | StateBody,
+): ArrayBuffer {
+  switch (opcode) {
+    case REQUEST_OP.control: {
+      const b = body as ControlBody;
+      const urlBytes = textEncoder.encode(b.url ?? "");
+      const buf = new ArrayBuffer(12 + urlBytes.length);
+      const dv = new DataView(buf);
+      const u8 = new Uint8Array(buf);
+      dv.setUint8(0, REQUEST_OP.control);
+      dv.setUint32(1, reqId, false);
+      dv.setUint8(5, CONTROL_ACTION[b.action]);
+      dv.setUint16(6, urlBytes.length, false);
+      u8.set(urlBytes, 8);
+      dv.setUint16(8 + urlBytes.length, b.width ?? 0, false);
+      dv.setUint16(10 + urlBytes.length, b.height ?? 0, false);
+      return buf;
+    }
+    case REQUEST_OP.eval: {
+      const b = body as EvalBody;
+      const exprBytes = textEncoder.encode(b.expression);
+      const buf = new ArrayBuffer(9 + exprBytes.length);
+      const dv = new DataView(buf);
+      const u8 = new Uint8Array(buf);
+      dv.setUint8(0, REQUEST_OP.eval);
+      dv.setUint32(1, reqId, false);
+      dv.setUint32(5, exprBytes.length, false);
+      u8.set(exprBytes, 9);
+      return buf;
+    }
+    case REQUEST_OP.state: {
+      const b = body as StateBody;
+      const buf = new ArrayBuffer(6);
+      const dv = new DataView(buf);
+      dv.setUint8(0, REQUEST_OP.state);
+      dv.setUint32(1, reqId, false);
+      dv.setUint8(5, b.resetContextMenu ? 0b00000001 : 0);
+      return buf;
+    }
+    default: {
+      const _exhaustive: never = opcode;
+      throw new Error(`encodeRequest: unknown opcode 0x${(_exhaustive as number).toString(16)}`);
+    }
+  }
+}
+
+/**
+ * Decode a server response frame (0x82/0x83/0x84) into `{ opcode, reqId,
+ * ok?, payload }`. Returns `null` on unknown opcode, truncated buffer, or
+ * malformed JSON payload — caller treats null as a silent drop.
+ *
+ * `payload` is `JSON.parse`d for caller convenience; consumers narrow it
+ * via the response-payload type they expect from be's `run*` dispatcher.
+ */
+export function decodeResponse(buf: ArrayBuffer | Uint8Array): WsResponse | null {
+  const view = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  if (view.length < 5) return null;
+  const dv = new DataView(view.buffer, view.byteOffset, view.byteLength);
+  const opcode = dv.getUint8(0);
+  const reqId = dv.getUint32(1, false);
+
+  try {
+    switch (opcode) {
+      case RESPONSE_OP.controlAck:
+      case RESPONSE_OP.evalResult: {
+        // header = op(1) + reqId(4) + ok(1) + payloadLen(4) = 10 bytes
+        if (view.length < 10) return null;
+        const ok = dv.getUint8(5) === 1;
+        const payloadLen = dv.getUint32(6, false);
+        if (view.length < 10 + payloadLen) return null;
+        const payload = parseJsonPayload(view.subarray(10, 10 + payloadLen));
+        if (payload === SENTINEL_BAD_JSON) return null;
+        return opcode === RESPONSE_OP.controlAck
+          ? { opcode: RESPONSE_OP.controlAck, reqId, ok, payload }
+          : { opcode: RESPONSE_OP.evalResult, reqId, ok, payload };
+      }
+      case RESPONSE_OP.stateSnapshot: {
+        // header = op(1) + reqId(4) + payloadLen(4) = 9 bytes  (no ok byte)
+        if (view.length < 9) return null;
+        const payloadLen = dv.getUint32(5, false);
+        if (view.length < 9 + payloadLen) return null;
+        const payload = parseJsonPayload(view.subarray(9, 9 + payloadLen));
+        if (payload === SENTINEL_BAD_JSON) return null;
+        return { opcode: RESPONSE_OP.stateSnapshot, reqId, payload };
+      }
+      default:
+        return null;
+    }
+  } catch {
+    // Out-of-bounds / alignment — treat as malformed.
+    return null;
+  }
+}
+
+// Sentinel for `parseJsonPayload` failure so callers can distinguish a
+// legitimate `null` payload from a parse error.
+const SENTINEL_BAD_JSON = Symbol("bad-json");
+function parseJsonPayload(bytes: Uint8Array): unknown {
+  if (bytes.length === 0) return null;
+  try {
+    return JSON.parse(textDecoder.decode(bytes));
+  } catch {
+    return SENTINEL_BAD_JSON;
   }
 }

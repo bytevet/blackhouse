@@ -12,9 +12,30 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { client } from "@/lib/api";
-import { encodeInput, type InputMessage } from "@/lib/browser-input-codec";
+import { encodeInput, REQUEST_OP, type InputMessage } from "@/lib/browser-input-codec";
+import { createWsRpc, type WsRpc } from "@/lib/browser-ws-rpc";
 import { cn } from "@/lib/utils";
+
+// Response payload shapes returned by `agent/browser-service/service.mjs`
+// `run*` dispatchers (#61). Permissive — only the fields the FE actually
+// reads are listed; extra keys land in the `unknown` body unobserved.
+interface ControlAckPayload {
+  ok: boolean;
+  url?: string;
+  width?: number;
+  height?: number;
+  error?: string;
+}
+interface EvalResultPayload {
+  ok: boolean;
+  result?: string;
+  error?: { description?: string; stack?: string };
+}
+interface StateSnapshotPayload {
+  ok: boolean;
+  url?: string;
+  selectionText?: string;
+}
 
 interface BrowserViewerProps {
   sessionId: string;
@@ -39,7 +60,7 @@ interface ConsoleEntry {
 }
 
 // Entries from the user-driven JS console eval input. `input` is echoed
-// locally on submit; `result`/`error` arrive via the SSE `eval` event.
+// locally on submit; `result`/`error` arrive as the WS-RPC response (#61).
 interface EvalEntry {
   kind: "input" | "result" | "error";
   text: string;
@@ -120,6 +141,10 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
   // input frames directly. Set on open, cleared on close. Reads check
   // `readyState === OPEN` before sending.
   const wsRef = useRef<WebSocket | null>(null);
+  // Request/response RPC bound to the live WS (#61). Created in the
+  // ws-effect alongside the WebSocket; disposed on cleanup so pending
+  // requests reject with `ws_closed` instead of leaking timers.
+  const rpcRef = useRef<WsRpc | null>(null);
   const mouseMoveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // True between mousedown and mouseup. While true, mouseMove skips its 50ms
@@ -155,6 +180,9 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
       `${protocol}//${window.location.host}/api/browser-ws/${sessionId}${tokenParam}`,
     );
     ws.binaryType = "arraybuffer";
+
+    const rpc = createWsRpc(ws);
+    rpcRef.current = rpc;
 
     ws.onopen = () => {
       if (!alive) return;
@@ -250,8 +278,14 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
         return;
       }
 
-      // ─ BINARY: 9-byte header + Annex-B H.264 payload ─────────────────
+      // ─ BINARY: video chunk OR rpc response ───────────────────────────
       if (event.data instanceof ArrayBuffer) {
+        // Response opcodes (0x82–0x84) ride the same socket; hand them
+        // off to the RPC dispatcher before treating bytes as video.
+        if (rpc.handleBinary(event.data)) return;
+
+        // Otherwise: 9-byte header + Annex-B H.264 payload.
+        // type=0 → keyframe, type=1 → delta.
         if (!decoder) return; // chunks arriving before config — drop; next keyframe recovers
         if (event.data.byteLength < 9) return;
         const view = new DataView(event.data);
@@ -274,6 +308,8 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
 
     return () => {
       alive = false;
+      rpc.dispose("ws_unmount");
+      rpcRef.current = null;
       wsRef.current = null;
       ws.close();
       if (decoder) {
@@ -306,7 +342,10 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
   // each by addEventListener (not onmessage):
   //   - "console"  — page console.log / exceptions
   //   - "navigate" — main-frame navigations (e.g. agent ran `browser.sh navigate`)
-  //   - "eval"     — result/error of user-driven JS eval (input echoes are FE-only)
+  //
+  // The "eval" event is no longer consumed here — eval results come back via
+  // the WS-RPC response (#61). console + navigate stay on SSE until be ships
+  // push opcodes 0x85/0x86 (deferred follow-up, no console-event-loss window).
   useEffect(() => {
     if (status !== "running") return;
 
@@ -315,14 +354,6 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
       try {
         const entry = JSON.parse((event as MessageEvent).data) as ConsoleEntry;
         setPanelEntries((prev) => [...prev.slice(-499), { ...entry, _t: "console" }]);
-      } catch {
-        // ignore malformed entries
-      }
-    });
-    es.addEventListener("eval", (event) => {
-      try {
-        const entry = JSON.parse((event as MessageEvent).data) as EvalEntry;
-        setPanelEntries((prev) => [...prev.slice(-499), { ...entry, _t: "eval" }]);
       } catch {
         // ignore malformed entries
       }
@@ -346,19 +377,25 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
     };
   }, [sessionId, status]);
 
-  // ─── Control + Input via Hono RPC ───────────────────────────────────────
+  // ─── Control + Input via WS-RPC (#61) ──────────────────────────────────
+  // Every control/eval/state call rides the live screencast WS now; the
+  // matching `requestOverWs` helper lives on the per-WS `rpc` instance.
+  // REST routes are still up on the server during the cutover but we
+  // never touch them — keeps the FE on a single transport.
   const sendControl = useCallback(
     async (action: Exclude<ControlAction, "resize">, navUrl?: string) => {
+      const rpc = rpcRef.current;
+      if (!rpc) return;
       try {
-        await client.api.sessions[":id"].browser.control.$post({
-          param: { id: sessionId },
-          json: navUrl ? { action, url: navUrl } : { action },
+        await rpc.request<ControlAckPayload>(REQUEST_OP.control, {
+          action,
+          url: navUrl,
         });
       } catch {
         // swallow — UI will reflect via WS disconnect / lack of new frames
       }
     },
-    [sessionId],
+    [],
   );
 
   // Drop input frames once the WS send buffer climbs over this — a stale
@@ -380,22 +417,22 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
   }, []);
 
   // ─── Dynamic viewport: request server to re-encode at new size ─────────
-  const sendResize = useCallback(
-    async (width: number, height: number) => {
-      try {
-        await client.api.sessions[":id"].browser.control.$post({
-          param: { id: sessionId },
-          json: { action: "resize", width, height },
-        });
-        // The server re-broadcasts a new `config` text message after the
-        // encoder restarts; the existing WS text-handler tears down the old
-        // VideoDecoder and configures a new one with the new dims.
-      } catch {
-        // swallow — next ResizeObserver tick will retry
-      }
-    },
-    [sessionId],
-  );
+  const sendResize = useCallback(async (width: number, height: number) => {
+    const rpc = rpcRef.current;
+    if (!rpc) return;
+    try {
+      await rpc.request<ControlAckPayload>(REQUEST_OP.control, {
+        action: "resize",
+        width,
+        height,
+      });
+      // The server re-broadcasts a new `config` text message after the
+      // encoder restarts; the existing WS text-handler tears down the old
+      // VideoDecoder and configures a new one with the new dims.
+    } catch {
+      // swallow — next ResizeObserver tick will retry
+    }
+  }, []);
 
   // Watch the visible frame wrapper. On size change, debounce 250ms then POST
   // a resize control with even-rounded, clamped (320..1920 × 240..1080) dims.
@@ -523,25 +560,23 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
   // Right-click → SPA-rendered ContextMenu (see #47). Fetches live page
   // selectionText on open so the "Copy" item can conditionally appear.
   // Errors silently — menu still shows, Copy just stays hidden.
-  const onContextMenuOpenChange = useCallback(
-    async (open: boolean) => {
-      if (!open) {
-        setMenuSelectionText(null);
-        return;
-      }
-      try {
-        const res = await client.api.sessions[":id"].browser.state.$get({
-          param: { id: sessionId },
-        });
-        if (!res.ok) return;
-        const data = (await res.json()) as { selectionText?: string };
-        setMenuSelectionText(typeof data.selectionText === "string" ? data.selectionText : "");
-      } catch {
-        // browser unavailable / network error — Copy will stay hidden
-      }
-    },
-    [sessionId],
-  );
+  const onContextMenuOpenChange = useCallback(async (open: boolean) => {
+    if (!open) {
+      setMenuSelectionText(null);
+      return;
+    }
+    const rpc = rpcRef.current;
+    if (!rpc) return;
+    try {
+      const data = await rpc.request<StateSnapshotPayload>(REQUEST_OP.state, {
+        resetContextMenu: false,
+      });
+      if (!data.ok) return;
+      setMenuSelectionText(typeof data.selectionText === "string" ? data.selectionText : "");
+    } catch {
+      // browser unavailable / rpc closed — Copy will stay hidden
+    }
+  }, []);
 
   const clipboardAvailable =
     typeof navigator !== "undefined" &&
@@ -657,11 +692,12 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
   }, [navigateTo, status, navigate, onNavigated]);
 
   // ─── JS console eval ────────────────────────────────────────────────────
+  // Result/error come back as the resolution of the WS-RPC promise (#61).
+  // No SSE eval listener anymore — single source of truth.
   const submitEval = useCallback(async () => {
     const expression = evalInput.trim();
     if (!expression) return;
-    // Optimistic local echo of the input (the BE doesn't re-emit `input`
-    // events on the wire — only result/error).
+    // Optimistic local echo of the input.
     const ts = Date.now();
     setPanelEntries((prev) => [
       ...prev.slice(-499),
@@ -670,21 +706,47 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
     setEvalHistory((prev) => [...prev.slice(-(EVAL_HISTORY_LIMIT - 1)), expression]);
     setEvalHistoryIdx(null);
     setEvalInput("");
-    try {
-      await client.api.sessions[":id"].browser.eval.$post({
-        param: { id: sessionId },
-        json: { expression },
-      });
-      // Result lands via the SSE `eval` listener above; no work to do here.
-    } catch {
-      // Network failure surfacing as a synthetic error entry, since the SSE
-      // wouldn't have fired in that case.
+
+    const rpc = rpcRef.current;
+    if (!rpc) {
       setPanelEntries((prev) => [
         ...prev.slice(-499),
-        { _t: "eval", kind: "error", text: "eval request failed", ts: Date.now() },
+        { _t: "eval", kind: "error", text: "ws not connected", ts: Date.now() },
+      ]);
+      return;
+    }
+    try {
+      // eval may take longer than the default 5s timeout for expensive
+      // expressions — bump to 30s, matching the in-container CDP timeout.
+      const data = await rpc.request<EvalResultPayload>(REQUEST_OP.eval, { expression }, 30_000);
+      if (data.ok) {
+        setPanelEntries((prev) => [
+          ...prev.slice(-499),
+          { _t: "eval", kind: "result", text: data.result ?? "", ts: Date.now() },
+        ]);
+      } else {
+        setPanelEntries((prev) => [
+          ...prev.slice(-499),
+          {
+            _t: "eval",
+            kind: "error",
+            text: data.error?.description ?? "eval failed",
+            ts: Date.now(),
+          },
+        ]);
+      }
+    } catch (err) {
+      setPanelEntries((prev) => [
+        ...prev.slice(-499),
+        {
+          _t: "eval",
+          kind: "error",
+          text: err instanceof Error ? err.message : "eval request failed",
+          ts: Date.now(),
+        },
       ]);
     }
-  }, [evalInput, sessionId]);
+  }, [evalInput]);
 
   const handleEvalKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
