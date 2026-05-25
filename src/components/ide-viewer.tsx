@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { SessionStatus } from "@/db/schema";
 
 interface IdeViewerProps {
@@ -23,7 +24,7 @@ export function IdeViewer({ sessionId, status }: IdeViewerProps) {
     <div className="relative h-full w-full">
       {!loaded && (
         <div className="absolute inset-0 flex items-center justify-center bg-muted">
-          <div className="size-8 animate-pulse rounded-md bg-muted-foreground/20" />
+          <Skeleton className="size-8 bg-muted-foreground/20" />
         </div>
       )}
       <iframe
