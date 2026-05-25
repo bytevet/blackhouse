@@ -4,21 +4,31 @@
  * Launches one headless Chromium page via Playwright and exposes endpoints
  * on 0.0.0.0:9223 (loopback-bound at the Docker hostport level):
  *
- *   GET  /browser/ws      — Sole transport. Binary opcode framing in both
- *                           directions; see `input-codec.mjs` header for
- *                           the full wire format. Server→client: 0x80
- *                           config (at open + after resize), 0x81 video
- *                           frames, 0x83 evalResult, 0x84 stateSnapshot,
- *                           0x85 consoleEvent push, 0x86 navigateEvent
- *                           push. Client→server: 0x01–0x07 input events
- *                           (fire-and-forget), 0x10 control (fire-and-
- *                           forget), 0x11 eval / 0x12 state requests with
- *                           u32 reqId.
- *   GET  /browser/health  — `{ok, url, streaming, codedWidth, codedHeight}`
+ *   GET  /browser/ws       — Client↔proxy transport. Binary opcode framing
+ *                            in both directions; see `input-codec.mjs`
+ *                            header for the full wire format. Server→
+ *                            client: 0x80 config (at open + after resize),
+ *                            0x81 video frames, 0x83 evalResult, 0x84
+ *                            stateSnapshot, 0x85 consoleEvent push, 0x86
+ *                            navigateEvent push. Client→server: 0x01–0x07
+ *                            input events (fire-and-forget), 0x10 control
+ *                            (fire-and-forget), 0x11 eval / 0x12 state
+ *                            requests with u32 reqId.
+ *   POST /browser/control  — IN-CONTAINER ONLY. Used by the `$BROWSER`
+ *                            shim (`agent/skills/blackhouse/browser.sh`
+ *                            and `browser-shim.sh`) so tools like
+ *                            `npm`/`gh`/dev servers running inside the
+ *                            container can drive the embedded page from
+ *                            shell. The Hono proxy does NOT forward this
+ *                            route (it was deleted in cec6b77 and stays
+ *                            deleted); only loopback callers reach it.
+ *   GET  /browser/health   — `{ok, url, streaming, codedWidth, codedHeight}`
  *
- * That's it. The previous REST routes (control / eval / state) and the
- * SSE channel (/browser/console) were retired by #61 — every operation
- * now travels as a binary opcode on the WS above.
+ * Scope of the #61 "no REST, no SSE" rule: it applies to the *external*
+ * client ↔ proxy ↔ agent wire (anything reachable through the Hono
+ * proxy). The 127.0.0.1:9223 surface inside the same container is a
+ * different category — localhost-to-localhost, trusted in-container
+ * tooling only. /browser/control lives here exclusively for the shim.
  *
  * Pipeline: CDP `Page.startScreencast` (jpeg q80) → ffmpeg per peer
  *   (`-f image2pipe -c:v mjpeg -i pipe:0` in, libx264 zerolatency Annex-B
@@ -969,12 +979,18 @@ async function dispatchInput(body) {
   }
 }
 
-// ---------- Control (WS opcode 0x10) -----------------------------------------
+// ---------- Control (WS opcode 0x10 + in-container REST) ---------------------
 
-// In-process control dispatcher invoked by the 0x10 WS branch in onMessage.
-// Fire-and-forget on the wire: the implicit ack comes via 0x80 config (resize)
-// or 0x86 navigateEvent (nav-class). The `{ok, …}` return shape feeds the
-// `!ok` log line in the WS dispatcher.
+// In-process control dispatcher. Two entrypoints share this function:
+//   (1) The 0x10 WS branch in onMessage (external client via Hono proxy).
+//       Fire-and-forget on the wire — implicit ack comes via 0x80 config
+//       (resize) or 0x86 navigateEvent (nav-class). The `{ok, …}` return
+//       shape feeds the `!ok` log line in the WS dispatcher.
+//   (2) POST /browser/control below — IN-CONTAINER ONLY. The `$BROWSER`
+//       shim (`agent/skills/blackhouse/browser.sh` and `browser-shim.sh`)
+//       calls this from inside the container so shell tools like `npm`,
+//       `gh`, and dev servers can drive the embedded page. The Hono proxy
+//       does NOT forward this route; only loopback callers reach it.
 async function runControl(body) {
   if (!body || typeof body !== "object" || typeof body.action !== "string") {
     return { ok: false, error: "invalid_body" };
@@ -1011,6 +1027,15 @@ async function runControl(body) {
     return { ok: false, error: "nav_failed", message: String(err) };
   }
 }
+
+// POST /browser/control — in-container shim entrypoint (see runControl
+// docstring). Loopback only; the Hono proxy does not forward this route.
+app.post("/browser/control", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const result = await runControl(body);
+  if (result.ok) return c.json(result);
+  return c.json(result, result.error === "nav_failed" ? 500 : 400);
+});
 
 // ---------- Eval (WS opcode 0x11) --------------------------------------------
 //
