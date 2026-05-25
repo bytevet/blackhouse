@@ -637,37 +637,6 @@ const app = new Hono<AuthEnv>()
     },
   )
 
-  // POST /api/sessions/:id/browser/input — forwarded as-is to the service.
-  .post(
-    "/:id/browser/input",
-    authMiddleware,
-    zValidator(
-      "json",
-      z.object({
-        type: z.enum(["mouseMove", "mouseDown", "mouseUp", "wheel", "keyDown", "keyUp", "char"]),
-        x: z.number().optional(),
-        y: z.number().optional(),
-        button: z.string().optional(),
-        // CDP `buttons` bitmask (1=left, 2=right, 4=middle). Needed so the
-        // in-container browser recognizes mouseMove during a drag as a
-        // selection-extension rather than a hover (#44).
-        buttons: z.number().int().nonnegative().optional(),
-        clickCount: z.number().optional(),
-        key: z.string().optional(),
-        code: z.string().optional(),
-        text: z.string().optional(),
-        modifiers: z.number().optional(),
-        deltaX: z.number().optional(),
-        deltaY: z.number().optional(),
-      }),
-    ),
-    async (c) => {
-      const id = c.req.param("id");
-      await requireSessionAccess(id, c.get("session").user);
-      return proxyBrowser(c, id, "/browser/input", jsonPost(c.req.valid("json")));
-    },
-  )
-
   // POST /api/sessions/:id/browser/eval — run a JS expression in the page.
   .post(
     "/:id/browser/eval",

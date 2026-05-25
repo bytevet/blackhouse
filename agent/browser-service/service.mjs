@@ -4,14 +4,13 @@
  * Launches one headless Chromium page via Playwright and exposes endpoints
  * on 127.0.0.1:9223:
  *
- *   GET  /browser/ws       — WebSocket carrying an H.264 video stream of
- *                            the page. First message is JSON config; each
- *                            following BINARY message is one Access Unit
- *                            with a 9-byte header (type + 8-byte big-endian
- *                            PTS µs) followed by Annex-B bytes.
- *   POST /browser/input    — { type, x, y, button, key, text, deltaY } →
- *                            dispatched via Input.dispatchMouse/KeyEvent /
- *                            Input.insertText.
+ *   GET  /browser/ws       — Bidirectional WebSocket. Server→client: H.264
+ *                            video stream (1st message JSON config; then
+ *                            BINARY Access Units with a 9-byte header
+ *                            `[type:u8, pts:u64-BE]` + Annex-B bytes).
+ *                            Client→server: BINARY input frames encoded
+ *                            per `input-codec.mjs` (opcode + fixed/var
+ *                            layout) — decoded and dispatched to CDP.
  *   POST /browser/control  — { action: navigate|back|forward|reload, url? }
  *                            or { action: "resize", width, height } (200ms
  *                            debounced; rebroadcasts a new `config` JSON
@@ -810,34 +809,19 @@ app.get(
         }
       }
     },
-    // Client→server input frames arrive on this same WS:
+    // Client→server input frames arrive as binary on this same WS,
+    // encoded per `input-codec.mjs` (opcode + fixed/variable layout). The
+    // proxy WS byte-pipes them through. browser-service handles messages
+    // in receive order, so a mouseMove can't beat its mouseDown to CDP
+    // (WS framing preserves order; CDP dispatches are sequential by
+    // virtue of being awaited).
     //
-    //   • Binary frame: compact opcode-prefixed encoding (see
-    //     `input-codec.mjs` for the table). Preferred path — 6 B for a
-    //     mouseMove vs ~80 B of JSON.
-    //   • Text frame:  legacy JSON envelope `{type:"input", input:{...}}`.
-    //     Kept as a fallback for clients that haven't shipped the binary
-    //     codec yet, and for forward-compat with any non-codec event.
-    //
-    // The proxy WS just byte-pipes both kinds through. browser-service
-    // handles them in receive order, so a mouseMove can't beat its
-    // mouseDown to CDP (WS framing preserves order; CDP dispatches are
-    // sequential by virtue of being awaited).
+    // Text frames are silently dropped — this is a new app with no JSON
+    // legacy to support. The codec rejects malformed binary the same way
+    // (returns null), so all the WS handler does is gate + dispatch.
     async onMessage(evt, _ws) {
       const message = evt.data;
-      if (typeof message === "string") {
-        let envelope;
-        try {
-          envelope = JSON.parse(message);
-        } catch {
-          return;
-        }
-        if (!envelope || typeof envelope !== "object" || envelope.type !== "input") return;
-        await dispatchInput(envelope.input);
-        return;
-      }
-      // Binary path. `evt.data` is an ArrayBuffer / Buffer / Uint8Array
-      // depending on `ws` package config; the codec accepts all three.
+      if (typeof message === "string") return;
       const payload = decodeInput(message);
       if (!payload) return;
       await dispatchInput(payload);
@@ -856,17 +840,14 @@ app.get(
   })),
 );
 
-// ---------- Input dispatch (shared by REST + WS) ----------------------------
+// ---------- Input dispatch (called from the WS message handler) -------------
 //
-// Dispatch a single input payload to CDP. Used by:
-//   - POST /browser/input  (fallback REST path; e2e direct-probe uses it)
-//   - The /browser/ws message handler when a `{type:"input", input:...}`
-//     JSON text frame arrives — saves the localhost HTTP round-trip that
-//     the proxy used to take per event.
-//
-// Returns `{ ok: true }` on success or `{ ok: false, error, status }` on
-// validation failure or CDP error. The WS path discards the result; the
-// REST path serializes it to a Hono response.
+// Dispatch one decoded input payload to CDP. Sole caller is `/browser/ws`'s
+// binary-frame branch; this used to also back a `POST /browser/input` REST
+// endpoint and the proxy's localhost-HTTP path, but the binary WS transport
+// supersedes both (#59 + #60). Errors are swallowed silently — fire-and-
+// forget input has no meaningful failure mode the client could act on, and
+// the WS handler can't surface anything anyway.
 //
 // CDP `buttons` is the bitmask of currently-held mouse buttons (1=left,
 // 2=right, 4=middle). Without it, every `mouseMoved` during a drag is
@@ -874,9 +855,7 @@ app.get(
 // renders. Likewise, `button` on `mouseMoved` must be the held button name
 // when buttons!=0 (not omitted/"none") — verified empirically in #45.
 async function dispatchInput(body) {
-  if (!body || typeof body !== "object" || typeof body.type !== "string") {
-    return { ok: false, error: "invalid_body", status: 400 };
-  }
+  if (!body || typeof body !== "object" || typeof body.type !== "string") return;
   try {
     switch (body.type) {
       case "mouseMove": {
@@ -940,26 +919,21 @@ async function dispatchInput(body) {
         });
         break;
       case "char":
-        if (typeof body.text !== "string") {
-          return { ok: false, error: "missing_text", status: 400 };
-        }
+        if (typeof body.text !== "string") return;
         await state.cdp.send("Input.insertText", { text: body.text });
         break;
       default:
-        return { ok: false, error: "unknown_type", status: 400 };
+      // unknown type — silently drop
     }
-    return { ok: true };
   } catch (err) {
-    return { ok: false, error: "cdp_error", message: String(err), status: 500 };
+    // Surface CDP failures one-shot so we notice a recurring issue without
+    // flooding the log on a per-event burst.
+    if (!dispatchInput._loggedErr) {
+      console.error(`[input] CDP dispatch error: ${String(err)}`);
+      dispatchInput._loggedErr = true;
+    }
   }
 }
-
-app.post("/browser/input", async (c) => {
-  const body = await c.req.json().catch(() => null);
-  const result = await dispatchInput(body);
-  if (result.ok) return c.json({ ok: true });
-  return c.json({ error: result.error, message: result.message }, result.status);
-});
 
 // ---------- POST /browser/control --------------------------------------------
 
