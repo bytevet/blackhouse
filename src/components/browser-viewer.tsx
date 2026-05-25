@@ -224,6 +224,12 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
             codec: msg.codec,
             codedWidth: msg.codedWidth,
             codedHeight: msg.codedHeight,
+            // Interactive screencast: skip the decoder's reorder buffer and
+            // surface frames as soon as they finish. Default optimizes for
+            // throughput, which adds latency we can't afford here.
+            optimizeForLatency: true,
+            // GPU decode when available; falls back gracefully without H.264 HW.
+            hardwareAcceleration: "prefer-hardware",
           });
         } catch (err) {
           console.error("[browser-viewer] VideoDecoder.configure failed", err);
