@@ -696,6 +696,13 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
     onNavigated?.();
   }, [navigateTo, status, navigate, onNavigated]);
 
+  // Append an eval entry to the panel, ring-buffered at 500 entries.
+  // Wrapper around setPanelEntries since `submitEval` writes the same
+  // shape five times (input echo + 3 result/error paths + catch).
+  const pushEvalEntry = useCallback((kind: EvalEntry["kind"], text: string) => {
+    setPanelEntries((prev) => [...prev.slice(-499), { _t: "eval", kind, text, ts: Date.now() }]);
+  }, []);
+
   // ─── JS console eval ────────────────────────────────────────────────────
   // Result/error come back as the resolution of the WS-RPC promise (#61).
   // No SSE eval listener anymore — single source of truth.
@@ -703,21 +710,14 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
     const expression = evalInput.trim();
     if (!expression) return;
     // Optimistic local echo of the input.
-    const ts = Date.now();
-    setPanelEntries((prev) => [
-      ...prev.slice(-499),
-      { _t: "eval", kind: "input", text: expression, ts },
-    ]);
+    pushEvalEntry("input", expression);
     setEvalHistory((prev) => [...prev.slice(-(EVAL_HISTORY_LIMIT - 1)), expression]);
     setEvalHistoryIdx(null);
     setEvalInput("");
 
     const rpc = rpcRef.current;
     if (!rpc) {
-      setPanelEntries((prev) => [
-        ...prev.slice(-499),
-        { _t: "eval", kind: "error", text: "ws not connected", ts: Date.now() },
-      ]);
+      pushEvalEntry("error", "ws not connected");
       return;
     }
     try {
@@ -725,33 +725,14 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
       // expressions — bump to 30s, matching the in-container CDP timeout.
       const data = await rpc.request<EvalResultPayload>(REQUEST_OP.eval, { expression }, 30_000);
       if (data.ok) {
-        setPanelEntries((prev) => [
-          ...prev.slice(-499),
-          { _t: "eval", kind: "result", text: data.result ?? "", ts: Date.now() },
-        ]);
+        pushEvalEntry("result", data.result ?? "");
       } else {
-        setPanelEntries((prev) => [
-          ...prev.slice(-499),
-          {
-            _t: "eval",
-            kind: "error",
-            text: data.error?.description ?? "eval failed",
-            ts: Date.now(),
-          },
-        ]);
+        pushEvalEntry("error", data.error?.description ?? "eval failed");
       }
     } catch (err) {
-      setPanelEntries((prev) => [
-        ...prev.slice(-499),
-        {
-          _t: "eval",
-          kind: "error",
-          text: err instanceof Error ? err.message : "eval request failed",
-          ts: Date.now(),
-        },
-      ]);
+      pushEvalEntry("error", err instanceof Error ? err.message : "eval request failed");
     }
-  }, [evalInput]);
+  }, [evalInput, pushEvalEntry]);
 
   const handleEvalKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
