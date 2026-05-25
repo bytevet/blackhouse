@@ -2,30 +2,34 @@
  * Blackhouse in-container browser service.
  *
  * Launches one headless Chromium page via Playwright and exposes endpoints
- * on 127.0.0.1:9223:
+ * on 0.0.0.0:9223 (loopback-bound at the Docker hostport level):
  *
- *   GET  /browser/ws       — Bidirectional WebSocket. Server→client: H.264
- *                            video stream (1st message JSON config; then
- *                            BINARY Access Units with a 9-byte header
- *                            `[type:u8, pts:u64-BE]` + Annex-B bytes).
- *                            Client→server: BINARY input frames encoded
- *                            per `input-codec.mjs` (opcode + fixed/var
- *                            layout) — decoded and dispatched to CDP.
+ *   GET  /browser/ws       — Sole transport after #61 parallel-paths. Binary
+ *                            opcode framing on both directions; see
+ *                            `input-codec.mjs` header for the wire format.
+ *                            Server→client: 0x80 config (once at open + after
+ *                            resize), 0x81 video frames, 0x82/0x83/0x84
+ *                            request acks, 0x85 console push, 0x86 navigate
+ *                            push. Client→server: 0x01–0x07 input events,
+ *                            0x10 control / 0x11 eval / 0x12 state requests
+ *                            with u32 reqId.
+ *
+ *   The REST + SSE routes below stay live during the cut-over so fe can
+ *   migrate one call site at a time. They go away in the follow-up commit
+ *   after fe + qa switch to WS-only.
+ *
  *   POST /browser/control  — { action: navigate|back|forward|reload, url? }
  *                            or { action: "resize", width, height } (200ms
- *                            debounced; rebroadcasts a new `config` JSON
- *                            and force-keyframes on next emitted AU).
+ *                            debounced).
  *   POST /browser/eval     — Runtime.evaluate; result/error also broadcast
  *                            on the /browser/console SSE channel.
  *   GET  /browser/console  — SSE multiplex of `console`, `eval`, `navigate`,
  *                            and `ping` events.
  *   GET  /browser/health   — `{ok, url, streaming, codedWidth, codedHeight}`
- *   GET  /browser/state    — strict e2e probe: queries the live page via CDP
- *                            `Runtime.evaluate` and returns selectionText,
- *                            scrollX/Y, viewport, docSize, lastContextMenu
- *                            (captured by a one-shot listener), etc.
- *                            `?resetContextMenu=1` clears the contextmenu
- *                            slot before reading.
+ *   GET  /browser/state    — strict e2e probe: returns selectionText,
+ *                            scrollX/Y, viewport, docSize, lastContextMenu,
+ *                            etc. `?resetContextMenu=1` clears the
+ *                            contextmenu slot before reading.
  *
  * Pipeline: CDP `Page.startScreencast` (jpeg q80) → ffmpeg per peer
  *   (`-f image2pipe -c:v mjpeg -i pipe:0` in, libx264 zerolatency Annex-B
@@ -46,7 +50,16 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import ffmpegPath from "ffmpeg-static";
-import { decode as decodeInput, decodeRequest, encodeResponse, OP } from "./input-codec.mjs";
+import {
+  decode as decodeInput,
+  decodeRequest,
+  encodeResponse,
+  encodeConfig,
+  encodeConsoleEvent,
+  encodeNavigateEvent,
+  encodeVideoFrameHeader,
+  OP,
+} from "./input-codec.mjs";
 
 // Surface immediately at boot so we never silently lose ffmpeg later. If
 // ffmpeg-static didn't successfully run its post-install (e.g. the image
@@ -181,66 +194,82 @@ async function startBrowser() {
   await cdp.send("Page.enable");
   await cdp.send("Runtime.enable");
 
-  // Console / exception → emitted as `console` SSE events
-  cdp.on("Runtime.consoleAPICalled", (params) => {
-    const text = (params.args || [])
-      .map((a) => a.value ?? a.description ?? a.unserializableValue ?? "")
-      .join(" ");
-    emitEvent("console", {
-      level: params.type || "log",
-      text,
-      url: params.stackTrace?.callFrames?.[0]?.url,
-      line: params.stackTrace?.callFrames?.[0]?.lineNumber,
-      ts: Date.now(),
-    });
-  });
-  cdp.on("Runtime.exceptionThrown", (params) => {
-    const e = params.exceptionDetails;
-    emitEvent("console", {
-      level: "error",
-      text: e?.exception?.description || e?.text || "exception",
-      url: e?.url,
-      line: e?.lineNumber,
-      ts: Date.now(),
-    });
-  });
-
-  // Main-frame navigation → emitted as `navigate` SSE events. The React
-  // address bar listens for these so it reflects whatever URL the agent
-  // navigated to (via `browser.sh navigate` or the BROWSER shim).
-  // `parentId` is undefined on the top frame; we filter sub-frame navigations
-  // (iframes, ads) out so the address bar shows the page URL only.
-  cdp.on("Page.frameNavigated", (params) => {
-    if (params.frame?.parentId) return;
-    const url = params.frame?.url;
-    if (!url || url === "about:blank") return;
-    emitEvent("navigate", { url, ts: Date.now() });
-    // Re-install the contextmenu listener after every navigation. Page
-    // navigations wipe DOM listeners; the listener is what /browser/state
-    // reads to verify right-click actually synthesized a contextmenu event.
-    // Fire-and-forget; harmless if injection fails.
-    installDebugHooks(cdp).catch(() => {});
-  });
-
   // Set of active per-peer encoder streams. Each holds an ffmpeg child
   // process taking JPEGs in and producing H.264 Annex-B out (see
   // `H264PeerStream` below). The CDP screencast itself is shared (one
   // `Page.startScreencast` invocation drives all peers); we fan the JPEG
   // bytes out to each peer's ffmpeg stdin.
   const peers = new Set();
+
+  // Broadcast a binary frame to every connected peer's WS. Used for the
+  // server-pushed opcodes (0x85 console, 0x86 navigate). Errors are
+  // swallowed per-peer — a dead WS shouldn't block the others.
+  function broadcastBinary(buf) {
+    for (const peer of peers) {
+      try {
+        peer.ws.send(buf);
+      } catch {
+        /* peer gone; onClose will remove it from the set */
+      }
+    }
+  }
+
+  // Console / exception → SSE `console` event (legacy) AND WS opcode 0x85
+  // push to all peers (new in #61). SSE goes away once REST/SSE are
+  // deleted in the follow-up commit.
+  cdp.on("Runtime.consoleAPICalled", (params) => {
+    const text = (params.args || [])
+      .map((a) => a.value ?? a.description ?? a.unserializableValue ?? "")
+      .join(" ");
+    const kind = params.type || "log";
+    const url = params.stackTrace?.callFrames?.[0]?.url;
+    const line = params.stackTrace?.callFrames?.[0]?.lineNumber;
+    const ts = Date.now();
+    emitEvent("console", { level: kind, text, url, line, ts });
+    broadcastBinary(encodeConsoleEvent({ kind, text, url, line, ts }));
+  });
+  cdp.on("Runtime.exceptionThrown", (params) => {
+    const e = params.exceptionDetails;
+    const text = e?.exception?.description || e?.text || "exception";
+    const url = e?.url;
+    const line = e?.lineNumber;
+    const ts = Date.now();
+    emitEvent("console", { level: "error", text, url, line, ts });
+    broadcastBinary(encodeConsoleEvent({ kind: "error", text, url, line, ts }));
+  });
+
+  // Main-frame navigation → SSE `navigate` event (legacy) AND WS opcode
+  // 0x86 push (new in #61). `parentId` is undefined on the top frame; we
+  // filter sub-frame navigations (iframes, ads) so the address bar shows
+  // the page URL only.
+  cdp.on("Page.frameNavigated", (params) => {
+    if (params.frame?.parentId) return;
+    const url = params.frame?.url;
+    if (!url || url === "about:blank") return;
+    const ts = Date.now();
+    emitEvent("navigate", { url, ts });
+    broadcastBinary(encodeNavigateEvent({ url, ts }));
+    // Re-install the contextmenu listener after every navigation. Page
+    // navigations wipe DOM listeners; the listener is what /browser/state
+    // reads to verify right-click actually synthesized a contextmenu event.
+    // Fire-and-forget; harmless if injection fails.
+    installDebugHooks(cdp).catch(() => {});
+  });
   let screencastRunning = false;
 
   async function ensureScreencastRunning() {
     if (screencastRunning) return;
     screencastRunning = true;
     await cdp.send("Page.startScreencast", makeScreencastConfig());
-    // Push the current page URL as a synthetic `navigate` event so the
-    // React address bar populates immediately on first connect — even when
-    // the page is still on the default `about:blank` (which the
-    // `Page.frameNavigated` handler filters out to avoid noise). This event
-    // lands in `eventBuffer`, so later SSE subscribers see it via the
-    // replay path too.
-    emitEvent("navigate", { url: page.url(), ts: Date.now() });
+    // Push the current page URL as a synthetic `navigate` so the React
+    // address bar populates immediately on first connect — even when the
+    // page is still on the default `about:blank` (which the real
+    // `Page.frameNavigated` handler filters out to avoid noise). SSE
+    // replay buffer also seeds this for late subscribers.
+    const synthUrl = page.url();
+    const synthTs = Date.now();
+    emitEvent("navigate", { url: synthUrl, ts: synthTs });
+    broadcastBinary(encodeNavigateEvent({ url: synthUrl, ts: synthTs }));
   }
 
   async function stopScreencastIfIdle() {
@@ -294,19 +323,13 @@ async function startBrowser() {
       SCREENCAST_WIDTH = width;
       SCREENCAST_HEIGHT = height;
       // 4. Recreate per-peer encoders + tell each peer about the new codec
-      //    config so it can reconfigure its VideoDecoder before the next
-      //    binary chunk lands (which will be a fresh keyframe).
+      //    config (opcode 0x80) so it can reconfigure its VideoDecoder
+      //    before the next binary chunk lands (a fresh keyframe).
+      const configBuf = encodeConfig(SCREENCAST_WIDTH, SCREENCAST_HEIGHT, H264_CODEC_STRING);
       for (const ws of peerWss) {
         if (ws._h264 == null) continue; // peer disconnected mid-resize
         try {
-          ws.send(
-            JSON.stringify({
-              type: "config",
-              codec: H264_CODEC_STRING,
-              codedWidth: SCREENCAST_WIDTH,
-              codedHeight: SCREENCAST_HEIGHT,
-            }),
-          );
+          ws.send(configBuf);
         } catch {
           continue; // peer gone
         }
@@ -678,9 +701,9 @@ class H264PeerStream {
     }
     if (isKey) this.firstKeyEmitted = true;
 
-    const header = Buffer.alloc(9);
-    header[0] = isKey ? 0 : 1;
-    header.writeBigUInt64BE(this.pts, 1);
+    // Opcode 0x81 video frame: [op, reqId=0, type:u8, pts:u64 BE, ...nalu]
+    // — codec lives in input-codec.mjs (`encodeVideoFrameHeader`).
+    const header = encodeVideoFrameHeader(isKey, this.pts);
     this.pts += PTS_INCREMENT_US;
 
     try {
@@ -784,15 +807,10 @@ app.get(
         `[ws] onOpen size=${SCREENCAST_WIDTH}x${SCREENCAST_HEIGHT} peers-before=${state.peers.size}`,
       );
       // 1) Tell the client the codec + dimensions before any binary frames.
+      //    Sent as opcode 0x80 (`encodeConfig`) — the legacy TEXT JSON
+      //    preamble is gone as of #61.
       try {
-        ws.send(
-          JSON.stringify({
-            type: "config",
-            codec: H264_CODEC_STRING,
-            codedWidth: SCREENCAST_WIDTH,
-            codedHeight: SCREENCAST_HEIGHT,
-          }),
-        );
+        ws.send(encodeConfig(SCREENCAST_WIDTH, SCREENCAST_HEIGHT, H264_CODEC_STRING));
       } catch (err) {
         console.error(`[ws] failed to send initial config: ${err}`);
         return; // peer already disconnected
@@ -873,7 +891,7 @@ app.get(
       if (op === OP.STATE) {
         const req = decodeRequest(message);
         if (!req) return;
-        const result = await runState(req.body);
+        const result = await runWsState(req.body);
         // stateSnapshot omits the ok byte per spec — pass true; the JSON
         // payload itself carries `ok` for the client to inspect.
         const buf = encodeResponse(OP.STATE_SNAPSHOT, req.reqId, true, JSON.stringify(result));
@@ -1237,6 +1255,47 @@ app.get("/browser/state", async (c) => {
   if (result.ok) return c.json(result);
   return c.json(result, 500);
 });
+
+// ---------- WS state (opcode 0x12 dispatcher) --------------------------------
+//
+// New in #61: a leaner state projection driven by include-bit flags from the
+// opcode 0x12 payload. Returns ONLY the fields the caller asked for, JSON-
+// encoded into the 0x84 stateSnapshot frame. The richer REST `/browser/state`
+// probe (with selectionText / contextMenu / scroll positions) stays alive on
+// the side channel until qa migrates its probes.
+async function runWsState(body) {
+  const wantUrl = !!body?.includeUrl;
+  const wantTitle = !!body?.includeTitle;
+  const wantLoading = !!body?.includeLoading;
+  if (!wantUrl && !wantTitle && !wantLoading) return { ok: true };
+  try {
+    // One CDP round-trip; missing flags produce JSON `undefined` which
+    // disappears after JSON.stringify.
+    const evalResp = await state.cdp.send("Runtime.evaluate", {
+      expression: `({
+        url: ${wantUrl ? "location.href" : "undefined"},
+        title: ${wantTitle ? "document.title" : "undefined"},
+        loading: ${wantLoading ? "document.readyState !== 'complete'" : "undefined"},
+      })`,
+      returnByValue: true,
+    });
+    if (evalResp.exceptionDetails) {
+      return { ok: false, error: "eval_failed" };
+    }
+    const v = evalResp.result?.value || {};
+    const out = { ok: true };
+    if (wantUrl) out.url = v.url;
+    if (wantTitle) out.title = v.title;
+    if (wantLoading) out.loading = !!v.loading;
+    return out;
+  } catch (err) {
+    return {
+      ok: false,
+      error: "cdp_error",
+      message: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
 
 // ---------- Boot --------------------------------------------------------------
 

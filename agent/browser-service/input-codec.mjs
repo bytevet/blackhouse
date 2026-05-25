@@ -1,7 +1,13 @@
-// Binary wire format for the browser WS — client↔server protocol that
-// supersedes the REST + SSE channels (#61). Two opcode ranges:
+// Binary wire format for the browser WS — sole client↔server protocol
+// after #61. Replaces the legacy REST + SSE channels and the TEXT
+// `config` preamble. All frames are binary; text frames are dropped.
 //
-// 0x01–0x07: input events. Fire-and-forget, no reqId.
+// Universal layout: `opcode(u8) + reqId(u32 BE) + payload`. `reqId == 0`
+// for fire-and-forget / broadcast frames; non-zero for request/response
+// pairs (server echoes the reqId back so the client can correlate via a
+// `Map<reqId, resolver>`).
+//
+// ── Input events (client→server, reqId=0) ───────────────────────────────
 //   0x01 mouseMove   x:u16, y:u16, buttons:u8                         6 B
 //   0x02 mouseDown   x:u16, y:u16, button:u8, buttons:u8,
 //                    clickCount:u8, modifiers:u8                      9 B
@@ -12,30 +18,40 @@
 //   0x06 keyUp       (same as keyDown)                                4+N+M
 //   0x07 char        textLen:u8, text:utf8                            2+N
 //
-// 0x10+: request/response opcodes. Format `[op:u8, reqId:u32 BE, …]`.
-//   Server echoes the same reqId back in its 0x82/0x83/0x84 response
-//   so the client can correlate via a `Map<reqId, resolver>`.
-//   0x10 control   action:u8 (1=navigate, 2=back, 3=forward,
-//                  4=reload, 5=resize), urlLen:u16, url:utf8,
+// NOTE: input opcodes (0x01–0x07) inherited their pre-#61 wireframe and
+// do NOT carry a reqId byte (they're fire-and-forget). The universal
+// layout above describes the 0x10+ request opcodes and the 0x80+
+// server-pushed/response opcodes.
+//
+// ── Requests (client→server, reqId != 0) ────────────────────────────────
+//   0x10 control   action:u8 (0=back, 1=forward, 2=reload, 3=navigate,
+//                  4=resize), urlLen:u16, url:utf8,
 //                  width:u16, height:u16 (last two used by resize)
 //   0x11 eval      exprLen:u32, expr:utf8
-//   0x12 state     flags:u8 (bit0 = resetContextMenu)
+//   0x12 state     flags:u8 (bit0=includeUrl, bit1=includeTitle,
+//                  bit2=includeLoading)
 //
-// 0x80+: server→client opcodes (encoded with `encodeResponse`).
-//   0x82 controlAck   reqId echo, ok:u8, payloadLen:u32, payload:utf8
-//   0x83 evalResult   reqId echo, ok:u8, payloadLen:u32, payload:utf8
-//   0x84 stateSnapshot reqId echo, payloadLen:u32, payload:utf8
-//   (0x80 config / 0x81 video / 0x85 console / 0x86 navigate land in
-//    later migration steps — screencast preamble + push channels stay
-//    on their current transports until fe finishes client-side cutover.)
+// ── Responses + pushes (server→client) ──────────────────────────────────
+//   0x80 config        (reqId=0) codedWidth:u16, codedHeight:u16,
+//                                codecLen:u8, codec:utf8
+//   0x81 videoFrame    (reqId=0) type:u8 (0=key, 1=delta), pts:u64 BE,
+//                                naluBytes (Annex-B H.264)
+//   0x82 controlAck    (reqId echo) ok:u8, payloadLen:u32, payload:utf8
+//   0x83 evalResult    (reqId echo) ok:u8, payloadLen:u32, payload:utf8
+//   0x84 stateSnapshot (reqId echo) payloadLen:u32, payload:utf8
+//                                   (JSON; `ok` lives inside the JSON)
+//   0x85 consoleEvent  (reqId=0) kindLen:u8, kind:utf8, textLen:u32,
+//                                text:utf8, urlLen:u16, url:utf8,
+//                                line:u32, ts:f64
+//   0x86 navigateEvent (reqId=0) urlLen:u16, url:utf8, ts:f64
 //
 // `button` byte enum (single button, not bitmask):
 //   0 = none, 1 = left, 2 = right, 4 = middle
 // `buttons` is a CDP-style bitmask of currently-held buttons (same
 // convention, OR'd together).
 //
-// All multi-byte ints big-endian. Must stay in lockstep with
-// `src/lib/browser-input-codec.ts` on the client side.
+// All multi-byte ints big-endian. Must stay in lockstep with the TS
+// client codec at `src/lib/browser-input-codec.ts`.
 
 export const OP = Object.freeze({
   MOUSE_MOVE: 0x01,
@@ -48,12 +64,22 @@ export const OP = Object.freeze({
   CONTROL: 0x10,
   EVAL: 0x11,
   STATE: 0x12,
+  CONFIG: 0x80,
+  VIDEO_FRAME: 0x81,
   CONTROL_ACK: 0x82,
   EVAL_RESULT: 0x83,
   STATE_SNAPSHOT: 0x84,
+  CONSOLE_EVENT: 0x85,
+  NAVIGATE_EVENT: 0x86,
 });
 
-const CONTROL_ACTION = ["", "navigate", "back", "forward", "reload", "resize"];
+// Indexed by the wire `action` byte. Keep in lockstep with the FE codec.
+const CONTROL_ACTION = ["back", "forward", "reload", "navigate", "resize"];
+
+// State flag bits — keep in lockstep with the FE codec.
+const STATE_FLAG_INCLUDE_URL = 1 << 0;
+const STATE_FLAG_INCLUDE_TITLE = 1 << 1;
+const STATE_FLAG_INCLUDE_LOADING = 1 << 2;
 
 const BUTTON_NAME = ["none", "left", "right", undefined, "middle"];
 
@@ -256,7 +282,15 @@ export function decodeRequest(input) {
       case OP.STATE: {
         if (view.byteLength < 5 + 1) return null;
         const flags = view.getUint8(5);
-        return { opcode, reqId, body: { resetContextMenu: (flags & 1) === 1 } };
+        return {
+          opcode,
+          reqId,
+          body: {
+            includeUrl: (flags & STATE_FLAG_INCLUDE_URL) !== 0,
+            includeTitle: (flags & STATE_FLAG_INCLUDE_TITLE) !== 0,
+            includeLoading: (flags & STATE_FLAG_INCLUDE_LOADING) !== 0,
+          },
+        };
       }
       default:
         return null;
@@ -297,6 +331,108 @@ export function encodeResponse(opcode, reqId, ok, jsonPayload) {
   return buf;
 }
 
+/**
+ * Encode the screencast `config` preamble (opcode 0x80). Sent once at WS
+ * open and again after every viewport resize so the client's
+ * `VideoDecoder.configure(...)` can re-create itself.
+ *   [op=0x80, reqId=0, codedWidth:u16, codedHeight:u16, codecLen:u8, codec:utf8]
+ */
+export function encodeConfig(codedWidth, codedHeight, codecStr) {
+  const codecBytes = utf8(codecStr || "");
+  if (codecBytes.length > 255) {
+    throw new Error(`codec string too long: ${codecBytes.length} > 255 bytes`);
+  }
+  const buf = new ArrayBuffer(1 + 4 + 2 + 2 + 1 + codecBytes.length);
+  const v = new DataView(buf);
+  const u = new Uint8Array(buf);
+  v.setUint8(0, OP.CONFIG);
+  v.setUint32(1, 0, false); // reqId
+  v.setUint16(5, clampU16(codedWidth), false);
+  v.setUint16(7, clampU16(codedHeight), false);
+  v.setUint8(9, codecBytes.length);
+  u.set(codecBytes, 10);
+  return buf;
+}
+
+/**
+ * Encode the 14-byte video frame *header* (opcode 0x81). The caller
+ * concatenates this with the raw Annex-B AU bytes. Header layout:
+ *   [op=0x81, reqId=0, type:u8 (0=key, 1=delta), pts:u64 BE]
+ *
+ * Returns a Uint8Array so it can be Buffer.concat'd straight away in
+ * the encoder hot path without an extra copy. (BigUint64BE via DataView
+ * accepts the `pts` BigInt directly.)
+ */
+export function encodeVideoFrameHeader(isKey, pts) {
+  const buf = new ArrayBuffer(14);
+  const v = new DataView(buf);
+  v.setUint8(0, OP.VIDEO_FRAME);
+  v.setUint32(1, 0, false); // reqId
+  v.setUint8(5, isKey ? 0 : 1);
+  v.setBigUint64(6, BigInt(pts), false);
+  return new Uint8Array(buf);
+}
+
+/**
+ * Encode a console event (opcode 0x85) for broadcast to every WS peer.
+ *   [op=0x85, reqId=0, kindLen:u8, kind:utf8, textLen:u32, text:utf8,
+ *    urlLen:u16, url:utf8, line:u32, ts:f64]
+ *
+ * Coerces missing/oversized fields rather than throwing — console event
+ * push must never break the screencast.
+ */
+export function encodeConsoleEvent(evt) {
+  const kindBytes = utf8(truncate(evt?.kind ?? "log", 255));
+  const textBytes = utf8(String(evt?.text ?? ""));
+  const urlBytes = utf8(truncate(evt?.url ?? "", 0xffff));
+  const line = clampU32(evt?.line ?? 0);
+  const ts = Number(evt?.ts ?? Date.now());
+  const buf = new ArrayBuffer(
+    1 + 4 + 1 + kindBytes.length + 4 + textBytes.length + 2 + urlBytes.length + 4 + 8,
+  );
+  const v = new DataView(buf);
+  const u = new Uint8Array(buf);
+  let off = 0;
+  v.setUint8(off, OP.CONSOLE_EVENT);
+  off += 1;
+  v.setUint32(off, 0, false);
+  off += 4; // reqId
+  v.setUint8(off, kindBytes.length);
+  off += 1;
+  u.set(kindBytes, off);
+  off += kindBytes.length;
+  v.setUint32(off, textBytes.length, false);
+  off += 4;
+  u.set(textBytes, off);
+  off += textBytes.length;
+  v.setUint16(off, urlBytes.length, false);
+  off += 2;
+  u.set(urlBytes, off);
+  off += urlBytes.length;
+  v.setUint32(off, line, false);
+  off += 4;
+  v.setFloat64(off, ts, false);
+  return buf;
+}
+
+/**
+ * Encode a navigate event (opcode 0x86) for broadcast.
+ *   [op=0x86, reqId=0, urlLen:u16, url:utf8, ts:f64]
+ */
+export function encodeNavigateEvent(evt) {
+  const urlBytes = utf8(truncate(evt?.url ?? "", 0xffff));
+  const ts = Number(evt?.ts ?? Date.now());
+  const buf = new ArrayBuffer(1 + 4 + 2 + urlBytes.length + 8);
+  const v = new DataView(buf);
+  const u = new Uint8Array(buf);
+  v.setUint8(0, OP.NAVIGATE_EVENT);
+  v.setUint32(1, 0, false);
+  v.setUint16(5, urlBytes.length, false);
+  u.set(urlBytes, 7);
+  v.setFloat64(7 + urlBytes.length, ts, false);
+  return buf;
+}
+
 // --- helpers ----------------------------------------------------------------
 
 function toDataView(input) {
@@ -328,6 +464,18 @@ function clampU16(n) {
 function clampU8(n) {
   const v = Math.max(0, Math.min(0xff, Math.round(Number(n) || 0)));
   return v;
+}
+function clampU32(n) {
+  const v = Math.max(0, Math.min(0xffffffff, Math.round(Number(n) || 0)));
+  return v;
+}
+function truncate(str, maxBytes) {
+  if (!str) return "";
+  // Trim at codepoint boundary by re-encoding/decoding once we exceed
+  // the byte budget. Cheap on the happy path (length check short-circuits).
+  if (TEXT_ENC.encode(str).length <= maxBytes) return str;
+  const bytes = TEXT_ENC.encode(str).subarray(0, maxBytes);
+  return TEXT_DEC.decode(bytes, { stream: false }).replace(/�$/u, "");
 }
 function buttonNameToCode(name) {
   switch (name) {
