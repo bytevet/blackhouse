@@ -1,12 +1,7 @@
-// Binary input wire format for client→server input events over the
-// browser WS. Reduces per-event payload from ~80–120 B of JSON to 6–14 B
-// for the common (mouse/wheel) cases. The decoded object shape matches
-// the REST `POST /browser/input` body so the shared `dispatchInput`
-// helper handles both transports identically.
+// Binary wire format for the browser WS — client↔server protocol that
+// supersedes the REST + SSE channels (#61). Two opcode ranges:
 //
-// Wire format (1-byte opcode + payload; all multi-byte ints big-endian):
-//
-//   Op   Event       Layout                                          Total
+// 0x01–0x07: input events. Fire-and-forget, no reqId.
 //   0x01 mouseMove   x:u16, y:u16, buttons:u8                         6 B
 //   0x02 mouseDown   x:u16, y:u16, button:u8, buttons:u8,
 //                    clickCount:u8, modifiers:u8                      9 B
@@ -17,13 +12,30 @@
 //   0x06 keyUp       (same as keyDown)                                4+N+M
 //   0x07 char        textLen:u8, text:utf8                            2+N
 //
+// 0x10+: request/response opcodes. Format `[op:u8, reqId:u32 BE, …]`.
+//   Server echoes the same reqId back in its 0x82/0x83/0x84 response
+//   so the client can correlate via a `Map<reqId, resolver>`.
+//   0x10 control   action:u8 (1=navigate, 2=back, 3=forward,
+//                  4=reload, 5=resize), urlLen:u16, url:utf8,
+//                  width:u16, height:u16 (last two used by resize)
+//   0x11 eval      exprLen:u32, expr:utf8
+//   0x12 state     flags:u8 (bit0 = resetContextMenu)
+//
+// 0x80+: server→client opcodes (encoded with `encodeResponse`).
+//   0x82 controlAck   reqId echo, ok:u8, payloadLen:u32, payload:utf8
+//   0x83 evalResult   reqId echo, ok:u8, payloadLen:u32, payload:utf8
+//   0x84 stateSnapshot reqId echo, payloadLen:u32, payload:utf8
+//   (0x80 config / 0x81 video / 0x85 console / 0x86 navigate land in
+//    later migration steps — screencast preamble + push channels stay
+//    on their current transports until fe finishes client-side cutover.)
+//
 // `button` byte enum (single button, not bitmask):
 //   0 = none, 1 = left, 2 = right, 4 = middle
 // `buttons` is a CDP-style bitmask of currently-held buttons (same
 // convention, OR'd together).
 //
-// Must stay in lockstep with `src/lib/browser-input-codec.ts` on the
-// client side. Add new opcodes by appending; never reuse numbers.
+// All multi-byte ints big-endian. Must stay in lockstep with
+// `src/lib/browser-input-codec.ts` on the client side.
 
 export const OP = Object.freeze({
   MOUSE_MOVE: 0x01,
@@ -33,7 +45,15 @@ export const OP = Object.freeze({
   KEY_DOWN: 0x05,
   KEY_UP: 0x06,
   CHAR: 0x07,
+  CONTROL: 0x10,
+  EVAL: 0x11,
+  STATE: 0x12,
+  CONTROL_ACK: 0x82,
+  EVAL_RESULT: 0x83,
+  STATE_SNAPSHOT: 0x84,
 });
+
+const CONTROL_ACTION = ["", "navigate", "back", "forward", "reload", "resize"];
 
 const BUTTON_NAME = ["none", "left", "right", undefined, "middle"];
 
@@ -189,6 +209,92 @@ export function encode(payload) {
     default:
       return null;
   }
+}
+
+/**
+ * Decode a request frame (opcode 0x10/0x11/0x12) into a `{ opcode, reqId,
+ * body }` triple where `body` is the same shape the existing in-process
+ * dispatchers accept. Returns `null` on unknown opcode or truncation.
+ *
+ * Differs from {@link decode} (the input-event decoder) in that request
+ * frames carry a u32 `reqId` immediately after the opcode byte for
+ * response correlation.
+ */
+export function decodeRequest(input) {
+  const view = toDataView(input);
+  if (!view || view.byteLength < 5) return null;
+  const opcode = view.getUint8(0);
+  const reqId = view.getUint32(1, false);
+  try {
+    switch (opcode) {
+      case OP.CONTROL: {
+        // [op, reqId, action:u8, urlLen:u16, url:utf8, width:u16, height:u16]
+        if (view.byteLength < 5 + 1 + 2) return null;
+        const actionByte = view.getUint8(5);
+        const action = CONTROL_ACTION[actionByte];
+        if (!action) return null;
+        const urlLen = view.getUint16(6, false);
+        if (view.byteLength < 8 + urlLen + 4) return null;
+        const url = urlLen > 0 ? readUtf8(view, 8, urlLen) : "";
+        const width = view.getUint16(8 + urlLen, false);
+        const height = view.getUint16(10 + urlLen, false);
+        const body = { action };
+        if (action === "navigate" && url) body.url = url;
+        if (action === "resize") {
+          body.width = width;
+          body.height = height;
+        }
+        return { opcode, reqId, body };
+      }
+      case OP.EVAL: {
+        if (view.byteLength < 5 + 4) return null;
+        const exprLen = view.getUint32(5, false);
+        if (view.byteLength < 9 + exprLen) return null;
+        const expression = readUtf8(view, 9, exprLen);
+        return { opcode, reqId, body: { expression } };
+      }
+      case OP.STATE: {
+        if (view.byteLength < 5 + 1) return null;
+        const flags = view.getUint8(5);
+        return { opcode, reqId, body: { resetContextMenu: (flags & 1) === 1 } };
+      }
+      default:
+        return null;
+    }
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Encode a request response (opcode 0x82/0x83/0x84). Frame layout:
+ *   [op:u8, reqId:u32 BE, ok:u8, payloadLen:u32 BE, payload:utf8]
+ *
+ * The `stateSnapshot` opcode (0x84) elides the `ok` byte per spec — caller
+ * passes `ok = true`. Callers serialize the JSON payload themselves; this
+ * helper just frames bytes.
+ */
+export function encodeResponse(opcode, reqId, ok, jsonPayload) {
+  const payloadBytes = utf8(jsonPayload);
+  // stateSnapshot has no ok byte; controlAck and evalResult do.
+  const hasOkByte = opcode === OP.CONTROL_ACK || opcode === OP.EVAL_RESULT;
+  const headerLen = 1 + 4 + (hasOkByte ? 1 : 0) + 4;
+  const buf = new ArrayBuffer(headerLen + payloadBytes.length);
+  const v = new DataView(buf);
+  const u = new Uint8Array(buf);
+  let off = 0;
+  v.setUint8(off, opcode);
+  off += 1;
+  v.setUint32(off, reqId, false);
+  off += 4;
+  if (hasOkByte) {
+    v.setUint8(off, ok ? 1 : 0);
+    off += 1;
+  }
+  v.setUint32(off, payloadBytes.length, false);
+  off += 4;
+  u.set(payloadBytes, off);
+  return buf;
 }
 
 // --- helpers ----------------------------------------------------------------

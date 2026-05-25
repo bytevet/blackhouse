@@ -46,7 +46,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import ffmpegPath from "ffmpeg-static";
-import { decode as decodeInput } from "./input-codec.mjs";
+import { decode as decodeInput, decodeRequest, encodeResponse, OP } from "./input-codec.mjs";
 
 // Surface immediately at boot so we never silently lose ffmpeg later. If
 // ffmpeg-static didn't successfully run its post-install (e.g. the image
@@ -395,6 +395,22 @@ async function startBrowser() {
 }
 
 const state = await startBrowser();
+
+/**
+ * Read the first byte of an incoming WS binary frame as the opcode.
+ * Accepts Buffer / ArrayBuffer / Uint8Array (whichever shape `ws` hands
+ * us). Returns null for empty/missing payloads.
+ */
+function peekOpcode(data) {
+  if (!data) return null;
+  if (Buffer.isBuffer(data)) return data.length > 0 ? data[0] : null;
+  if (data instanceof ArrayBuffer) return data.byteLength > 0 ? new Uint8Array(data)[0] : null;
+  if (ArrayBuffer.isView(data))
+    return data.byteLength > 0
+      ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)[0]
+      : null;
+  return null;
+}
 
 // ---------- Per-peer H.264 encoder stream ------------------------------------
 
@@ -809,22 +825,65 @@ app.get(
         }
       }
     },
-    // Client→server input frames arrive as binary on this same WS,
-    // encoded per `input-codec.mjs` (opcode + fixed/variable layout). The
-    // proxy WS byte-pipes them through. browser-service handles messages
-    // in receive order, so a mouseMove can't beat its mouseDown to CDP
-    // (WS framing preserves order; CDP dispatches are sequential by
-    // virtue of being awaited).
+    // Client→server frames arrive as binary on this same WS, encoded per
+    // `input-codec.mjs`. Two opcode ranges:
     //
-    // Text frames are silently dropped — this is a new app with no JSON
-    // legacy to support. The codec rejects malformed binary the same way
-    // (returns null), so all the WS handler does is gate + dispatch.
-    async onMessage(evt, _ws) {
+    //   0x01–0x07: input events (mouseMove, keyDown, …). Fire-and-forget,
+    //     no reqId. Dispatched in receive order so a mouseMove can't beat
+    //     its mouseDown to CDP.
+    //   0x10–0x12: request/response (control, eval, state). Carry a u32
+    //     reqId we echo back in the 0x82/0x83/0x84 response frame.
+    //
+    // Text frames are silently dropped. Malformed binary likewise returns
+    // null from the decoders and we drop.
+    async onMessage(evt, ws) {
       const message = evt.data;
       if (typeof message === "string") return;
-      const payload = decodeInput(message);
-      if (!payload) return;
-      await dispatchInput(payload);
+      const op = peekOpcode(message);
+      if (op == null) return;
+      if (op >= 0x01 && op <= 0x07) {
+        const payload = decodeInput(message);
+        if (payload) await dispatchInput(payload);
+        return;
+      }
+      if (op === OP.CONTROL) {
+        const req = decodeRequest(message);
+        if (!req) return;
+        const result = await runControl(req.body);
+        const buf = encodeResponse(OP.CONTROL_ACK, req.reqId, result.ok, JSON.stringify(result));
+        try {
+          ws.send(buf);
+        } catch {
+          /* peer gone */
+        }
+        return;
+      }
+      if (op === OP.EVAL) {
+        const req = decodeRequest(message);
+        if (!req) return;
+        const result = await runEval(req.body);
+        const buf = encodeResponse(OP.EVAL_RESULT, req.reqId, result.ok, JSON.stringify(result));
+        try {
+          ws.send(buf);
+        } catch {
+          /* peer gone */
+        }
+        return;
+      }
+      if (op === OP.STATE) {
+        const req = decodeRequest(message);
+        if (!req) return;
+        const result = await runState(req.body);
+        // stateSnapshot omits the ok byte per spec — pass true; the JSON
+        // payload itself carries `ok` for the client to inspect.
+        const buf = encodeResponse(OP.STATE_SNAPSHOT, req.reqId, true, JSON.stringify(result));
+        try {
+          ws.send(buf);
+        } catch {
+          /* peer gone */
+        }
+        return;
+      }
     },
     onClose(_evt, ws) {
       const stream = ws._h264;
@@ -937,43 +996,52 @@ async function dispatchInput(body) {
 
 // ---------- POST /browser/control --------------------------------------------
 
-app.post("/browser/control", async (c) => {
-  const body = await c.req.json().catch(() => null);
+// Shared in-process control dispatcher. Both the REST `POST /browser/control`
+// route and the WS opcode 0x10 handler call this. Returns a plain object that
+// each transport serializes its own way (Hono JSON response vs encoded
+// opcode 0x82 payload).
+async function runControl(body) {
   if (!body || typeof body !== "object" || typeof body.action !== "string") {
-    return c.json({ error: "invalid_body" }, 400);
+    return { ok: false, error: "invalid_body" };
   }
   try {
     switch (body.action) {
       case "navigate":
-        if (typeof body.url !== "string") return c.json({ error: "missing_url" }, 400);
+        if (typeof body.url !== "string") return { ok: false, error: "missing_url" };
         await state.page.goto(body.url, { waitUntil: "domcontentloaded", timeout: 30000 });
-        break;
+        return { ok: true, url: state.page.url() };
       case "back":
         await state.page.goBack();
-        break;
+        return { ok: true, url: state.page.url() };
       case "forward":
         await state.page.goForward();
-        break;
+        return { ok: true, url: state.page.url() };
       case "reload":
         await state.page.reload();
-        break;
+        return { ok: true, url: state.page.url() };
       case "resize": {
         if (typeof body.width !== "number" || typeof body.height !== "number") {
-          return c.json({ error: "missing_dims" }, 400);
+          return { ok: false, error: "missing_dims" };
         }
         // Fire-and-forget: scheduleResize debounces 200 ms and runs async.
         // Respond with the clamped target so the FE can sanity-check.
         const dims = clampDims(body.width, body.height);
         state.scheduleResize(dims.width, dims.height);
-        return c.json({ ok: true, url: state.page.url(), width: dims.width, height: dims.height });
+        return { ok: true, url: state.page.url(), width: dims.width, height: dims.height };
       }
       default:
-        return c.json({ error: "unknown_action" }, 400);
+        return { ok: false, error: "unknown_action" };
     }
-    return c.json({ ok: true, url: state.page.url() });
   } catch (err) {
-    return c.json({ error: "nav_failed", message: String(err) }, 500);
+    return { ok: false, error: "nav_failed", message: String(err) };
   }
+}
+
+app.post("/browser/control", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const result = await runControl(body);
+  if (result.ok) return c.json(result);
+  return c.json(result, result.error === "nav_failed" ? 500 : 400);
 });
 
 // ---------- POST /browser/eval -----------------------------------------------
@@ -987,13 +1055,11 @@ app.post("/browser/control", async (c) => {
 // `kind:"input"`) — we don't re-emit it on the SSE channel to avoid
 // duplicates. We do emit a `result` or `error` entry.
 
-app.post("/browser/eval", async (c) => {
-  const body = await c.req.json().catch(() => null);
+async function runEval(body) {
   if (!body || typeof body !== "object" || typeof body.expression !== "string") {
-    return c.json({ ok: false, error: { description: "invalid_body" } }, 400);
+    return { ok: false, error: { description: "invalid_body" } };
   }
   const expression = body.expression;
-
   try {
     const evalResp = await state.cdp.send("Runtime.evaluate", {
       expression,
@@ -1016,7 +1082,7 @@ app.post("/browser/eval", async (c) => {
             .join("\n")
         : undefined;
       emitEvent("eval", { kind: "error", text: description, ts: Date.now() });
-      return c.json({ ok: false, error: { description, stack } });
+      return { ok: false, error: { description, stack } };
     }
 
     // Stringify the result. `returnByValue: true` populates `value` for
@@ -1036,12 +1102,23 @@ app.post("/browser/eval", async (c) => {
       text = remote.description || remote.type;
     }
     emitEvent("eval", { kind: "result", text, ts: Date.now() });
-    return c.json({ ok: true, result: text });
+    return { ok: true, result: text };
   } catch (err) {
     const description = err instanceof Error ? err.message : String(err);
     emitEvent("eval", { kind: "error", text: description, ts: Date.now() });
-    return c.json({ ok: false, error: { description } }, 500);
+    return { ok: false, error: { description } };
   }
+}
+
+app.post("/browser/eval", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const result = await runEval(body);
+  if (result.ok) return c.json(result);
+  // invalid_body → 400, anything else (exception/cdp_error) → 500-ish but
+  // the body itself carries the structured error. Keep 200 for thrown
+  // expressions (those are "successful evaluations that produced an
+  // exception") to match the original REST contract.
+  return c.json(result, result.error?.description === "invalid_body" ? 400 : 200);
 });
 
 // ---------- GET /browser/console (SSE) ---------------------------------------
@@ -1107,7 +1184,7 @@ app.get("/browser/health", (c) =>
 // `?resetContextMenu=1` clears `window.__lastCM` before reading so a test
 // can synchronize "right click, then probe" without seeing stale data.
 
-app.get("/browser/state", async (c) => {
+async function runState(body) {
   // Make sure the debug hook is installed (idempotent — installDebugHooks
   // guards with __bhDebugInstalled). Covers the case where the page has
   // never navigated since process start.
@@ -1116,10 +1193,7 @@ app.get("/browser/state", async (c) => {
   } catch {
     /* page not ready yet; reads below may still succeed */
   }
-
-  const reset = c.req.query("resetContextMenu") === "1";
-
-  let result;
+  const reset = body?.resetContextMenu === true;
   try {
     const evalResp = await state.cdp.send("Runtime.evaluate", {
       expression: `(() => {
@@ -1146,16 +1220,22 @@ app.get("/browser/state", async (c) => {
       returnByValue: true,
     });
     if (evalResp.exceptionDetails) {
-      return c.json({ error: "eval_failed", details: evalResp.exceptionDetails }, 500);
+      return { ok: false, error: "eval_failed", details: evalResp.exceptionDetails };
     }
-    result = evalResp.result?.value || {};
+    return { ok: true, ...(evalResp.result?.value || {}) };
   } catch (err) {
-    return c.json(
-      { error: "cdp_error", message: err instanceof Error ? err.message : String(err) },
-      500,
-    );
+    return {
+      ok: false,
+      error: "cdp_error",
+      message: err instanceof Error ? err.message : String(err),
+    };
   }
-  return c.json({ ok: true, ...result });
+}
+
+app.get("/browser/state", async (c) => {
+  const result = await runState({ resetContextMenu: c.req.query("resetContextMenu") === "1" });
+  if (result.ok) return c.json(result);
+  return c.json(result, 500);
 });
 
 // ---------- Boot --------------------------------------------------------------
