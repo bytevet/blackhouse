@@ -26,6 +26,7 @@ import { requireSessionAccess, handleSessionAccessError } from "../lib/session.j
 import { authSessionToken, authMessagingFromTo } from "../lib/session-token-auth.js";
 import { checkRateLimit } from "../lib/messaging-rate-limit.js";
 import { inboxEvents } from "../lib/inbox-events.js";
+import { streamSSE } from "hono/streaming";
 
 /** Session columns without the potentially-large resultHtml blob. */
 const { resultHtml: _resultHtml, ...sessionColumns } = getTableColumns(schema.codingSessions);
@@ -57,6 +58,81 @@ function toSessionSummary<T extends { resultHtml?: string | null }>({ resultHtml
 
 const app = new Hono<AuthEnv>()
   .onError(handleSessionAccessError)
+
+  // ===========================================================================
+  // Static-path routes — MUST be declared before any `/:id/...` matcher so
+  // Hono's router doesn't capture them as a session id. (Verified: a route
+  // declared after `/:id` is shadowed; Hono dispatches in registration
+  // order regardless of static-vs-param specificity.)
+  // ===========================================================================
+
+  // GET /api/sessions/list-mine — sender discovery for messaging. Returns
+  // every non-destroyed session belonging to the token's owning user.
+  // Auth via the per-session token; admins viewing other users' sessions
+  // use the existing /?all=true cookie-auth path instead.
+  .get("/list-mine", async (c) => {
+    const token = bearerOrQueryToken(c);
+    if (!token) return c.json({ error: "Invalid token" }, 403);
+
+    const [owningSession] = await db
+      .select({ userId: schema.codingSessions.userId })
+      .from(schema.codingSessions)
+      .where(eq(schema.codingSessions.sessionToken, token))
+      .limit(1);
+    if (!owningSession) return c.json({ error: "Invalid token" }, 403);
+
+    const rows = await db
+      .select({
+        id: schema.codingSessions.id,
+        name: schema.codingSessions.name,
+        status: schema.codingSessions.status,
+        preset: schema.codingSessions.preset,
+        agentTitle: schema.codingSessions.agentTitle,
+      })
+      .from(schema.codingSessions)
+      .where(
+        and(
+          eq(schema.codingSessions.userId, owningSession.userId),
+          ne(schema.codingSessions.status, "destroyed"),
+        ),
+      )
+      .orderBy(desc(schema.codingSessions.createdAt));
+
+    return c.json({ sessions: rows });
+  })
+
+  // GET /api/sessions/inbox-events — SSE channel for live unread-count
+  // updates. One connection per dashboard tab; the per-user EventEmitter
+  // in inboxEvents fans out to every active tab for that user. Hooks
+  // emit-side are wired into POST /send-message + both /ack endpoints.
+  //
+  // 15s heartbeat keeps proxies and load balancers from closing idle
+  // connections. Cleanup on `c.req.raw.signal` abort removes the
+  // listener; the emitter itself is kept warm for reconnects (~100 B).
+  .get("/inbox-events", authMiddleware, (c) => {
+    const userId = c.get("session").user.id;
+    return streamSSE(c, async (stream) => {
+      const unsubscribe = inboxEvents.subscribe(userId, (ev) => {
+        // writeSSE is async but stream maintains its own write queue,
+        // so we can fire-and-forget without ordering hazard.
+        void stream.writeSSE({ data: JSON.stringify(ev) });
+      });
+      const heartbeat = setInterval(() => {
+        void stream.writeSSE({ event: "ping", data: "" });
+      }, 15_000);
+
+      await new Promise<void>((resolve) => {
+        const abort = () => {
+          unsubscribe();
+          clearInterval(heartbeat);
+          resolve();
+        };
+        if (c.req.raw.signal.aborted) abort();
+        else c.req.raw.signal.addEventListener("abort", abort, { once: true });
+      });
+    });
+  })
+
   // ---------------------------------------------------------------------------
   // GET /api/sessions — list sessions
   // ---------------------------------------------------------------------------
@@ -869,51 +945,7 @@ const app = new Hono<AuthEnv>()
 
       return c.json({ acked: updated.length, ack_at: now });
     },
-  )
-
-  // GET /api/sessions/list-mine — sender discovery. Returns all
-  // non-destroyed sessions belonging to the authenticated session's user.
-  // Auth via the token's owning user — admins viewing other users' work
-  // don't pivot through this endpoint, they use the existing /?all=true.
-  //
-  // NOTE: This route is intentionally `/list-mine` not `/:id/list-mine`
-  // because the answer is user-scoped, not session-scoped. The token
-  // resolves the user via its owning session — no `:id` needed in the
-  // URL, just the token. Hono dispatches in order, so this MUST be
-  // declared via a static path BEFORE any `/:id/...` matcher could
-  // catch it — guarded here by carrying its own check.
-  .get("/list-mine", async (c) => {
-    const token = bearerOrQueryToken(c);
-    if (!token) return c.json({ error: "Invalid token" }, 403);
-
-    // Find the session owning this token, then list all sessions for
-    // its user. One round trip via a self-join.
-    const [owningSession] = await db
-      .select({ userId: schema.codingSessions.userId })
-      .from(schema.codingSessions)
-      .where(eq(schema.codingSessions.sessionToken, token))
-      .limit(1);
-    if (!owningSession) return c.json({ error: "Invalid token" }, 403);
-
-    const rows = await db
-      .select({
-        id: schema.codingSessions.id,
-        name: schema.codingSessions.name,
-        status: schema.codingSessions.status,
-        preset: schema.codingSessions.preset,
-        agentTitle: schema.codingSessions.agentTitle,
-      })
-      .from(schema.codingSessions)
-      .where(
-        and(
-          eq(schema.codingSessions.userId, owningSession.userId),
-          ne(schema.codingSessions.status, "destroyed"),
-        ),
-      )
-      .orderBy(desc(schema.codingSessions.createdAt));
-
-    return c.json({ sessions: rows });
-  });
+  );
 
 /** Extract the per-session token from Authorization: Bearer or ?token=. */
 function bearerOrQueryToken(c: {
