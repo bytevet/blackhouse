@@ -8,8 +8,16 @@ const INDEX = {
   skills: [
     {
       name: "blackhouse",
-      description: "Blackhouse session tools — submit visual results and update session status",
-      files: ["SKILL.md", "submit-result.sh", "update-title.sh"],
+      description:
+        "Blackhouse session tools — submit visual results, update session status, and exchange messages with sibling sessions",
+      files: [
+        "SKILL.md",
+        "submit-result.sh",
+        "update-title.sh",
+        "send-msg.sh",
+        "check-inbox.sh",
+        "list-sessions.sh",
+      ],
     },
   ],
 };
