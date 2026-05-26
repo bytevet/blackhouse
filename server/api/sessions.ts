@@ -188,9 +188,15 @@ const app = new Hono<AuthEnv>()
           .limit(perPage)
           .offset(offset);
 
+        // Admin impersonation guard — sessionToken is a per-container
+        // bearer credential; leaking it via admin views would let any
+        // admin pose as another user's agent. Strip from rows the admin
+        // doesn't own.
+        const adminUserId = session.user.id;
         return c.json({
-          data: rows.map(({ userName, userEmail, ...s }) => ({
+          data: rows.map(({ userName, userEmail, sessionToken, ...s }) => ({
             ...s,
+            sessionToken: s.userId === adminUserId ? sessionToken : null,
             user: { name: userName, email: userEmail },
           })),
           total,
@@ -237,29 +243,37 @@ const app = new Hono<AuthEnv>()
       return c.json({ error: "Forbidden" }, 403);
     }
 
+    // Admin impersonation guard — strip sessionToken when an admin is
+    // viewing another user's session. Owner always sees their own token
+    // (the dashboard uses it for the per-session messaging endpoints).
+    const isOwner = codingSession.userId === session.user.id;
+    const projected = isOwner
+      ? codingSession
+      : { ...codingSession, sessionToken: null as string | null };
+
     // Auto-detect stopped containers
-    if (codingSession.status === "running" && codingSession.containerId) {
+    if (projected.status === "running" && projected.containerId) {
       try {
         const docker = await getDockerClient();
-        const container = docker.getContainer(codingSession.containerId);
+        const container = docker.getContainer(projected.containerId);
         const info = await container.inspect();
         if (!info.State.Running) {
           await db
             .update(schema.codingSessions)
             .set({ status: "stopped", updatedAt: new Date() })
             .where(eq(schema.codingSessions.id, id));
-          return c.json({ ...codingSession, status: "stopped" as const });
+          return c.json({ ...projected, status: "stopped" as const });
         }
       } catch {
         await db
           .update(schema.codingSessions)
           .set({ status: "stopped", updatedAt: new Date() })
           .where(eq(schema.codingSessions.id, id));
-        return c.json({ ...codingSession, status: "stopped" as const });
+        return c.json({ ...projected, status: "stopped" as const });
       }
     }
 
-    return c.json(codingSession);
+    return c.json(projected);
   })
 
   // ---------------------------------------------------------------------------
