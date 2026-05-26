@@ -15,7 +15,7 @@ import {
   getTableColumns,
   type SQL,
 } from "drizzle-orm";
-import { getDockerClient, getContainerHostPort } from "../lib/docker.js";
+import { getDockerClient } from "../lib/docker.js";
 import type { AuthEnv } from "../middleware/auth.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { paginationQuery } from "../lib/pagination.js";
@@ -318,6 +318,7 @@ const app = new Hono<AuthEnv>()
 
       try {
         const docker = await getDockerClient();
+        const blackhouseNetwork = process.env.BLACKHOUSE_NETWORK;
 
         const container = await docker.createContainer({
           Image: imageName,
@@ -333,26 +334,34 @@ const app = new Hono<AuthEnv>()
           // proxy them to the React SPA:
           //   9223 — browser-service (Playwright screencast + control)
           //   8443 — code-server (IDE)
-          // Empty HostPort tells Docker to assign an ephemeral port; we look
-          // it up on demand via `getContainerHostPort(sessionId, port)`.
+          // Reachability is decided by whether `BLACKHOUSE_NETWORK` is set
+          // (see `getContainerEndpoint` in `server/lib/docker.ts`):
+          //
+          // - Set: Blackhouse runs inside its own container; the agent
+          //   attaches to the same Docker network and we reach it by its
+          //   IP on that network + the internal port. No host port mapping.
+          //
+          // - Unset: local-dev path. Blackhouse runs on the host; agent
+          //   binds to the host's `127.0.0.1:<ephemeral>`, constrained to
+          //   the loopback so the services aren't exposed on the LAN.
           ExposedPorts: {
             "9223/tcp": {},
             "8443/tcp": {},
           },
+          NetworkingConfig: blackhouseNetwork
+            ? { EndpointsConfig: { [blackhouseNetwork]: {} } }
+            : undefined,
           HostConfig: {
             Memory: 2 * 1024 * 1024 * 1024, // 2GB
             NanoCpus: 2_000_000_000, // 2 CPUs
             Binds: binds.length > 0 ? binds : undefined,
             ExtraHosts: ["host.docker.internal:host-gateway"],
-            // `HostIp: "127.0.0.1"` constrains the mapped ports to the host's
-            // loopback. The container itself binds 0.0.0.0 (needed for the
-            // port mapping to work — see entrypoint.sh / browser-service);
-            // without this HostIp, those services would be exposed on every
-            // host interface, including the LAN.
-            PortBindings: {
-              "9223/tcp": [{ HostIp: "127.0.0.1", HostPort: "" }],
-              "8443/tcp": [{ HostIp: "127.0.0.1", HostPort: "" }],
-            },
+            PortBindings: blackhouseNetwork
+              ? undefined
+              : {
+                  "9223/tcp": [{ HostIp: "127.0.0.1", HostPort: "" }],
+                  "8443/tcp": [{ HostIp: "127.0.0.1", HostPort: "" }],
+                },
           },
         });
 

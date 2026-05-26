@@ -8,7 +8,18 @@ services:
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:?Set BETTER_AUTH_SECRET in .env or environment}
       - BETTER_AUTH_URL=${BETTER_AUTH_URL:-http://localhost:3000}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
-      - BLACKHOUSE_CONTAINER_URL=${BLACKHOUSE_CONTAINER_URL:-http://host.docker.internal:3000}
+      # Agent containers reach Blackhouse over the shared `blackhouse` bridge
+      # (see BLACKHOUSE_NETWORK below) via the compose service name. Override
+      # with a host-routable URL if you run agents off-host or detach them
+      # from this network.
+      - BLACKHOUSE_CONTAINER_URL=${BLACKHOUSE_CONTAINER_URL:-http://app:3000}
+      # Attach every spawned agent container to this Docker network so the
+      # app container can reach the agent's in-container services (8443
+      # code-server, 9223 browser-service) by container IP + internal port,
+      # bypassing host port mapping. Required because `127.0.0.1` inside the
+      # app container is its own loopback — not the host's — so the legacy
+      # host-port-mapping path can't reach the agent from here.
+      - BLACKHOUSE_NETWORK=${BLACKHOUSE_NETWORK:-blackhouse}
       - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
       - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
     volumes:
@@ -76,4 +87,10 @@ volumes:
 
 networks:
   blackhouse:
+    # Pin the Docker network name explicitly so it matches `BLACKHOUSE_NETWORK`
+    # above regardless of the compose project prefix. Required because the
+    # Blackhouse server attaches every spawned agent container to a network
+    # *by name* via dockerode, and compose defaults to `<project>_blackhouse`
+    # which would never match.
+    name: blackhouse
     driver: bridge
