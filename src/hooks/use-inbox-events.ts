@@ -25,7 +25,7 @@ export interface UseInboxEventsResult {
 }
 
 /**
- * Subscribes to `/api/inbox-events` via EventSource and tracks per-session
+ * Subscribes to `/api/sessions/inbox-events` via EventSource and tracks per-session
  * unread counts. State is populated by two paths: the consumer calling
  * `mergeUnread` with values from a list fetch (avoids flash-of-zero on the
  * sidebar aggregate), and SSE deltas driving live updates thereafter.
@@ -43,7 +43,7 @@ export function useInboxEvents(): UseInboxEventsResult {
   const [unread, setUnread] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    const es = new EventSource("/api/inbox-events");
+    const es = new EventSource("/api/sessions/inbox-events");
     es.onmessage = (e) => {
       let ev: InboxEvent;
       try {

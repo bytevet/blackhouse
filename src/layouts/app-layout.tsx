@@ -10,7 +10,7 @@ import { InboxEventsProvider } from "@/contexts/inbox-events-provider";
  * page breadcrumbs / titles.
  *
  * `InboxEventsProvider` wraps both sidebar and content so they share one
- * `/api/inbox-events` EventSource per tab.
+ * `/api/sessions/inbox-events` EventSource per tab.
  */
 export function AppLayout() {
   return (
