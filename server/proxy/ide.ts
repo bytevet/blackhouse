@@ -4,7 +4,7 @@ import WebSocket, { type RawData } from "ws";
 import type { AuthEnv } from "../middleware/auth.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireSessionAccess, handleSessionAccessError } from "../lib/session.js";
-import { getContainerHostPort } from "../lib/docker.js";
+import { getContainerEndpoint } from "../lib/docker.js";
 import { rawDataToArrayBuffer } from "../lib/ws-binary.js";
 
 /**
@@ -77,9 +77,9 @@ export function createIdeProxy(
 
       return {
         async onOpen(_evt, ws) {
-          let port: number;
+          let endpoint: Awaited<ReturnType<typeof getContainerEndpoint>>;
           try {
-            port = await getContainerHostPort(sessionId, 8443);
+            endpoint = await getContainerEndpoint(sessionId, 8443);
           } catch (err) {
             try {
               ws.send(`[IDE unavailable: ${err instanceof Error ? err.message : String(err)}]`);
@@ -90,7 +90,7 @@ export function createIdeProxy(
             return;
           }
 
-          const upstreamUrl = `ws://127.0.0.1:${port}${targetPath}${search}`;
+          const upstreamUrl = `ws://${endpoint.host}:${endpoint.port}${targetPath}${search}`;
           upstream = new WebSocket(upstreamUrl);
 
           upstream.on("message", (data: RawData) => {
@@ -156,9 +156,9 @@ export function createIdeProxy(
 }
 
 async function proxyHttp(c: import("hono").Context, sessionId: string) {
-  let port: number;
+  let endpoint: Awaited<ReturnType<typeof getContainerEndpoint>>;
   try {
-    port = await getContainerHostPort(sessionId, 8443);
+    endpoint = await getContainerEndpoint(sessionId, 8443);
   } catch (err) {
     return c.json(
       { error: "ide_unavailable", message: err instanceof Error ? err.message : String(err) },
@@ -168,7 +168,7 @@ async function proxyHttp(c: import("hono").Context, sessionId: string) {
 
   const inUrl = new URL(c.req.url);
   const targetPath = inUrl.pathname.replace(PREFIX_RE, "") || "/";
-  const targetUrl = `http://127.0.0.1:${port}${targetPath}${inUrl.search}`;
+  const targetUrl = `http://${endpoint.host}:${endpoint.port}${targetPath}${inUrl.search}`;
 
   const forwardHeaders = new Headers();
   c.req.raw.headers.forEach((value, key) => {

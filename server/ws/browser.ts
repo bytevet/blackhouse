@@ -3,7 +3,7 @@ import type { WSContext } from "hono/ws";
 import type { createNodeWebSocket } from "@hono/node-ws";
 import WebSocket, { type RawData } from "ws";
 import { validateSessionForContainer } from "../lib/session-auth.js";
-import { getContainerHostPort } from "../lib/docker.js";
+import { getContainerEndpoint } from "../lib/docker.js";
 import { dataToBuffer, rawDataToArrayBuffer } from "../lib/ws-binary.js";
 
 /**
@@ -91,9 +91,9 @@ export function createBrowserWsRoute(
             return;
           }
 
-          let upstreamPort: number;
+          let endpoint: Awaited<ReturnType<typeof getContainerEndpoint>>;
           try {
-            upstreamPort = await getContainerHostPort(sessionId, 9223);
+            endpoint = await getContainerEndpoint(sessionId, 9223);
           } catch (err) {
             try {
               ws.send(`[Browser unavailable: ${err instanceof Error ? err.message : String(err)}]`);
@@ -108,7 +108,7 @@ export function createBrowserWsRoute(
           // permessage-deflate just burns CPU re-compressing it and adds
           // latency on every frame. Bilateral negotiation means the
           // browser-service WS server doesn't need its own opt-out.
-          upstream = new WebSocket(`ws://127.0.0.1:${upstreamPort}/browser/ws`, {
+          upstream = new WebSocket(`ws://${endpoint.host}:${endpoint.port}/browser/ws`, {
             perMessageDeflate: false,
           });
 

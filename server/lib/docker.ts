@@ -79,29 +79,47 @@ export function resetDockerClient(): void {
   dockerPromise = null;
 }
 
-// Short-lived cache for container host-port lookups. Browser/IDE flows
+// Short-lived cache for container endpoint lookups. Browser/IDE flows
 // hit this multiple times per user gesture (every /browser/* REST call,
 // every WS upgrade); each cache miss requires a `container.inspect()`
-// round-trip to dockerode. Ports never change after a container starts,
-// so a few seconds of staleness is safe — the cache is invalidated on
-// session destroy via `resetDockerClient()` indirectly (callers see a
-// throw from inspect on the next miss and tear down).
-const HOST_PORT_TTL_MS = 5_000;
-const hostPortCache = new Map<string, { port: number; expires: number }>();
+// round-trip to dockerode. The endpoint never changes after a container
+// starts, so a few seconds of staleness is safe — the cache is invalidated
+// on session destroy via `invalidateContainerEndpointCache(sessionId)`.
+const ENDPOINT_TTL_MS = 5_000;
+const endpointCache = new Map<string, { endpoint: ContainerEndpoint; expires: number }>();
+
+export interface ContainerEndpoint {
+  host: string;
+  port: number;
+}
 
 /**
- * Resolve the ephemeral host port that Docker mapped to a given container's
- * internal port (e.g. 9223 for the browser service, 8443 for code-server).
- * Cached for {@link HOST_PORT_TTL_MS} since ports are immutable for the
- * lifetime of a container.
+ * Resolve where to reach an in-agent-container service (e.g. 9223 for the
+ * browser service, 8443 for code-server). Cached for {@link ENDPOINT_TTL_MS}
+ * since the endpoint is immutable for the lifetime of a container.
+ *
+ * Two reachability modes:
+ *
+ * 1. **Container-network mode** (`BLACKHOUSE_NETWORK` env var set, used by
+ *    `compose.yml`): Blackhouse runs inside its own container, so the host's
+ *    loopback is NOT reachable as `127.0.0.1` from here. We attach every
+ *    agent container to the same Docker network as the Blackhouse server
+ *    (see `server/api/sessions.ts` createContainer), then reach it by the
+ *    agent's IP on that network + its INTERNAL port. No host port mapping
+ *    needed; the request never leaves Docker.
+ *
+ * 2. **Host mode** (default — local dev: `npm run dev` on the host):
+ *    `127.0.0.1` IS the host's loopback, so we reach the agent via the
+ *    ephemeral host port Docker mapped to its internal port (per the
+ *    `PortBindings` block in createContainer).
  */
-export async function getContainerHostPort(
+export async function getContainerEndpoint(
   sessionId: string,
   internalPort: number,
-): Promise<number> {
+): Promise<ContainerEndpoint> {
   const cacheKey = `${sessionId}:${internalPort}`;
-  const hit = hostPortCache.get(cacheKey);
-  if (hit && hit.expires > Date.now()) return hit.port;
+  const hit = endpointCache.get(cacheKey);
+  if (hit && hit.expires > Date.now()) return hit.endpoint;
 
   const [codingSession] = await db
     .select({ containerId: schema.codingSessions.containerId })
@@ -117,20 +135,37 @@ export async function getContainerHostPort(
   const container = docker.getContainer(codingSession.containerId);
   const info = await container.inspect();
 
-  const key = `${internalPort}/tcp`;
-  const bindings = info.NetworkSettings?.Ports?.[key];
-  if (!bindings || bindings.length === 0 || !bindings[0].HostPort) {
-    throw new Error(`Session ${sessionId} container has no host binding for ${key}`);
+  const networkName = process.env.BLACKHOUSE_NETWORK;
+  let endpoint: ContainerEndpoint;
+
+  if (networkName) {
+    const ip = info.NetworkSettings?.Networks?.[networkName]?.IPAddress;
+    if (!ip) {
+      throw new Error(
+        `Session ${sessionId} container is not attached to network "${networkName}" ` +
+          `(BLACKHOUSE_NETWORK is set). NetworkSettings.Networks keys: ` +
+          `${Object.keys(info.NetworkSettings?.Networks ?? {}).join(", ") || "<none>"}`,
+      );
+    }
+    endpoint = { host: ip, port: internalPort };
+  } else {
+    const key = `${internalPort}/tcp`;
+    const bindings = info.NetworkSettings?.Ports?.[key];
+    if (!bindings || bindings.length === 0 || !bindings[0].HostPort) {
+      throw new Error(`Session ${sessionId} container has no host binding for ${key}`);
+    }
+    const port = Number(bindings[0].HostPort);
+    if (!Number.isFinite(port)) {
+      throw new Error(`Session ${sessionId} returned non-numeric HostPort for ${key}`);
+    }
+    endpoint = { host: "127.0.0.1", port };
   }
-  const port = Number(bindings[0].HostPort);
-  if (!Number.isFinite(port)) {
-    throw new Error(`Session ${sessionId} returned non-numeric HostPort for ${key}`);
-  }
-  hostPortCache.set(cacheKey, { port, expires: Date.now() + HOST_PORT_TTL_MS });
-  return port;
+
+  endpointCache.set(cacheKey, { endpoint, expires: Date.now() + ENDPOINT_TTL_MS });
+  return endpoint;
 }
 
-/** Drop any cached host-port lookups for a session. Call after destroy. */
-export function invalidateContainerHostPortCache(sessionId: string): void {
-  for (const k of hostPortCache.keys()) if (k.startsWith(`${sessionId}:`)) hostPortCache.delete(k);
+/** Drop any cached endpoint lookups for a session. Call after destroy. */
+export function invalidateContainerEndpointCache(sessionId: string): void {
+  for (const k of endpointCache.keys()) if (k.startsWith(`${sessionId}:`)) endpointCache.delete(k);
 }
