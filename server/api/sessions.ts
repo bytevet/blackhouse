@@ -576,10 +576,4 @@ const app = new Hono<AuthEnv>()
     return c.json({ success: true });
   });
 
-// Browser pane now talks to the in-container service exclusively over the
-// binary WebSocket at `/api/browser-ws/:sessionId` (see `server/ws/browser.ts`).
-// The previous REST routes (POST /browser/control, POST /browser/eval,
-// GET /browser/state) and SSE channel (GET /browser/console) were retired by
-// #61 — every operation now travels as a binary opcode on that one WS.
-
 export default app;
