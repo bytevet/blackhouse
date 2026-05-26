@@ -257,13 +257,16 @@ test.describe("Antigravity session happy-path", () => {
  * C9 — Embedded-browser tab end-to-end.
  *
  * Drives the live `BrowserViewer` (#15) against the in-container
- * browser-service (#12) via the WS/SSE/REST proxy (#14). Covers:
+ * browser-service (#12) via the binary WS proxy (post-#61 BE-cut2). Covers:
  *   1. Navigate via the UI address bar; first H.264 frame paints the canvas.
- *   2. SSE console panel picks up at least one entry from the page.
+ *   2. Console panel picks up output via the 0x85 console-event push.
  *   3. A click is forwarded to the in-container browser (no UI errors).
- *   4. An agent-side navigate via /opt/blackhouse/browser-shim.sh actually
- *      changes the in-container page URL AND the React address bar reflects it.
- *   5. A resize POST to the proxy changes the canvas intrinsic dimensions.
+ *   4. An agent-side navigate via /opt/blackhouse/browser-shim.sh (which
+ *      curls the in-container loopback REST `/browser/control` — the lone
+ *      route be intentionally restored in 78a16dd for `$BROWSER` shims)
+ *      changes the in-container page URL AND the React address bar reflects
+ *      it via the 0x86 navigate-event push.
+ *   5. A 0x10 resize control reconfigures the encoder + canvas dimensions.
  */
 test.describe("Browser tab end-to-end", () => {
   test.skip(() => !process.env.E2E_DOCKER, "Requires Docker — set E2E_DOCKER=1 to enable");
@@ -320,12 +323,13 @@ test.describe("Browser tab end-to-end", () => {
 
     // Expand the Console panel and wait for at least one entry. example.com
     // typically logs nothing on its own, so be tolerant of an empty panel —
-    // the strict signal is that the SSE channel is wired (the panel mounts).
+    // the strict signal is that the 0x85 console-event push is wired (the
+    // panel mounts).
     const consoleToggle = page.getByRole("button", { name: /^console/i });
     await consoleToggle.click();
     // Trigger something that definitely produces a console entry by reloading.
     await page.getByRole("button", { name: /^reload$/i }).click();
-    // Give the SSE a moment; assert the panel is mounted and not in error state.
+    // Give the push a moment; assert the panel is mounted and not in error state.
     await expect(page.getByText(/No console output|\[(log|info|warn|error|debug)\]/i)).toBeVisible({
       timeout: 10000,
     });
@@ -341,9 +345,9 @@ test.describe("Browser tab end-to-end", () => {
     expect(nav.exitCode).toBe(0);
 
     // Strict assertion (UI side): the React address bar reflects the new URL,
-    // proven by the `navigate` SSE event landing in BrowserViewer (added in
-    // #28 — browser-service emits Page.frameNavigated → SSE `event: navigate`
-    // → setUrl/setPendingUrl). The pendingUrl is what the <Input> displays.
+    // proven by the 0x86 navigate-event push landing in BrowserViewer
+    // (browser-service emits Page.frameNavigated → 0x86 → setUrl/
+    // setPendingUrl). The pendingUrl is what the <Input> displays.
     await expect(addressBar).toHaveValue(/example\.org/, { timeout: 15000 });
 
     // Belt-and-suspenders (container side): the in-container Playwright page
@@ -400,12 +404,13 @@ test.describe("Browser tab end-to-end", () => {
 /**
  * #45 — Strict browser-interactivity verification.
  *
- * Previous Browser-tab e2e checked WIRE shape: that input POSTs were sent
- * with the right CDP params (button, buttons, deltaY, etc.). That left a gap
- * — Chromium could ignore the events and the test would still pass. These
- * tests assert on OBSERVABLE PAGE STATE via the browser-service's strict
- * probe `/browser/state`, which runs `Runtime.evaluate` inside the actual
- * page and reports back `selectionText`, `scrollY`, `lastContextMenu`, etc.
+ * Previous Browser-tab e2e checked WIRE shape: that input frames carried the
+ * right CDP params (button, buttons, deltaY, etc.). That left a gap —
+ * Chromium could ignore the events and the test would still pass. These
+ * tests assert on OBSERVABLE PAGE STATE via the binary-WS 0x12 state probe
+ * (post-#61 BE-cut2 — see `getBrowserState` below), which runs
+ * `Runtime.evaluate` inside the actual page and reports back
+ * `selectionText`, `scrollY`, `lastContextMenu`, etc.
  *
  * Each test creates its own session because they're independent verifications
  * and easier to debug when isolated. Shared setup helpers (`signInAsAdmin`,
