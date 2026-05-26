@@ -1,6 +1,6 @@
 import { Link } from "react-router";
 import { useTranslation } from "react-i18next";
-import { Bot, Clock, Eye, GitBranch, RotateCcw, Square, User, UserX } from "lucide-react";
+import { Bot, Clock, Eye, GitBranch, Inbox, RotateCcw, Square, User, UserX } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
@@ -13,6 +13,10 @@ import type { CodingSession, SessionStatus } from "@/db/schema";
 
 export type SessionForCard = CodingSession & {
   user?: { name: string | null; email: string | null };
+  /** Inter-session messaging unread count. Server-included on the list
+   *  endpoint; the dashboard merges in live SSE deltas before passing the
+   *  effective value to this prop. */
+  unreadCount?: number;
 };
 
 // Shared classes for the bottom action-bar buttons: equal width via flex-1,
@@ -52,6 +56,7 @@ export function SessionWorkerCard({
   const config = sessionStatusConfig[status] || sessionStatusConfig.pending;
   const slug = codename(session.id);
   const avatarSrc = avatarUrl(session.id, session.preset);
+  const unread = session.unreadCount ?? 0;
 
   return (
     <Card
@@ -62,18 +67,30 @@ export function SessionWorkerCard({
       {/* Body — centered circular avatar (overflows the top edge by 50% for
           the ID-card-on-a-lanyard look) + identity stack. */}
       <CardContent className="flex flex-col items-center gap-2 text-center">
-        <Link
-          to={`/sessions/${session.id}`}
-          className="-mt-8 block rounded-full ring-foreground/10 transition-shadow hover:ring-primary/40 focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:outline-none"
-          aria-label={t("worker.viewAria", { name: session.name })}
-        >
-          <img
-            src={avatarSrc}
-            alt=""
-            className="size-16 shrink-0 rounded-full border-2 border-card bg-muted ring-1 ring-foreground/10"
-            draggable={false}
-          />
-        </Link>
+        {/* `relative -mt-8` wrapper carries the ID-card avatar overflow so
+            the absolute dot can pin to the avatar's visible top-right via
+            `top-0 right-0` (in-flow inside the Link would clash with the
+            rounded-full + ring shadows already on the img). */}
+        <div className="relative -mt-8">
+          <Link
+            to={`/sessions/${session.id}`}
+            className="block rounded-full ring-foreground/10 transition-shadow hover:ring-primary/40 focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:outline-none"
+            aria-label={t("worker.viewAria", { name: session.name })}
+          >
+            <img
+              src={avatarSrc}
+              alt=""
+              className="size-16 shrink-0 rounded-full border-2 border-card bg-muted ring-1 ring-foreground/10"
+              draggable={false}
+            />
+          </Link>
+          {unread > 0 && (
+            <span
+              aria-label={t("messaging.unreadChip", { count: unread })}
+              className="pointer-events-none absolute top-0 right-0 size-3 rounded-full bg-destructive ring-2 ring-card"
+            />
+          )}
+        </div>
 
         <div className="min-w-0 space-y-0.5">
           <h3 className="truncate text-sm font-semibold text-foreground">
@@ -115,6 +132,12 @@ export function SessionWorkerCard({
             >
               <span className="size-1.5 rounded-full bg-success" />
               {t("worker.result")}
+            </Badge>
+          )}
+          {unread > 0 && (
+            <Badge variant="secondary" className="gap-1 text-[0.625rem] font-normal">
+              <Inbox className="size-3" />
+              {t("messaging.unreadChip", { count: unread })}
             </Badge>
           )}
         </div>

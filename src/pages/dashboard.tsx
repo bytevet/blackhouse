@@ -30,14 +30,21 @@ import { Plus, ChevronLeft, ChevronRight } from "lucide-react";
 import type { CodingSession, Template, AgentConfig, SessionStatus } from "@/db/schema";
 import { SESSION_STATUSES } from "@/db/schema";
 import { sessionStatusConfig } from "@/lib/session-status";
+import { useInboxEventsContext } from "@/contexts/inbox-events-context";
 
-type SessionWithUser = CodingSession & { user?: { name: string | null; email: string | null } };
+type SessionWithUser = CodingSession & {
+  user?: { name: string | null; email: string | null };
+  /** Server-included on the list endpoint; merged into the shared inbox
+   *  context so the sidebar aggregate + per-card chip stay in sync. */
+  unreadCount: number;
+};
 
 export function DashboardPage() {
   const { t } = useTranslation();
   const { data: session } = useSession();
   const navigate = useNavigate();
   const isAdmin = session?.user?.role === "admin";
+  const { unreadBySession, mergeUnread } = useInboxEventsContext();
 
   const [sessions, setSessions] = useState<SessionWithUser[]>([]);
   const [sessionsTotal, setSessionsTotal] = useState(0);
@@ -95,6 +102,7 @@ export function DashboardPage() {
         ]);
         setSessions(sessionsResult.data);
         setSessionsTotal(sessionsResult.total);
+        seedUnreadFromSessions(sessionsResult.data);
         setAgentConfigs(configs);
         const seen = new Set<string>();
         const merged = [...myTemplates.data, ...publicTemplates.data].filter((t) => {
@@ -115,6 +123,16 @@ export function DashboardPage() {
     const result = await unwrap<Paginated<SessionWithUser>>(res);
     setSessions(result.data);
     setSessionsTotal(result.total);
+    seedUnreadFromSessions(result.data);
+  };
+
+  /** Feed the shared inbox-events context with this page's per-row unread
+   *  counts so the sidebar aggregate + card chips render immediately, before
+   *  the first SSE delta lands. SSE corrects any divergence on its next emit. */
+  const seedUnreadFromSessions = (rows: SessionWithUser[]) => {
+    const counts: Record<string, number> = {};
+    for (const s of rows) counts[s.id] = s.unreadCount;
+    mergeUnread(counts);
   };
 
   const handleCreateSession = async (e: React.FormEvent) => {
@@ -503,7 +521,10 @@ export function DashboardPage() {
           {sessions.map((s) => (
             <SessionWorkerCard
               key={s.id}
-              session={s}
+              // Live unread from the SSE-backed context (falls back to the
+              // server-provided row value on first render before mergeUnread
+              // settles).
+              session={{ ...s, unreadCount: unreadBySession[s.id] ?? s.unreadCount }}
               showOwner={showAll}
               onStop={(sessionId, sessionName) =>
                 setConfirmAction({ type: "stop", sessionId, sessionName })

@@ -25,9 +25,11 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
+import { useInboxEventsContext } from "@/contexts/inbox-events-context";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -96,6 +98,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const { t } = useTranslation();
   const { data: session } = useSession();
   const { resolved, toggle } = useTheme();
+  const { totalUnread } = useInboxEventsContext();
   const user = session?.user;
   const isAdmin = user?.role === "admin";
 
@@ -138,6 +141,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <SidebarMenu>
                 {visible.map((item) => {
                   const title = t(item.titleKey);
+                  const showRosterBadge = item.titleKey === "nav.roster" && totalUnread > 0;
                   return (
                     <SidebarMenuItem key={item.url}>
                       <SidebarMenuButton
@@ -148,6 +152,13 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                         <item.icon className="size-4" />
                         <span>{title}</span>
                       </SidebarMenuButton>
+                      {showRosterBadge && (
+                        <SidebarMenuBadge
+                          aria-label={t("messaging.aggregateUnread", { count: totalUnread })}
+                        >
+                          {totalUnread}
+                        </SidebarMenuBadge>
+                      )}
                     </SidebarMenuItem>
                   );
                 })}
