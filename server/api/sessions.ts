@@ -9,8 +9,11 @@ import {
   desc,
   count,
   and,
+  inArray,
   isNotNull,
   isNull,
+  ne,
+  gte,
   sql,
   getTableColumns,
   type SQL,
@@ -20,6 +23,9 @@ import type { AuthEnv } from "../middleware/auth.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { paginationQuery } from "../lib/pagination.js";
 import { requireSessionAccess, handleSessionAccessError } from "../lib/session.js";
+import { authSessionToken, authMessagingFromTo } from "../lib/session-token-auth.js";
+import { checkRateLimit } from "../lib/messaging-rate-limit.js";
+import { inboxEvents } from "../lib/inbox-events.js";
 
 /** Session columns without the potentially-large resultHtml blob. */
 const { resultHtml: _resultHtml, ...sessionColumns } = getTableColumns(schema.codingSessions);
@@ -583,6 +589,338 @@ const app = new Hono<AuthEnv>()
       .where(eq(schema.codingSessions.id, id));
 
     return c.json({ success: true });
+  })
+
+  // ---------------------------------------------------------------------------
+  // Inter-session messaging — all six endpoints below authenticate with the
+  // per-session token in the Authorization header (Bearer scheme) or a
+  // `token` query param. These are called from inside the agent container
+  // by the messaging shell scripts (send-msg.sh / check-inbox.sh /
+  // list-sessions.sh) and by the sidecar daemon, so the Better Auth cookie
+  // isn't available. authSessionToken / authMessagingFromTo wrap the
+  // lookup + validation.
+  // ---------------------------------------------------------------------------
+
+  // POST /api/sessions/:id/send-message — send to another session
+  .post(
+    "/:id/send-message",
+    zValidator(
+      "json",
+      z.object({
+        target_session_id: z.string().uuid(),
+        // Cap at 100 KB. The DB column is unbounded text but a runaway
+        // payload here would just waste budget — agents send short
+        // coordination messages, not blobs.
+        message: z.string().min(1).max(100_000),
+        request_id: z.string().max(128).optional(),
+      }),
+    ),
+    async (c) => {
+      const fromSessionId = c.req.param("id");
+      const token = bearerOrQueryToken(c);
+      const { target_session_id, message, request_id } = c.req.valid("json");
+
+      const auth = await authMessagingFromTo(fromSessionId, token, target_session_id);
+      if ("error" in auth) return c.json({ error: auth.error }, auth.status);
+
+      // Rate-limit gate. Per-session and per-user buckets — see
+      // server/lib/messaging-rate-limit.ts for sizing.
+      const rl = checkRateLimit(fromSessionId, auth.from.userId);
+      if (!rl.ok) {
+        c.header("Retry-After", String(rl.retryAfterSec));
+        return c.json({ error: "Rate limit exceeded", retry_after_sec: rl.retryAfterSec }, 429);
+      }
+
+      // 60-second dedup window. If the same (from_session_id, request_id)
+      // exists, return the existing message_id without re-inserting.
+      // Idempotent retries from send-msg.sh's --wait poller land here.
+      if (request_id) {
+        const dedupCutoff = new Date(Date.now() - 60_000);
+        const [existing] = await db
+          .select({ id: schema.sessionMessages.id, createdAt: schema.sessionMessages.createdAt })
+          .from(schema.sessionMessages)
+          .where(
+            and(
+              eq(schema.sessionMessages.fromSessionId, fromSessionId),
+              eq(schema.sessionMessages.requestId, request_id),
+              gte(schema.sessionMessages.createdAt, dedupCutoff),
+            ),
+          )
+          .limit(1);
+        if (existing) {
+          const unread = await unreadCountFor(target_session_id);
+          return c.json({
+            message_id: existing.id,
+            queued_at: existing.createdAt,
+            target_unread_count: unread,
+            deduplicated: true,
+          });
+        }
+      }
+
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      const [inserted] = await db
+        .insert(schema.sessionMessages)
+        .values({
+          fromSessionId,
+          toSessionId: target_session_id,
+          message,
+          requestId: request_id ?? null,
+          expiresAt,
+        })
+        .returning({ id: schema.sessionMessages.id, createdAt: schema.sessionMessages.createdAt });
+
+      const unread = await unreadCountFor(target_session_id);
+
+      // SSE fan-out — lands in commit 6. Decoupled via a tiny event-bus
+      // module so the messaging endpoints don't depend on the SSE
+      // route's lifecycle.
+
+      inboxEvents.emit(auth.to.userId, {
+        type: "unread-changed",
+        sessionId: target_session_id,
+        unreadCount: unread,
+      });
+
+      return c.json({
+        message_id: inserted.id,
+        queued_at: inserted.createdAt,
+        target_unread_count: unread,
+      });
+    },
+  )
+
+  // GET /api/sessions/:id/inbox?unread=true&reply_to=...&limit=N — fetch
+  // pending messages. Sets delivered_at on returned rows (observability
+  // only; never flips status or ack_at).
+  .get(
+    "/:id/inbox",
+    zValidator(
+      "query",
+      z.object({
+        unread: z.coerce.boolean().optional(),
+        reply_to: z.string().optional(),
+        limit: z.coerce.number().int().min(1).max(100).optional(),
+      }),
+    ),
+    async (c) => {
+      const sessionId = c.req.param("id");
+      const token = bearerOrQueryToken(c);
+      const { unread, reply_to, limit } = c.req.valid("query");
+
+      const auth = await authSessionToken(sessionId, token);
+      if ("error" in auth) return c.json({ error: auth.error }, auth.status);
+
+      const cap = limit ?? 50;
+      const filters: SQL[] = [eq(schema.sessionMessages.toSessionId, sessionId)];
+      // `unread=true` AND `unread` omitted both filter to pending+unacked
+      // (default = "give me my inbox"). Explicit `unread=false` returns
+      // all non-expired messages, which only makes sense for debugging.
+      if (unread !== false) {
+        filters.push(eq(schema.sessionMessages.status, "pending"));
+        filters.push(isNull(schema.sessionMessages.ackAt));
+      }
+      // reply_to filters by the request_id of the original outbound
+      // message — used by send-msg.sh --wait to poll for replies that
+      // reference its request_id.
+      if (reply_to) filters.push(eq(schema.sessionMessages.requestId, reply_to));
+
+      const rows = await db
+        .select()
+        .from(schema.sessionMessages)
+        .where(and(...filters))
+        .orderBy(desc(schema.sessionMessages.createdAt))
+        .limit(cap);
+
+      // Stamp delivered_at on the rows we just handed out, only if it
+      // wasn't already set. Pure observability — does NOT flip status
+      // or ack_at. Run async-but-await so the response and the stamp
+      // don't race with a follow-up /inbox call.
+      const toStamp = rows.filter((r) => r.deliveredAt == null).map((r) => r.id);
+      if (toStamp.length > 0) {
+        await db
+          .update(schema.sessionMessages)
+          .set({ deliveredAt: new Date() })
+          .where(
+            and(
+              inArray(schema.sessionMessages.id, toStamp),
+              isNull(schema.sessionMessages.deliveredAt),
+            ),
+          );
+      }
+
+      return c.json({ messages: rows });
+    },
+  )
+
+  // GET /api/sessions/:id/inbox/count — fast-path count for the sidecar
+  // daemon (5s cadence). Uses the partial index directly.
+  .get("/:id/inbox/count", async (c) => {
+    const sessionId = c.req.param("id");
+    const token = bearerOrQueryToken(c);
+    const auth = await authSessionToken(sessionId, token);
+    if ("error" in auth) return c.json({ error: auth.error }, auth.status);
+
+    const unread = await unreadCountFor(sessionId);
+    return c.json({ unread });
+  })
+
+  // PUT /api/sessions/:id/messages/:msgId/ack — single-message ack.
+  // Idempotent: a second ack on the same id returns already_acked=true.
+  .put("/:id/messages/:msgId/ack", async (c) => {
+    const sessionId = c.req.param("id");
+    const msgId = c.req.param("msgId");
+    const token = bearerOrQueryToken(c);
+    const auth = await authSessionToken(sessionId, token);
+    if ("error" in auth) return c.json({ error: auth.error }, auth.status);
+
+    const now = new Date();
+    const updated = await db
+      .update(schema.sessionMessages)
+      .set({ ackAt: now })
+      .where(
+        and(
+          eq(schema.sessionMessages.id, msgId),
+          eq(schema.sessionMessages.toSessionId, sessionId),
+          isNull(schema.sessionMessages.ackAt),
+        ),
+      )
+      .returning({ id: schema.sessionMessages.id });
+
+    if (updated.length === 0) {
+      // Either the message doesn't exist for this session OR it was
+      // already acked. Distinguish so the client can decide whether to
+      // retry. Idempotent for retry-after-network-blip.
+      const [existing] = await db
+        .select({ ackAt: schema.sessionMessages.ackAt })
+        .from(schema.sessionMessages)
+        .where(
+          and(
+            eq(schema.sessionMessages.id, msgId),
+            eq(schema.sessionMessages.toSessionId, sessionId),
+          ),
+        )
+        .limit(1);
+      if (!existing) return c.json({ error: "Message not found" }, 404);
+      return c.json({ ok: true, already_acked: true, ack_at: existing.ackAt });
+    }
+
+    const unread = await unreadCountFor(sessionId);
+    const { inboxEvents } = await import("../lib/inbox-events.js");
+    inboxEvents.emit(auth.session.userId, {
+      type: "unread-changed",
+      sessionId,
+      unreadCount: unread,
+    });
+
+    return c.json({ ok: true, ack_at: now });
+  })
+
+  // PUT /api/sessions/:id/messages/ack-batch — batch ack from
+  // check-inbox.sh --ack-all. The `to_session_id = $1` clause in the
+  // WHERE is load-bearing security: prevents a session from acking
+  // another session's messages even if it guesses the UUIDs.
+  .put(
+    "/:id/messages/ack-batch",
+    zValidator("json", z.object({ ids: z.array(z.string().uuid()).min(1).max(1000) })),
+    async (c) => {
+      const sessionId = c.req.param("id");
+      const { ids } = c.req.valid("json");
+      const token = bearerOrQueryToken(c);
+      const auth = await authSessionToken(sessionId, token);
+      if ("error" in auth) return c.json({ error: auth.error }, auth.status);
+
+      const now = new Date();
+      const updated = await db
+        .update(schema.sessionMessages)
+        .set({ ackAt: now })
+        .where(
+          and(
+            eq(schema.sessionMessages.toSessionId, sessionId),
+            inArray(schema.sessionMessages.id, ids),
+            isNull(schema.sessionMessages.ackAt),
+          ),
+        )
+        .returning({ id: schema.sessionMessages.id });
+
+      const unread = await unreadCountFor(sessionId);
+
+      inboxEvents.emit(auth.session.userId, {
+        type: "unread-changed",
+        sessionId,
+        unreadCount: unread,
+      });
+
+      return c.json({ acked: updated.length, ack_at: now });
+    },
+  )
+
+  // GET /api/sessions/list-mine — sender discovery. Returns all
+  // non-destroyed sessions belonging to the authenticated session's user.
+  // Auth via the token's owning user — admins viewing other users' work
+  // don't pivot through this endpoint, they use the existing /?all=true.
+  //
+  // NOTE: This route is intentionally `/list-mine` not `/:id/list-mine`
+  // because the answer is user-scoped, not session-scoped. The token
+  // resolves the user via its owning session — no `:id` needed in the
+  // URL, just the token. Hono dispatches in order, so this MUST be
+  // declared via a static path BEFORE any `/:id/...` matcher could
+  // catch it — guarded here by carrying its own check.
+  .get("/list-mine", async (c) => {
+    const token = bearerOrQueryToken(c);
+    if (!token) return c.json({ error: "Invalid token" }, 403);
+
+    // Find the session owning this token, then list all sessions for
+    // its user. One round trip via a self-join.
+    const [owningSession] = await db
+      .select({ userId: schema.codingSessions.userId })
+      .from(schema.codingSessions)
+      .where(eq(schema.codingSessions.sessionToken, token))
+      .limit(1);
+    if (!owningSession) return c.json({ error: "Invalid token" }, 403);
+
+    const rows = await db
+      .select({
+        id: schema.codingSessions.id,
+        name: schema.codingSessions.name,
+        status: schema.codingSessions.status,
+        preset: schema.codingSessions.preset,
+        agentTitle: schema.codingSessions.agentTitle,
+      })
+      .from(schema.codingSessions)
+      .where(
+        and(
+          eq(schema.codingSessions.userId, owningSession.userId),
+          ne(schema.codingSessions.status, "destroyed"),
+        ),
+      )
+      .orderBy(desc(schema.codingSessions.createdAt));
+
+    return c.json({ sessions: rows });
   });
+
+/** Extract the per-session token from Authorization: Bearer or ?token=. */
+function bearerOrQueryToken(c: {
+  req: { header: (k: string) => string | undefined; query: (k: string) => string | undefined };
+}): string | undefined {
+  const h = c.req.header("authorization") ?? c.req.header("Authorization");
+  if (h && h.toLowerCase().startsWith("bearer ")) return h.slice(7).trim();
+  return c.req.query("token");
+}
+
+/** Count unread (pending + unacked) messages for a session. */
+async function unreadCountFor(sessionId: string): Promise<number> {
+  const [row] = await db
+    .select({ n: count() })
+    .from(schema.sessionMessages)
+    .where(
+      and(
+        eq(schema.sessionMessages.toSessionId, sessionId),
+        eq(schema.sessionMessages.status, "pending"),
+        isNull(schema.sessionMessages.ackAt),
+      ),
+    );
+  return Number(row?.n ?? 0);
+}
 
 export default app;
