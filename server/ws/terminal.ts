@@ -6,6 +6,7 @@ import { db } from "../db/index.js";
 import { codingSessions } from "../db/schema.js";
 import { eq } from "drizzle-orm";
 import { validateSessionForContainer } from "../lib/session-auth.js";
+import { dataToBuffer } from "../lib/ws-binary.js";
 
 const SCROLLBACK_LIMIT = 256 * 1024; // 256KB of recent output
 
@@ -320,26 +321,8 @@ export function createTerminalRoute(
           const terminal = activeTerminals.get(sessionId);
           if (!terminal) return;
 
-          // Convert message to raw bytes
-          let raw: Buffer;
-          const message = evt.data;
-          if (Buffer.isBuffer(message)) {
-            raw = message;
-          } else if (typeof message === "string") {
-            raw = Buffer.from(message, "utf-8");
-          } else if (message instanceof ArrayBuffer) {
-            raw = Buffer.from(message);
-          } else if (message instanceof Uint8Array) {
-            raw = Buffer.from(
-              message.buffer as ArrayBuffer,
-              message.byteOffset,
-              message.byteLength,
-            );
-          } else {
-            raw = Buffer.from(String(message), "utf-8");
-          }
-
-          if (raw.length === 0) return;
+          const raw = dataToBuffer(evt.data);
+          if (!raw || raw.length === 0) return;
 
           const type = raw[0];
           const payload = raw.subarray(1);

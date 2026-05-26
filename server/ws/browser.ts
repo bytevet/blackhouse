@@ -4,7 +4,7 @@ import type { createNodeWebSocket } from "@hono/node-ws";
 import WebSocket, { type RawData } from "ws";
 import { validateSessionForContainer } from "../lib/session-auth.js";
 import { getContainerHostPort } from "../lib/docker.js";
-import { rawDataToArrayBuffer } from "../lib/ws-binary.js";
+import { dataToBuffer, rawDataToArrayBuffer } from "../lib/ws-binary.js";
 
 /**
  * Browser WebSocket proxy.
@@ -49,18 +49,12 @@ const EARLY_QUEUE_BYTES_CAP = 16 * 1024;
 
 type ProxyFrame = string | Buffer;
 
+// Preserves the text-vs-binary distinction so we send the right WS frame
+// type upstream. Anything binary collapses through `dataToBuffer`.
 function normalizeClientFrame(message: unknown): ProxyFrame | null {
-  if (typeof message === "string") return message;
   if (Buffer.isBuffer(message)) return message;
-  if (message instanceof ArrayBuffer) return Buffer.from(message);
-  if (message instanceof Uint8Array) {
-    return Buffer.from(message.buffer, message.byteOffset, message.byteLength);
-  }
-  return null;
-}
-
-function frameByteLength(frame: ProxyFrame): number {
-  return typeof frame === "string" ? Buffer.byteLength(frame, "utf8") : frame.byteLength;
+  if (typeof message === "string") return message;
+  return dataToBuffer(message);
 }
 
 export function createBrowserWsRoute(
@@ -144,15 +138,11 @@ export function createBrowserWsRoute(
                 if (raw && raw.bufferedAmount > CLIENT_BACKPRESSURE_LIMIT) return;
                 ws.send(rawDataToArrayBuffer(data));
               } else {
-                // Preserve the WS frame type: encoder emits a JSON `config`
-                // message (codec metadata for VideoDecoder.configure) as a
-                // TEXT frame. Converting it to binary breaks the decoder.
-                const buf = Array.isArray(data)
-                  ? Buffer.concat(data)
-                  : Buffer.isBuffer(data)
-                    ? data
-                    : Buffer.from(data);
-                ws.send(buf.toString("utf8"));
+                // Preserve the WS frame type — TEXT frames must round-trip
+                // as TEXT (a pre-#61 encoder emitted JSON config preambles
+                // this way). Post-#61 binary opcodes never take this branch.
+                const buf = dataToBuffer(data);
+                if (buf) ws.send(buf.toString("utf8"));
               }
             } catch {
               // peer closed mid-frame; will be cleaned up by close handler
@@ -192,7 +182,8 @@ export function createBrowserWsRoute(
           if (frame == null) return;
 
           if (!upstream || upstream.readyState !== WebSocket.OPEN) {
-            const size = frameByteLength(frame);
+            const size =
+              typeof frame === "string" ? Buffer.byteLength(frame, "utf8") : frame.byteLength;
             if (earlyQueueBytes + size > EARLY_QUEUE_BYTES_CAP) {
               if (!earlyQueueDropped) {
                 console.warn(
