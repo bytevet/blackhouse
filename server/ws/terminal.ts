@@ -3,8 +3,10 @@ import type { WSContext } from "hono/ws";
 import type { createNodeWebSocket } from "@hono/node-ws";
 import { getDockerClient } from "../lib/docker.js";
 import { db } from "../db/index.js";
-import { codingSessions, session as authSession, user } from "../db/schema.js";
+import { codingSessions } from "../db/schema.js";
 import { eq } from "drizzle-orm";
+import { validateSessionForContainer } from "../lib/session-auth.js";
+import { dataToBuffer } from "../lib/ws-binary.js";
 
 const SCROLLBACK_LIMIT = 256 * 1024; // 256KB of recent output
 
@@ -45,37 +47,6 @@ function tagOutput(chunk: Buffer): ArrayBuffer {
   tagged[0] = 0x00;
   chunk.copy(tagged, 1);
   return tagged.buffer.slice(tagged.byteOffset, tagged.byteOffset + tagged.byteLength);
-}
-
-async function validateSession(
-  sessionId: string,
-  token?: string,
-): Promise<{ containerId: string } | null> {
-  const [codingSession] = await db
-    .select()
-    .from(codingSessions)
-    .where(eq(codingSessions.id, sessionId))
-    .limit(1);
-
-  if (!codingSession || !codingSession.containerId) return null;
-  if (codingSession.status !== "running") return null;
-
-  if (token) {
-    const [authSess] = await db
-      .select()
-      .from(authSession)
-      .where(eq(authSession.token, token))
-      .limit(1);
-
-    if (!authSess) return null;
-
-    if (codingSession.userId !== authSess.userId) {
-      const [usr] = await db.select().from(user).where(eq(user.id, authSess.userId)).limit(1);
-      if (!usr || usr.role !== "admin") return null;
-    }
-  }
-
-  return { containerId: codingSession.containerId };
 }
 
 const DOCKER_ATTACH_KEYS = new Set(["stream", "stdin", "stdout", "stderr", "hijack", "Tty"]);
@@ -163,7 +134,7 @@ export function createTerminalRoute(
 
       return {
         async onOpen(_evt, ws) {
-          const result = await validateSession(sessionId, token);
+          const result = await validateSessionForContainer(sessionId, token);
           if (!result) {
             ws.send("[Auth failed or session not running]");
             ws.close(4001, "Unauthorized");
@@ -350,26 +321,8 @@ export function createTerminalRoute(
           const terminal = activeTerminals.get(sessionId);
           if (!terminal) return;
 
-          // Convert message to raw bytes
-          let raw: Buffer;
-          const message = evt.data;
-          if (Buffer.isBuffer(message)) {
-            raw = message;
-          } else if (typeof message === "string") {
-            raw = Buffer.from(message, "utf-8");
-          } else if (message instanceof ArrayBuffer) {
-            raw = Buffer.from(message);
-          } else if (message instanceof Uint8Array) {
-            raw = Buffer.from(
-              message.buffer as ArrayBuffer,
-              message.byteOffset,
-              message.byteLength,
-            );
-          } else {
-            raw = Buffer.from(String(message), "utf-8");
-          }
-
-          if (raw.length === 0) return;
+          const raw = dataToBuffer(evt.data);
+          if (!raw || raw.length === 0) return;
 
           const type = raw[0];
           const payload = raw.subarray(1);

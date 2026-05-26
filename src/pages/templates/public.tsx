@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { client, unwrap, type Paginated } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
@@ -8,6 +9,7 @@ import { timeAgo } from "@/lib/time";
 import type { Template } from "@/db/schema";
 
 export function PublicTemplatesPage() {
+  const { t } = useTranslation();
   const [templates, setTemplates] = useState<Template[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -26,18 +28,16 @@ export function PublicTemplatesPage() {
   }, [page]);
 
   if (loading) {
-    return <div className="text-sm text-muted-foreground">Loading public templates...</div>;
+    return <div className="text-sm text-muted-foreground">{t("briefings.loadingPublic")}</div>;
   }
 
   const totalPages = Math.ceil(total / perPage);
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-muted-foreground">
-        Browse templates shared by other users on the platform.
-      </p>
+      <p className="text-xs text-muted-foreground">{t("briefings.publicDescription")}</p>
       {templates.length === 0 ? (
-        <p className="py-4 text-sm text-muted-foreground">No public templates available yet.</p>
+        <p className="py-4 text-sm text-muted-foreground">{t("briefings.publicEmptyState")}</p>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {templates.map((template) => (
@@ -46,9 +46,11 @@ export function PublicTemplatesPage() {
                 <CardTitle className="flex items-center justify-between gap-2">
                   <span className="truncate">{template.name}</span>
                   <span className="flex shrink-0 gap-1">
-                    {template.gitRequired && <Badge className="shrink-0">Git Required</Badge>}
+                    {template.gitRequired && (
+                      <Badge className="shrink-0">{t("dashboard.form.gitRequired")}</Badge>
+                    )}
                     <Badge variant="outline" className="shrink-0">
-                      Public
+                      {t("dashboard.form.public")}
                     </Badge>
                   </span>
                 </CardTitle>
@@ -58,7 +60,7 @@ export function PublicTemplatesPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-xs text-muted-foreground">
-                  Created {timeAgo(template.createdAt)}
+                  {t("briefings.created", { when: timeAgo(template.createdAt) })}
                 </div>
               </CardContent>
             </Card>
@@ -74,10 +76,10 @@ export function PublicTemplatesPage() {
             disabled={page <= 1}
             onClick={() => setPage((p) => p - 1)}
           >
-            <ChevronLeft className="size-3" /> Prev
+            <ChevronLeft className="size-3" /> {t("common.prev")}
           </Button>
           <span className="text-xs text-muted-foreground">
-            Page {page} of {totalPages}
+            {t("dashboard.pageOf", { current: page, total: totalPages })}
           </span>
           <Button
             variant="outline"
@@ -85,7 +87,7 @@ export function PublicTemplatesPage() {
             disabled={page >= totalPages}
             onClick={() => setPage((p) => p + 1)}
           >
-            Next <ChevronRight className="size-3" />
+            {t("common.next")} <ChevronRight className="size-3" />
           </Button>
         </div>
       )}

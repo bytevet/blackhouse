@@ -1,11 +1,14 @@
-import { User, Globe } from "lucide-react";
-import { TabbedLayout } from "@/components/tabbed-layout";
+import { Outlet } from "react-router";
 
-const tabs = [
-  { to: "/templates/mine", label: "My Templates", icon: User },
-  { to: "/templates/public", label: "Public Templates", icon: Globe },
-];
-
+/**
+ * Templates section layout — sub-nav (My/Public Templates) lives in the
+ * sidebar now, so this is just a padded scroll container around the active
+ * page.
+ */
 export function TemplatesLayout() {
-  return <TabbedLayout title="Templates" tabs={tabs} />;
+  return (
+    <div className="flex flex-1 flex-col overflow-auto p-4 md:p-6">
+      <Outlet />
+    </div>
+  );
 }

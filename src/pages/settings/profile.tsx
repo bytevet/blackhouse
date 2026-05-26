@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { z } from "zod";
 import { useSession } from "@/lib/auth-client";
 import { client } from "@/lib/api";
@@ -27,6 +28,7 @@ const passwordSchema = z
   });
 
 export function ProfilePage() {
+  const { t } = useTranslation();
   const { data: session } = useSession();
 
   const [nameData, setNameData] = useState({ displayName: session?.user?.name || "" });
@@ -48,7 +50,7 @@ export function ProfilePage() {
     if (!result.success) {
       const errs: Record<string, string> = {};
       for (const issue of result.error.issues) {
-        errs[issue.path[0] as string] = issue.message;
+        errs[String(issue.path[0])] = issue.message;
       }
       setNameErrors(errs);
       return;
@@ -68,7 +70,7 @@ export function ProfilePage() {
     if (!result.success) {
       const errs: Record<string, string> = {};
       for (const issue of result.error.issues) {
-        errs[issue.path[0] as string] = issue.message;
+        errs[String(issue.path[0])] = issue.message;
       }
       setPasswordErrors(errs);
       return;
@@ -91,8 +93,8 @@ export function ProfilePage() {
     <div className="max-w-md space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle>Display Name</CardTitle>
-          <CardDescription>This is the name displayed across the platform.</CardDescription>
+          <CardTitle>{t("settings.profile.displayName")}</CardTitle>
+          <CardDescription>{t("settings.profile.displayNameDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleNameSubmit}>
@@ -102,7 +104,7 @@ export function ProfilePage() {
                   value={nameData.displayName}
                   onChange={(e) => setNameData({ displayName: e.target.value })}
                   aria-invalid={!!nameErrors.displayName}
-                  placeholder="Your name"
+                  placeholder={t("settings.profile.namePlaceholder")}
                 />
                 {nameErrors.displayName && (
                   <FieldError errors={[{ message: nameErrors.displayName }]} />
@@ -110,7 +112,7 @@ export function ProfilePage() {
               </Field>
               <Button type="submit" disabled={nameSaving}>
                 <Save className="size-3" />
-                {nameSaving ? "Saving..." : "Save"}
+                {nameSaving ? t("common.saving") : t("common.save")}
               </Button>
             </div>
           </form>
@@ -119,14 +121,14 @@ export function ProfilePage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Change Password</CardTitle>
-          <CardDescription>Update your password to keep your account secure.</CardDescription>
+          <CardTitle>{t("settings.profile.changePassword")}</CardTitle>
+          <CardDescription>{t("settings.profile.changePasswordDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handlePasswordSubmit}>
             <FieldGroup>
               <Field data-invalid={!!passwordErrors.currentPassword}>
-                <FieldLabel>Current Password</FieldLabel>
+                <FieldLabel>{t("settings.profile.currentPassword")}</FieldLabel>
                 <Input
                   type="password"
                   value={passwordData.currentPassword}
@@ -141,7 +143,7 @@ export function ProfilePage() {
               </Field>
 
               <Field data-invalid={!!passwordErrors.newPassword}>
-                <FieldLabel>New Password</FieldLabel>
+                <FieldLabel>{t("settings.profile.newPassword")}</FieldLabel>
                 <Input
                   type="password"
                   value={passwordData.newPassword}
@@ -156,7 +158,7 @@ export function ProfilePage() {
               </Field>
 
               <Field data-invalid={!!passwordErrors.confirmPassword}>
-                <FieldLabel>Confirm Password</FieldLabel>
+                <FieldLabel>{t("settings.profile.confirmPassword")}</FieldLabel>
                 <Input
                   type="password"
                   value={passwordData.confirmPassword}
@@ -171,7 +173,9 @@ export function ProfilePage() {
               </Field>
 
               <Button type="submit" disabled={passwordSaving} className="w-fit">
-                {passwordSaving ? "Updating..." : "Update Password"}
+                {passwordSaving
+                  ? t("settings.profile.updating")
+                  : t("settings.profile.updatePassword")}
               </Button>
             </FieldGroup>
           </form>

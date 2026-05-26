@@ -3,6 +3,8 @@
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/source-code-pro";
 @import "@fontsource-variable/geist-mono";
+@import "@fontsource-variable/figtree";
+@import "@fontsource-variable/jetbrains-mono";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -19,8 +21,8 @@
   --card-foreground: oklch(0.141 0.005 285.823);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.141 0.005 285.823);
-  --primary: oklch(0.514 0.222 16.935);
-  --primary-foreground: oklch(0.969 0.015 12.422);
+  --primary: oklch(0.21 0.006 285.885);
+  --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.967 0.001 286.375);
   --secondary-foreground: oklch(0.21 0.006 285.885);
   --muted: oklch(0.967 0.001 286.375);
@@ -31,21 +33,38 @@
   --border: oklch(0.92 0.004 286.32);
   --input: oklch(0.92 0.004 286.32);
   --ring: oklch(0.705 0.015 286.067);
-  --chart-1: oklch(0.81 0.117 11.638);
-  --chart-2: oklch(0.645 0.246 16.439);
-  --chart-3: oklch(0.586 0.253 17.585);
-  --chart-4: oklch(0.514 0.222 16.935);
-  --chart-5: oklch(0.455 0.188 13.697);
-  --radius: 0.625rem;
+  --chart-1: oklch(0.811 0.111 293.571);
+  --chart-2: oklch(0.606 0.25 292.717);
+  --chart-3: oklch(0.541 0.281 293.009);
+  --chart-4: oklch(0.491 0.27 292.581);
+  --chart-5: oklch(0.432 0.232 292.759);
+  --radius: 0.45rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.141 0.005 285.823);
-  --sidebar-primary: oklch(0.586 0.253 17.585);
-  --sidebar-primary-foreground: oklch(0.969 0.015 12.422);
+  --sidebar-primary: oklch(0.21 0.006 285.885);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.967 0.001 286.375);
   --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
   --sidebar-border: oklch(0.92 0.004 286.32);
   --sidebar-ring: oklch(0.705 0.015 286.067);
   --terminal: oklch(0.1 0.005 285.823);
+
+  /* Semantic status tokens (#52) — used by session-status.ts + agent/docker
+   * health badges + dashboard status indicators. Each has a core (`--xxx`),
+   * a foreground for text-on-bg pairs (`--xxx-fg`), and a soft bg
+   * (`--xxx-bg`) for badge/pill backgrounds. */
+  --success: oklch(0.62 0.16 142);
+  --success-fg: oklch(0.32 0.1 142);
+  --success-bg: oklch(0.95 0.05 142);
+  --warning: oklch(0.74 0.16 70);
+  --warning-fg: oklch(0.42 0.1 70);
+  --warning-bg: oklch(0.96 0.05 70);
+  --error: oklch(0.62 0.18 25);
+  --error-fg: oklch(0.32 0.12 25);
+  --error-bg: oklch(0.95 0.05 25);
+  --info: oklch(0.58 0.18 250);
+  --info-fg: oklch(0.3 0.12 250);
+  --info-bg: oklch(0.95 0.05 250);
 }
 
 .dark {
@@ -55,8 +74,8 @@
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.21 0.006 285.885);
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.455 0.188 13.697);
-  --primary-foreground: oklch(0.969 0.015 12.422);
+  --primary: oklch(0.92 0.004 286.32);
+  --primary-foreground: oklch(0.21 0.006 285.885);
   --secondary: oklch(0.274 0.006 286.033);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.274 0.006 286.033);
@@ -67,24 +86,40 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.552 0.016 285.938);
-  --chart-1: oklch(0.81 0.117 11.638);
-  --chart-2: oklch(0.645 0.246 16.439);
-  --chart-3: oklch(0.586 0.253 17.585);
-  --chart-4: oklch(0.514 0.222 16.935);
-  --chart-5: oklch(0.455 0.188 13.697);
+  --chart-1: oklch(0.811 0.111 293.571);
+  --chart-2: oklch(0.606 0.25 292.717);
+  --chart-3: oklch(0.541 0.281 293.009);
+  --chart-4: oklch(0.491 0.27 292.581);
+  --chart-5: oklch(0.432 0.232 292.759);
   --sidebar: oklch(0.21 0.006 285.885);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.645 0.246 16.439);
-  --sidebar-primary-foreground: oklch(0.969 0.015 12.422);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.274 0.006 286.033);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.552 0.016 285.938);
   --terminal: oklch(0.1 0.005 285.823);
+
+  /* Semantic status tokens — dark variants. Foreground (-fg) is brightened
+   * for contrast on dark surfaces; background (-bg) is darkened to a low-
+   * chroma muted tone that reads as elevated without glare. */
+  --success: oklch(0.74 0.15 142);
+  --success-fg: oklch(0.85 0.13 142);
+  --success-bg: oklch(0.28 0.08 142);
+  --warning: oklch(0.82 0.15 70);
+  --warning-fg: oklch(0.88 0.12 70);
+  --warning-bg: oklch(0.3 0.08 70);
+  --error: oklch(0.74 0.18 25);
+  --error-fg: oklch(0.85 0.14 25);
+  --error-bg: oklch(0.28 0.09 25);
+  --info: oklch(0.7 0.17 250);
+  --info-fg: oklch(0.85 0.13 250);
+  --info-bg: oklch(0.28 0.08 250);
 }
 
 @theme inline {
-  --font-heading: var(--font-mono);
+  --font-heading: "JetBrains Mono Variable", monospace;
   --font-mono: "Geist Mono Variable", monospace;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -118,6 +153,18 @@
   --color-foreground: var(--foreground);
   --color-terminal: var(--terminal);
   --color-background: var(--background);
+  --color-success: var(--success);
+  --color-success-fg: var(--success-fg);
+  --color-success-bg: var(--success-bg);
+  --color-warning: var(--warning);
+  --color-warning-fg: var(--warning-fg);
+  --color-warning-bg: var(--warning-bg);
+  --color-error: var(--error);
+  --color-error-fg: var(--error-fg);
+  --color-error-bg: var(--error-bg);
+  --color-info: var(--info);
+  --color-info-fg: var(--info-fg);
+  --color-info-bg: var(--info-bg);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -125,6 +172,7 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  --font-sans: "Figtree Variable", sans-serif;
 }
 
 @layer base {
@@ -135,7 +183,7 @@
     @apply bg-background text-foreground;
   }
   html {
-    @apply font-mono;
+    @apply font-sans;
   }
 }
 

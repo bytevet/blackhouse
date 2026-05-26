@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
+import { useTranslation } from "react-i18next";
 import { z } from "zod";
 import { useSession } from "@/lib/auth-client";
 import { client, unwrap, type Paginated } from "@/lib/api";
@@ -56,6 +57,7 @@ const editUserSchema = z.object({
 });
 
 export function UsersPage() {
+  const { t } = useTranslation();
   const { data: session } = useSession();
   const navigate = useNavigate();
   const isAdmin = session?.user?.role === "admin";
@@ -69,7 +71,6 @@ export function UsersPage() {
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<UserRow | null>(null);
   const [deletingUser, setDeletingUser] = useState<UserRow | null>(null);
   const [saving, setSaving] = useState(false);
@@ -136,7 +137,7 @@ export function UsersPage() {
     const result = createUserSchema.safeParse(createForm);
     if (!result.success) {
       const errs: Record<string, string> = {};
-      for (const issue of result.error.issues) errs[issue.path[0] as string] = issue.message;
+      for (const issue of result.error.issues) errs[String(issue.path[0])] = issue.message;
       setFormErrors(errs);
       return;
     }
@@ -164,7 +165,7 @@ export function UsersPage() {
     const result = editUserSchema.safeParse(editForm);
     if (!result.success) {
       const errs: Record<string, string> = {};
-      for (const issue of result.error.issues) errs[issue.path[0] as string] = issue.message;
+      for (const issue of result.error.issues) errs[String(issue.path[0])] = issue.message;
       setFormErrors(errs);
       return;
     }
@@ -190,7 +191,6 @@ export function UsersPage() {
   const handleDelete = async () => {
     if (!deletingUser) return;
     await client.api.settings.users[":id"].$delete({ param: { id: deletingUser.id } });
-    setDeleteDialogOpen(false);
     setDeletingUser(null);
     await refresh();
   };
@@ -204,15 +204,13 @@ export function UsersPage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
-            Users
+            {t("settings.team.title")}
             <Button size="sm" onClick={openCreate}>
               <Plus className="size-3" />
-              Add User
+              {t("settings.team.onboardUser")}
             </Button>
           </CardTitle>
-          <CardDescription>
-            Manage platform users and their roles. Only admins can access this page.
-          </CardDescription>
+          <CardDescription>{t("settings.team.description")}</CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
@@ -267,14 +265,7 @@ export function UsersPage() {
                           <Edit className="size-3" />
                         </Button>
                         {!isSelf && (
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            onClick={() => {
-                              setDeletingUser(u);
-                              setDeleteDialogOpen(true);
-                            }}
-                          >
+                          <Button variant="ghost" size="icon-sm" onClick={() => setDeletingUser(u)}>
                             <Trash2 className="size-3" />
                           </Button>
                         )}
@@ -316,8 +307,8 @@ export function UsersPage() {
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Add User</DialogTitle>
-            <DialogDescription>Create a new platform user.</DialogDescription>
+            <DialogTitle>{t("settings.team.onboardDialogTitle")}</DialogTitle>
+            <DialogDescription>{t("settings.team.onboardDialogDescription")}</DialogDescription>
           </DialogHeader>
           <FieldGroup>
             <Field data-invalid={!!formErrors.name || undefined}>
@@ -445,21 +436,21 @@ export function UsersPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+      {/* Off-board Confirmation Dialog */}
+      <Dialog open={!!deletingUser} onOpenChange={(o) => !o && setDeletingUser(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete User</DialogTitle>
+            <DialogTitle>{t("settings.team.offboardUser")}</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete "{deletingUser?.name}"? This action cannot be undone.
+              {t("settings.team.offboardDialogBody", { name: deletingUser?.name ?? "" })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
-              Cancel
+            <Button variant="outline" onClick={() => setDeletingUser(null)}>
+              {t("common.cancel")}
             </Button>
             <Button variant="destructive" onClick={handleDelete}>
-              Delete
+              {t("settings.team.offboard")}
             </Button>
           </DialogFooter>
         </DialogContent>

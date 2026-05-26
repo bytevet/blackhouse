@@ -15,7 +15,7 @@ import {
   getTableColumns,
   type SQL,
 } from "drizzle-orm";
-import { getDockerClient } from "../lib/docker.js";
+import { getDockerClient, getContainerHostPort } from "../lib/docker.js";
 import type { AuthEnv } from "../middleware/auth.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { paginationQuery } from "../lib/pagination.js";
@@ -329,11 +329,30 @@ const app = new Hono<AuthEnv>()
             "blackhouse.user_id": session.user.id,
             "blackhouse.managed": "true",
           },
+          // Expose the in-container services so the Blackhouse server can
+          // proxy them to the React SPA:
+          //   9223 — browser-service (Playwright screencast + control)
+          //   8443 — code-server (IDE)
+          // Empty HostPort tells Docker to assign an ephemeral port; we look
+          // it up on demand via `getContainerHostPort(sessionId, port)`.
+          ExposedPorts: {
+            "9223/tcp": {},
+            "8443/tcp": {},
+          },
           HostConfig: {
             Memory: 2 * 1024 * 1024 * 1024, // 2GB
             NanoCpus: 2_000_000_000, // 2 CPUs
             Binds: binds.length > 0 ? binds : undefined,
             ExtraHosts: ["host.docker.internal:host-gateway"],
+            // `HostIp: "127.0.0.1"` constrains the mapped ports to the host's
+            // loopback. The container itself binds 0.0.0.0 (needed for the
+            // port mapping to work — see entrypoint.sh / browser-service);
+            // without this HostIp, those services would be exposed on every
+            // host interface, including the LAN.
+            PortBindings: {
+              "9223/tcp": [{ HostIp: "127.0.0.1", HostPort: "" }],
+              "8443/tcp": [{ HostIp: "127.0.0.1", HostPort: "" }],
+            },
           },
         });
 

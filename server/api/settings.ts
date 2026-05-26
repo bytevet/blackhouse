@@ -15,6 +15,61 @@ import { authMiddleware, adminMiddleware } from "../middleware/auth.js";
 import { paginationQuery, paginate } from "../lib/pagination.js";
 import { volumeMountSchema } from "../lib/validation.js";
 
+// ---------------------------------------------------------------------------
+// Build-context tar helpers
+// ---------------------------------------------------------------------------
+
+/** Pack a single file (resolved against cwd) into the tar stream. */
+function addFileToTar(pack: tar.Pack, relPath: string, opts?: { mode?: number }): void {
+  const abs = path.resolve(process.cwd(), relPath);
+  const stat = fs.statSync(abs);
+  const buf = fs.readFileSync(abs);
+  pack.entry(
+    {
+      name: relPath,
+      mode: opts?.mode ?? stat.mode & 0o7777,
+      mtime: stat.mtime,
+      size: buf.length,
+    },
+    buf,
+  );
+}
+
+/**
+ * Recursively pack a directory (resolved against cwd) into the tar stream.
+ * Entries are added with their path relative to cwd so the Docker daemon
+ * sees the same layout the local working tree has — `COPY agent/foo /dst`
+ * resolves identically.
+ */
+function addDirToTar(pack: tar.Pack, relDir: string, opts?: { skip?: string[] }): void {
+  const skip = new Set(opts?.skip ?? []);
+  const root = path.resolve(process.cwd(), relDir);
+  const walk = (absDir: string): void => {
+    for (const entry of fs.readdirSync(absDir, { withFileTypes: true })) {
+      if (skip.has(entry.name)) continue;
+      const abs = path.join(absDir, entry.name);
+      const rel = path.relative(process.cwd(), abs);
+      if (entry.isDirectory()) {
+        walk(abs);
+      } else if (entry.isFile()) {
+        const stat = fs.statSync(abs);
+        const buf = fs.readFileSync(abs);
+        pack.entry(
+          {
+            name: rel,
+            mode: stat.mode & 0o7777,
+            mtime: stat.mtime,
+            size: buf.length,
+          },
+          buf,
+        );
+      }
+      // symlinks/sockets/etc. are skipped — build context shouldn't carry them
+    }
+  };
+  walk(root);
+}
+
 const app = new Hono<AuthEnv>()
   // ---------------------------------------------------------------------------
   // PUT /api/settings/profile — update profile (requires auth)
@@ -223,6 +278,19 @@ const app = new Hono<AuthEnv>()
         const pack = tar.pack();
         pack.entry({ name: "Dockerfile" }, dockerfile);
         pack.entry({ name: "agent/entrypoint.sh" }, entrypointScript);
+
+        // The shared Dockerfile block added in v-next (#13) references these
+        // additional build-context paths:
+        //   agent/browser-service/        (recursive — package.json + service.mjs)
+        //   agent/skills/blackhouse/browser-shim.sh
+        // Pack them so the Docker daemon can resolve the COPY directives.
+        // Skip node_modules — the Dockerfile re-runs `npm install --omit=dev`
+        // inside the image, and any host-installed modules would bloat the
+        // context and risk shipping host-platform native binaries.
+        addDirToTar(pack, "agent/browser-service", { skip: ["node_modules"] });
+        addFileToTar(pack, "agent/skills/blackhouse/browser-shim.sh", { mode: 0o755 });
+        addDirToTar(pack, "agent/code-server-config");
+
         pack.finalize();
 
         const docker = await getDockerClient();

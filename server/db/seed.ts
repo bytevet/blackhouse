@@ -1,9 +1,11 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { db } from "./index.js";
 import * as schema from "./schema.js";
 
 export async function runSeed() {
+  const { hashPassword } = await import("better-auth/crypto");
+
   // Seed default admin user
   const existingAdmin = await db
     .select()
@@ -12,8 +14,6 @@ export async function runSeed() {
     .limit(1);
 
   if (existingAdmin.length === 0) {
-    const { hashPassword } = await import("better-auth/crypto");
-
     const password = process.env.ADMIN_PASSWORD || randomBytes(16).toString("base64url");
     const userId = crypto.randomUUID();
     const hashedPassword = await hashPassword(password);
@@ -42,6 +42,25 @@ export async function runSeed() {
       .onConflictDoNothing();
 
     console.log(`[blackhouse] Default admin user created (username: admin, password: ${password})`);
+  } else if (process.env.ADMIN_PASSWORD) {
+    // Admin exists AND operator pinned ADMIN_PASSWORD — reconcile the credential.
+    // This is the "idempotent admin password" semantic: re-running the seed
+    // with a different ADMIN_PASSWORD updates the existing admin's hash.
+    // No-op when ADMIN_PASSWORD is unset (otherwise we'd lock the user out
+    // of their existing chosen password on every restart).
+    const adminUser = existingAdmin[0];
+    const hashedPassword = await hashPassword(process.env.ADMIN_PASSWORD);
+    const updated = await db
+      .update(schema.account)
+      .set({ password: hashedPassword, updatedAt: new Date() })
+      .where(
+        and(eq(schema.account.userId, adminUser.id), eq(schema.account.providerId, "credential")),
+      )
+      .returning({ id: schema.account.id });
+
+    if (updated.length > 0) {
+      console.log("[blackhouse] Admin password reconciled from ADMIN_PASSWORD env.");
+    }
   }
 
   // Seed default agent configs
@@ -59,15 +78,17 @@ export async function runSeed() {
         ],
       },
       {
-        preset: "gemini",
-        displayName: "Gemini",
-        agentCommand: "gemini --yolo",
-        volumeMounts: [{ name: "gemini-config", mountPath: "/home/workspace/.gemini" }],
+        preset: "antigravity",
+        displayName: "Antigravity",
+        agentCommand: "agy --dangerously-skip-permissions",
+        // `agy` writes config to `~/.gemini` (inherits Gemini's layout) —
+        // see agent-presets.ts comment and 0004 migration.
+        volumeMounts: [{ name: "antigravity-config", mountPath: "/home/workspace/.gemini" }],
       },
       {
         preset: "codex",
         displayName: "Codex",
-        agentCommand: "codex --full-auto",
+        agentCommand: "codex --sandbox workspace-write --ask-for-approval on-request",
         volumeMounts: [{ name: "codex-config", mountPath: "/home/workspace/.codex" }],
       },
     ]);

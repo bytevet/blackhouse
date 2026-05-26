@@ -21,8 +21,14 @@ logs
 
 # Test results
 test-results
+playwright-report
+.playwright-mcp
+
+# Scratch / one-shot working dirs (screenshots, demo data, repro probes)
+tmp
 
 # Legacy
 .output
 .vinxi
 dist-ssr
+tests/e2e/.auth/

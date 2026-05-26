@@ -1,6 +1,6 @@
 # Blackhouse
 
-Coding agent management platform — spawn and manage Docker-containerized coding agents (Claude Code, Codex, Gemini) with terminal access, file explorers, and result viewers.
+Coding agent management platform — spawn and manage Docker-containerized coding agents (Claude Code, Codex, Antigravity) with terminal access, file explorers, and result viewers.
 
 ## Tech Stack
 

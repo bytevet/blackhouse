@@ -1,6 +1,8 @@
 import { test, expect } from "@playwright/test";
 import { signInAsAdmin } from "./helpers";
 
+test.use({ storageState: { cookies: [], origins: [] } });
+
 test.describe("Authentication", () => {
   test("unauthenticated users are redirected to /login", async ({ page }) => {
     await page.goto("/dashboard");
@@ -26,7 +28,7 @@ test.describe("Authentication", () => {
   test("can sign in with admin credentials", async ({ page }) => {
     await signInAsAdmin(page);
     await expect(page).toHaveURL(/\/dashboard/);
-    await expect(page.getByRole("heading", { name: /dashboard/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /roster/i })).toBeVisible();
   });
 
   test("shows error on invalid credentials", async ({ page }) => {

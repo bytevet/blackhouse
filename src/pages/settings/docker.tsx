@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
+import { useTranslation } from "react-i18next";
 import { useSession } from "@/lib/auth-client";
 import { client, unwrap, type Paginated } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -135,6 +136,7 @@ function formatBytes(bytes: number): string {
 }
 
 export function DockerPage() {
+  const { t } = useTranslation();
   const { data: session } = useSession();
   const navigate = useNavigate();
   const isAdmin = session?.user?.role === "admin";
@@ -269,11 +271,11 @@ export function DockerPage() {
                 variant="outline"
                 className={
                   isConnected
-                    ? "border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-400"
-                    : "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400"
+                    ? "border-success/30 bg-success-bg text-success-fg"
+                    : "border-error/30 bg-error-bg text-error-fg"
                 }
               >
-                {isConnected ? "Connected" : "Disconnected"}
+                {isConnected ? t("settings.docker.connected") : t("settings.docker.disconnected")}
               </Badge>
               {dockerStatus?.version && (
                 <span className="text-xs font-normal text-muted-foreground">
@@ -377,8 +379,8 @@ export function DockerPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Active Containers</CardTitle>
-          <CardDescription>Containers managed by Blackhouse sessions.</CardDescription>
+          <CardTitle>{t("settings.docker.activeContainers")}</CardTitle>
+          <CardDescription>{t("settings.docker.activeDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
@@ -450,7 +452,7 @@ export function DockerPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Volumes</CardTitle>
+          <CardTitle>{t("settings.docker.volumes")}</CardTitle>
           <CardDescription>
             Docker volumes used by agent credential mounts and session data.
           </CardDescription>
@@ -527,7 +529,7 @@ export function DockerPage() {
       <Dialog open={!!deletingVolume} onOpenChange={(open) => !open && setDeletingVolume(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete Volume</DialogTitle>
+            <DialogTitle>{t("settings.docker.deleteVolume")}</DialogTitle>
             <DialogDescription>
               Are you sure you want to delete volume{" "}
               <code className="rounded bg-muted px-1 font-mono text-xs">{deletingVolume}</code>?
