@@ -9,7 +9,7 @@ import {
   pgEnum,
   index,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 
 // --- Better Auth managed tables ---
 
@@ -108,6 +108,50 @@ export const codingSessions = pgTable(
   ],
 );
 
+export const sessionMessages = pgTable(
+  "session_messages",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    fromSessionId: uuid("from_session_id")
+      .notNull()
+      .references(() => codingSessions.id, { onDelete: "cascade" }),
+    toSessionId: uuid("to_session_id")
+      .notNull()
+      .references(() => codingSessions.id, { onDelete: "cascade" }),
+    message: text("message").notNull(),
+    requestId: text("request_id"),
+    // 'pending' | 'expired' — flat enum kept as text so reaper/cleanup
+    // can add new states (e.g. 'cancelled') without a migration.
+    status: text("status").notNull().default("pending"),
+    // Stamped when a receiver first fetches the message via /inbox.
+    // Observability only — does NOT flip status or ack_at.
+    deliveredAt: timestamp("delivered_at"),
+    // Stamped when the receiver acks. NULL = unread. At-least-once
+    // delivery: acks are explicit (check-inbox.sh --ack or --ack-all),
+    // never implicit. Handlers must be idempotent via request_id.
+    ackAt: timestamp("ack_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    // Populated by the app at insert time: NOW() + 7 days. The reaper
+    // (future) flips status='expired' when this passes.
+    expiresAt: timestamp("expires_at").notNull(),
+  },
+  (table) => [
+    // Fast-path for /inbox + /inbox/count: unread messages for a session.
+    // Partial index keeps it small — only pending+unacked rows are indexed.
+    index("idx_messages_inbox")
+      .on(table.toSessionId, table.createdAt)
+      .where(sql`status = 'pending' AND ack_at IS NULL`),
+    // Dedup window: (from_session_id, request_id) within 60s returns the
+    // existing message_id without re-inserting. Non-unique on purpose —
+    // dedup is enforced in app code with a time window, not by the index.
+    index("idx_messages_dedup").on(table.fromSessionId, table.requestId),
+    // Reaper scan over non-expired rows.
+    index("idx_messages_expires")
+      .on(table.expiresAt)
+      .where(sql`status != 'expired'`),
+  ],
+);
+
 export const templates = pgTable(
   "templates",
   {
@@ -163,6 +207,7 @@ export const dockerConfigs = pgTable("docker_configs", {
 export type CodingSession = Omit<typeof codingSessions.$inferSelect, "resultHtml"> & {
   hasResult: boolean;
 };
+export type SessionMessage = typeof sessionMessages.$inferSelect;
 export type Template = typeof templates.$inferSelect;
 export type AgentConfig = typeof agentConfigs.$inferSelect;
 export type User = typeof user.$inferSelect;
@@ -196,4 +241,17 @@ export const templatesRelations = relations(templates, ({ one, many }) => ({
     references: [user.id],
   }),
   codingSessions: many(codingSessions),
+}));
+
+export const sessionMessagesRelations = relations(sessionMessages, ({ one }) => ({
+  fromSession: one(codingSessions, {
+    fields: [sessionMessages.fromSessionId],
+    references: [codingSessions.id],
+    relationName: "messagesSent",
+  }),
+  toSession: one(codingSessions, {
+    fields: [sessionMessages.toSessionId],
+    references: [codingSessions.id],
+    relationName: "messagesReceived",
+  }),
 }));

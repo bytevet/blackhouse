@@ -8,17 +8,20 @@ import {
   templates,
   agentConfigs,
   dockerConfigs,
+  sessionMessages,
   sessionStatusEnum,
   SESSION_STATUSES,
   userRelations,
   codingSessionsRelations,
   templatesRelations,
+  sessionMessagesRelations,
 } from "@/db/schema";
 import type {
   CodingSession,
   Template,
   AgentConfig,
   User,
+  SessionMessage,
   SessionStatus,
   UserRole,
 } from "@/db/schema";
@@ -126,6 +129,20 @@ describe("Database Schema", () => {
       expect(columns).toContain("updatedAt");
     });
 
+    it("should define sessionMessages table with all columns", () => {
+      const columns = Object.keys(sessionMessages);
+      expect(columns).toContain("id");
+      expect(columns).toContain("fromSessionId");
+      expect(columns).toContain("toSessionId");
+      expect(columns).toContain("message");
+      expect(columns).toContain("requestId");
+      expect(columns).toContain("status");
+      expect(columns).toContain("deliveredAt");
+      expect(columns).toContain("ackAt");
+      expect(columns).toContain("createdAt");
+      expect(columns).toContain("expiresAt");
+    });
+
     it("should define dockerConfigs table with all columns", () => {
       const columns = Object.keys(dockerConfigs);
       expect(columns).toContain("id");
@@ -150,6 +167,10 @@ describe("Database Schema", () => {
 
     it("should export templatesRelations", () => {
       expect(templatesRelations).toBeDefined();
+    });
+
+    it("should export sessionMessagesRelations", () => {
+      expect(sessionMessagesRelations).toBeDefined();
     });
   });
 
@@ -226,6 +247,23 @@ describe("Database Schema", () => {
         displayUsername: null,
       };
       expect(u.email).toBe("test@example.com");
+    });
+
+    it("should allow constructing a SessionMessage-shaped object", () => {
+      const m: SessionMessage = {
+        id: "msg-uuid",
+        fromSessionId: "sess-from",
+        toSessionId: "sess-to",
+        message: "hi",
+        requestId: null,
+        status: "pending",
+        deliveredAt: null,
+        ackAt: null,
+        createdAt: new Date(),
+        expiresAt: new Date(Date.now() + 7 * 86_400_000),
+      };
+      expect(m.message).toBe("hi");
+      expect(m.status).toBe("pending");
     });
 
     it("should enforce SessionStatus as a union of valid statuses", () => {

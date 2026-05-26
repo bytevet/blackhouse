@@ -36,6 +36,13 @@
       "when": 1779950000000,
       "tag": "0004_antigravity_volume_path",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1779823633584,
+      "tag": "0005_session_messages",
+      "breakpoints": true
     }
   ]
 }
