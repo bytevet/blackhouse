@@ -51,7 +51,8 @@ import ffmpegPath from "ffmpeg-static";
 import {
   decode as decodeInput,
   decodeRequest,
-  encodeResponse,
+  encodeEvalResult,
+  encodeStateSnapshot,
   encodeConfig,
   encodeConsoleEvent,
   encodeNavigateEvent,
@@ -847,9 +848,8 @@ app.get(
         const req = decodeRequest(message);
         if (!req) return;
         const result = await runEval(req.body);
-        const buf = encodeResponse(OP.EVAL_RESULT, req.reqId, result.ok, JSON.stringify(result));
         try {
-          ws.send(buf);
+          ws.send(encodeEvalResult(req.reqId, result.ok, JSON.stringify(result)));
         } catch {
           /* peer gone */
         }
@@ -859,11 +859,8 @@ app.get(
         const req = decodeRequest(message);
         if (!req) return;
         const result = await runWsState(req.body);
-        // stateSnapshot omits the ok byte per spec — pass true; the JSON
-        // payload itself carries `ok` for the client to inspect.
-        const buf = encodeResponse(OP.STATE_SNAPSHOT, req.reqId, true, JSON.stringify(result));
         try {
-          ws.send(buf);
+          ws.send(encodeStateSnapshot(req.reqId, JSON.stringify(result)));
         } catch {
           /* peer gone */
         }

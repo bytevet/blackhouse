@@ -317,38 +317,35 @@ export function decodeRequest(input) {
 }
 
 /**
- * Encode a request response (opcode 0x83 evalResult / 0x84 stateSnapshot).
- * Frame layout:
- *   [op:u8, reqId:u32 BE, ok:u8?, payloadLen:u32 BE, payload:utf8]
- *
- * stateSnapshot (0x84) elides the `ok` byte per spec — caller passes
- * `ok = true` and the JSON itself carries an `ok` field. evalResult (0x83)
- * keeps the ok byte. Callers serialize the JSON payload themselves; this
- * helper just frames bytes.
- *
- * (Control was previously 0x82 controlAck but is now fire-and-forget —
- * `resize` is implicitly acked by the next 0x80 config frame and nav-class
- * actions by the next 0x86 navigateEvent.)
+ * Encode a 0x83 evalResult response. Layout:
+ *   [op=0x83, reqId:u32 BE, ok:u8, payloadLen:u32 BE, payload:utf8]
  */
-export function encodeResponse(opcode, reqId, ok, jsonPayload) {
+export function encodeEvalResult(reqId, ok, jsonPayload) {
   const payloadBytes = utf8(jsonPayload);
-  const hasOkByte = opcode === OP.EVAL_RESULT;
-  const headerLen = 1 + 4 + (hasOkByte ? 1 : 0) + 4;
-  const buf = new ArrayBuffer(headerLen + payloadBytes.length);
+  const buf = new ArrayBuffer(10 + payloadBytes.length);
   const v = new DataView(buf);
-  const u = new Uint8Array(buf);
-  let off = 0;
-  v.setUint8(off, opcode);
-  off += 1;
-  v.setUint32(off, reqId, false);
-  off += 4;
-  if (hasOkByte) {
-    v.setUint8(off, ok ? 1 : 0);
-    off += 1;
-  }
-  v.setUint32(off, payloadBytes.length, false);
-  off += 4;
-  u.set(payloadBytes, off);
+  v.setUint8(0, OP.EVAL_RESULT);
+  v.setUint32(1, reqId, false);
+  v.setUint8(5, ok ? 1 : 0);
+  v.setUint32(6, payloadBytes.length, false);
+  new Uint8Array(buf).set(payloadBytes, 10);
+  return buf;
+}
+
+/**
+ * Encode a 0x84 stateSnapshot response. Layout:
+ *   [op=0x84, reqId:u32 BE, payloadLen:u32 BE, payload:utf8]
+ *
+ * No ok byte — the JSON payload carries an `ok` field at the top level.
+ */
+export function encodeStateSnapshot(reqId, jsonPayload) {
+  const payloadBytes = utf8(jsonPayload);
+  const buf = new ArrayBuffer(9 + payloadBytes.length);
+  const v = new DataView(buf);
+  v.setUint8(0, OP.STATE_SNAPSHOT);
+  v.setUint32(1, reqId, false);
+  v.setUint32(5, payloadBytes.length, false);
+  new Uint8Array(buf).set(payloadBytes, 9);
   return buf;
 }
 
@@ -403,9 +400,9 @@ export function encodeVideoFrameHeader(isKey, pts) {
  * push must never break the screencast.
  */
 export function encodeConsoleEvent(evt) {
-  const kindBytes = utf8(truncate(evt?.kind ?? "log", 255));
+  const kindBytes = encodeBounded(evt?.kind ?? "log", 255);
   const textBytes = utf8(String(evt?.text ?? ""));
-  const urlBytes = utf8(truncate(evt?.url ?? "", 0xffff));
+  const urlBytes = encodeBounded(evt?.url ?? "", 0xffff);
   const line = clampU32(evt?.line ?? 0);
   const ts = Number(evt?.ts ?? Date.now());
   const buf = new ArrayBuffer(
@@ -441,7 +438,7 @@ export function encodeConsoleEvent(evt) {
  *   [op=0x86, reqId=0, urlLen:u16, url:utf8, ts:f64]
  */
 export function encodeNavigateEvent(evt) {
-  const urlBytes = utf8(truncate(evt?.url ?? "", 0xffff));
+  const urlBytes = encodeBounded(evt?.url ?? "", 0xffff);
   const ts = Number(evt?.ts ?? Date.now());
   const buf = new ArrayBuffer(1 + 4 + 2 + urlBytes.length + 8);
   const v = new DataView(buf);
@@ -490,13 +487,14 @@ function clampU32(n) {
   const v = Math.max(0, Math.min(0xffffffff, Math.round(Number(n) || 0)));
   return v;
 }
-function truncate(str, maxBytes) {
-  if (!str) return "";
-  // Trim at codepoint boundary by re-encoding/decoding once we exceed
-  // the byte budget. Cheap on the happy path (length check short-circuits).
-  if (TEXT_ENC.encode(str).length <= maxBytes) return str;
-  const bytes = TEXT_ENC.encode(str).subarray(0, maxBytes);
-  return TEXT_DEC.decode(bytes, { stream: false }).replace(/�$/u, "");
+// Encode `str` to UTF-8 bytes, truncating to `maxBytes` if needed. Returns
+// the bytes directly so callers don't re-encode (the happy path was the
+// double-encode hot spot for console-event broadcasts). Mid-codepoint
+// cuts are possible at the cap; TextDecoder on the client renders the
+// trailing partial as U+FFFD, which is acceptable for log truncation.
+function encodeBounded(str, maxBytes) {
+  const bytes = TEXT_ENC.encode(str ?? "");
+  return bytes.length <= maxBytes ? bytes : bytes.subarray(0, maxBytes);
 }
 function buttonNameToCode(name) {
   switch (name) {

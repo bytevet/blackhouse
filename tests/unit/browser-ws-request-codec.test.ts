@@ -7,7 +7,8 @@ import { describe, it, expect } from "vitest";
 // @ts-expect-error — plain ESM module with no type defs
 import {
   decodeRequest,
-  encodeResponse,
+  encodeEvalResult,
+  encodeStateSnapshot,
   encodeConfig,
   encodeConsoleEvent,
   encodeNavigateEvent,
@@ -199,11 +200,11 @@ describe("decodeRequest — framing errors", () => {
   });
 });
 
-describe("encodeResponse — opcodes 0x83 and 0x84", () => {
-  // Note: 0x82 controlAck was removed — control is fire-and-forget.
-  // Implicit acks: resize → next 0x80 config; nav-class → next 0x86.
+describe("encodeEvalResult / encodeStateSnapshot — opcodes 0x83 and 0x84", () => {
+  // 0x82 controlAck was removed — control is fire-and-forget. Implicit
+  // acks: resize → next 0x80 config; nav-class → next 0x86.
   it("encodes evalResult with ok=true", () => {
-    const bytes = bytesOf(encodeResponse(OP.EVAL_RESULT, 42, true, '{"result":"hello"}'));
+    const bytes = bytesOf(encodeEvalResult(42, true, '{"result":"hello"}'));
     expect(bytes[0]).toBe(OP.EVAL_RESULT);
     expect(readU32BE(bytes, 1)).toBe(42);
     expect(bytes[5]).toBe(1); // ok
@@ -213,13 +214,13 @@ describe("encodeResponse — opcodes 0x83 and 0x84", () => {
   });
 
   it("encodes evalResult with ok=false", () => {
-    const bytes = bytesOf(encodeResponse(OP.EVAL_RESULT, 7, false, '{"error":"x"}'));
+    const bytes = bytesOf(encodeEvalResult(7, false, '{"error":"x"}'));
     expect(bytes[0]).toBe(OP.EVAL_RESULT);
     expect(bytes[5]).toBe(0);
   });
 
   it("encodes stateSnapshot WITHOUT ok byte (ok lives in JSON)", () => {
-    const bytes = bytesOf(encodeResponse(OP.STATE_SNAPSHOT, 1, true, '{"ok":true,"url":"x"}'));
+    const bytes = bytesOf(encodeStateSnapshot(1, '{"ok":true,"url":"x"}'));
     expect(bytes[0]).toBe(OP.STATE_SNAPSHOT);
     expect(readU32BE(bytes, 1)).toBe(1);
     // No ok byte — payloadLen starts at byte 5
