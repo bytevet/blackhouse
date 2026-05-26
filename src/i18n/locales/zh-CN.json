@@ -300,5 +300,11 @@
     "hoursAgo_other": "{{count}} 小时前",
     "daysAgo_one": "{{count}} 天前",
     "daysAgo_other": "{{count}} 天前"
+  },
+  "messaging": {
+    "unreadChip_one": "{{count}} 条未读",
+    "unreadChip_other": "{{count}} 条未读",
+    "aggregateUnread_one": "{{count}} 条未读消息",
+    "aggregateUnread_other": "{{count}} 条未读消息"
   }
 }

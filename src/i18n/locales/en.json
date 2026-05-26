@@ -300,5 +300,11 @@
     "hoursAgo_other": "{{count}} hours ago",
     "daysAgo_one": "{{count}} day ago",
     "daysAgo_other": "{{count}} days ago"
+  },
+  "messaging": {
+    "unreadChip_one": "{{count}} unread",
+    "unreadChip_other": "{{count}} unread",
+    "aggregateUnread_one": "{{count}} unread message",
+    "aggregateUnread_other": "{{count}} unread messages"
   }
 }
