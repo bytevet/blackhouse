@@ -453,7 +453,13 @@ export function encodeNavigateEvent(evt) {
 
 // --- helpers ----------------------------------------------------------------
 
-function toDataView(input) {
+/**
+ * Normalize a raw WS payload to a DataView. Used by both `decode` and
+ * `decodeRequest`; also exported so the service WS dispatcher can peek
+ * the opcode byte through the same code path instead of re-implementing
+ * the Buffer / ArrayBuffer / ArrayBufferView discriminator.
+ */
+export function toDataView(input) {
   if (!input) return null;
   if (input instanceof DataView) return input;
   if (input instanceof ArrayBuffer) return new DataView(input);

@@ -20,15 +20,13 @@
  *                            `npm`/`gh`/dev servers running inside the
  *                            container can drive the embedded page from
  *                            shell. The Hono proxy does NOT forward this
- *                            route (it was deleted in cec6b77 and stays
- *                            deleted); only loopback callers reach it.
+ *                            route — only loopback callers reach it.
  *   GET  /browser/health   — `{ok, url, streaming, codedWidth, codedHeight}`
  *
- * Scope of the #61 "no REST, no SSE" rule: it applies to the *external*
- * client ↔ proxy ↔ agent wire (anything reachable through the Hono
- * proxy). The 127.0.0.1:9223 surface inside the same container is a
- * different category — localhost-to-localhost, trusted in-container
- * tooling only. /browser/control lives here exclusively for the shim.
+ * The "binary-WS-only" rule applies to the *external* wire (client ↔
+ * proxy ↔ agent). The 127.0.0.1:9223 surface is a different category —
+ * localhost-to-localhost, trusted in-container tooling. /browser/control
+ * lives here exclusively for the shim.
  *
  * Pipeline: CDP `Page.startScreencast` (jpeg q80) → ffmpeg per peer
  *   (`-f image2pipe -c:v mjpeg -i pipe:0` in, libx264 zerolatency Annex-B
@@ -57,6 +55,7 @@ import {
   encodeConsoleEvent,
   encodeNavigateEvent,
   encodeVideoFrameHeader,
+  toDataView,
   OP,
 } from "./input-codec.mjs";
 
@@ -89,13 +88,12 @@ const DEFAULT_URL = process.env.BROWSER_DEFAULT_URL || "about:blank";
 // so Chromium itself ends up being the throttle. We forward every paint and
 // let bandwidth scale with page activity.
 //
-// JPEG quality is bumped to 80 (vs the old 60) since the lossy JPEG is now
-// being re-encoded into H.264 downstream — keeping more detail at the
-// source costs ~30 KB more per frame but reduces compounding artifacts.
-// Mutable: updated when the client requests a viewport resize (#41).
-// Encoder is re-spawned and CDP `Page.startScreencast` is re-issued at the
-// new size; the WS protocol re-broadcasts a fresh `config` JSON so the
-// VideoDecoder reconfigures.
+// JPEG quality 80 keeps more source detail before H.264 re-encode —
+// ~30 KB more per frame, but reduces compounding artifacts.
+//
+// Width/height are mutable: a client resize re-spawns the encoder + re-
+// issues `Page.startScreencast` at the new size, and broadcasts a fresh
+// 0x80 config so the client's VideoDecoder reconfigures.
 let SCREENCAST_WIDTH = 1280;
 let SCREENCAST_HEIGHT = 720;
 
@@ -385,22 +383,6 @@ async function startBrowser() {
 }
 
 const state = await startBrowser();
-
-/**
- * Read the first byte of an incoming WS binary frame as the opcode.
- * Accepts Buffer / ArrayBuffer / Uint8Array (whichever shape `ws` hands
- * us). Returns null for empty/missing payloads.
- */
-function peekOpcode(data) {
-  if (!data) return null;
-  if (Buffer.isBuffer(data)) return data.length > 0 ? data[0] : null;
-  if (data instanceof ArrayBuffer) return data.byteLength > 0 ? new Uint8Array(data)[0] : null;
-  if (ArrayBuffer.isView(data))
-    return data.byteLength > 0
-      ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)[0]
-      : null;
-  return null;
-}
 
 // ---------- Per-peer H.264 encoder stream ------------------------------------
 
@@ -717,19 +699,9 @@ class H264PeerStream {
  * scan for the 3-byte form here — sticking to the longer pattern avoids
  * false positives inside compressed slice payloads.
  */
+const AUD_START_CODE = Buffer.from([0x00, 0x00, 0x00, 0x01, 0x09]);
 function findAudStart(buf, from) {
-  for (let i = from; i + 4 < buf.length; i++) {
-    if (
-      buf[i] === 0x00 &&
-      buf[i + 1] === 0x00 &&
-      buf[i + 2] === 0x00 &&
-      buf[i + 3] === 0x01 &&
-      buf[i + 4] === 0x09
-    ) {
-      return i;
-    }
-  }
-  return -1;
+  return buf.indexOf(AUD_START_CODE, from);
 }
 
 /**
@@ -761,7 +733,7 @@ const { injectWebSocket, upgradeWebSocket } = nodeWs;
 // Disable permessage-deflate: H.264 chunks are already entropy-coded, so
 // compression is pure CPU overhead. Bilateral with the Blackhouse proxy
 // upstream connection (which also opts out). Mutating `wss.options`
-// works because the `ws` package reads it at handshake time. (#59 item 3.)
+// works because the `ws` package reads it at handshake time.
 nodeWs.wss.options.perMessageDeflate = false;
 
 // ---------- WebSocket: H.264 video stream ------------------------------------
@@ -773,9 +745,8 @@ app.get(
       console.log(
         `[ws] onOpen size=${SCREENCAST_WIDTH}x${SCREENCAST_HEIGHT} peers-before=${state.peers.size}`,
       );
-      // 1) Tell the client the codec + dimensions before any binary frames.
-      //    Sent as opcode 0x80 (`encodeConfig`) — the legacy TEXT JSON
-      //    preamble is gone as of #61.
+      // 1) Send the codec + dimensions (opcode 0x80) before any video frames
+      //    so the client's VideoDecoder.configure can run.
       try {
         ws.send(encodeConfig(SCREENCAST_WIDTH, SCREENCAST_HEIGHT, H264_CODEC_STRING));
       } catch (err) {
@@ -825,8 +796,9 @@ app.get(
     async onMessage(evt, ws) {
       const message = evt.data;
       if (typeof message === "string") return;
-      const op = peekOpcode(message);
-      if (op == null) return;
+      const view = toDataView(message);
+      if (!view || view.byteLength < 1) return;
+      const op = view.getUint8(0);
       if (op >= 0x01 && op <= 0x07) {
         const payload = decodeInput(message);
         if (payload) await dispatchInput(payload);
@@ -881,20 +853,17 @@ app.get(
   })),
 );
 
-// ---------- Input dispatch (called from the WS message handler) -------------
+// ---------- Input dispatch (WS opcode 0x01–0x07) -----------------------------
 //
-// Dispatch one decoded input payload to CDP. Sole caller is `/browser/ws`'s
-// binary-frame branch; this used to also back a `POST /browser/input` REST
-// endpoint and the proxy's localhost-HTTP path, but the binary WS transport
-// supersedes both (#59 + #60). Errors are swallowed silently — fire-and-
-// forget input has no meaningful failure mode the client could act on, and
-// the WS handler can't surface anything anyway.
+// Dispatch one decoded input payload to CDP. Errors are swallowed —
+// fire-and-forget input has no meaningful failure mode the client could
+// act on.
 //
 // CDP `buttons` is the bitmask of currently-held mouse buttons (1=left,
 // 2=right, 4=middle). Without it, every `mouseMoved` during a drag is
-// classified as a *hover* by Chromium — so text-selection highlight never
-// renders. Likewise, `button` on `mouseMoved` must be the held button name
-// when buttons!=0 (not omitted/"none") — verified empirically in #45.
+// classified as a *hover* by Chromium and text-selection highlight never
+// renders. Likewise, `button` on `mouseMoved` must be the held button
+// name when buttons!=0 (not omitted/"none").
 async function dispatchInput(body) {
   if (!body || typeof body !== "object" || typeof body.type !== "string") return;
   try {
@@ -1110,33 +1079,58 @@ app.get("/browser/health", (c) =>
 //
 // Flag-driven projection of the page's observable state, JSON-encoded into
 // the 0x84 stateSnapshot frame. Only the requested fields appear in the
-// response — callers ask for exactly what they need.
+// response — callers ask for exactly what they need. One CDP
+// `Runtime.evaluate` round-trip regardless of how many bits are set;
+// missing flags evaluate to `undefined`, which JSON.stringify elides.
 //
-// Flags (must stay in lockstep with input-codec.mjs STATE_FLAG_*):
-//   bit0 includeUrl           → `url`
-//   bit1 includeTitle         → `title`
-//   bit2 includeLoading       → `loading`
-//   bit3 includeSelection     → `selectionText`
-//   bit4 includeScroll        → `scrollX`, `scrollY`, `docSize`,  `viewport`
-//   bit5 includeContextMenu   → `lastContextMenu` (read-and-clears the
-//                                server-side slot; matches the legacy REST
-//                                `?resetContextMenu=1` behavior)
-//
-// One CDP `Runtime.evaluate` round-trip regardless of how many bits are
-// set. Missing flags evaluate to `undefined`, which JSON.stringify elides.
+// Adding a new field is two lines in the FIELDS table — kept in lockstep
+// with input-codec.mjs's STATE_FLAG_* bits.
+
+const STATE_FIELDS = [
+  { flag: "includeUrl", key: "url", expr: "location.href" },
+  { flag: "includeTitle", key: "title", expr: "document.title" },
+  {
+    flag: "includeLoading",
+    key: "loading",
+    expr: "document.readyState !== 'complete'",
+    coerce: (v) => !!v,
+  },
+  {
+    flag: "includeSelection",
+    key: "selectionText",
+    expr: "(window.getSelection && window.getSelection().toString()) || ''",
+    coerce: (v) => v ?? "",
+  },
+  { flag: "includeScroll", key: "scrollX", expr: "window.scrollX", coerce: (v) => v ?? 0 },
+  { flag: "includeScroll", key: "scrollY", expr: "window.scrollY", coerce: (v) => v ?? 0 },
+  {
+    flag: "includeScroll",
+    key: "viewport",
+    expr: "({ width: window.innerWidth, height: window.innerHeight })",
+    coerce: (v) => v ?? null,
+  },
+  {
+    flag: "includeScroll",
+    key: "docSize",
+    expr: "({ width: Math.max(document.documentElement.scrollWidth, (document.body && document.body.scrollWidth) || 0), height: Math.max(document.documentElement.scrollHeight, (document.body && document.body.scrollHeight) || 0) })",
+    coerce: (v) => v ?? null,
+  },
+  // includeContextMenu uses `__cm` which the prelude captures-and-clears.
+  {
+    flag: "includeContextMenu",
+    key: "lastContextMenu",
+    expr: "__cm",
+    coerce: (v) => v ?? null,
+  },
+];
+
 async function runWsState(body) {
-  const wantUrl = !!body?.includeUrl;
-  const wantTitle = !!body?.includeTitle;
-  const wantLoading = !!body?.includeLoading;
-  const wantSelection = !!body?.includeSelection;
-  const wantScroll = !!body?.includeScroll;
-  const wantContextMenu = !!body?.includeContextMenu;
-  if (!wantUrl && !wantTitle && !wantLoading && !wantSelection && !wantScroll && !wantContextMenu) {
-    return { ok: true };
-  }
+  const wanted = STATE_FIELDS.filter((f) => body?.[f.flag]);
+  if (wanted.length === 0) return { ok: true };
   // The contextmenu listener is what populates `window.__lastCM`; make sure
   // it's installed before the first probe. Idempotent — installDebugHooks
   // guards with __bhDebugInstalled.
+  const wantContextMenu = !!body?.includeContextMenu;
   if (wantContextMenu) {
     try {
       await installDebugHooks(state.cdp);
@@ -1144,44 +1138,24 @@ async function runWsState(body) {
       /* page not ready yet; the read below will return null */
     }
   }
+  // Prelude captures the contextmenu slot once so the projection sees a
+  // consistent value AND the slot is cleared in the same eval — matches
+  // the legacy REST `?resetContextMenu=1` semantics.
+  const prelude = wantContextMenu
+    ? "const __cm = window.__lastCM || null; window.__lastCM = null;"
+    : "";
+  const projection = wanted.map((f) => `${f.key}: ${f.expr}`).join(", ");
   try {
     const evalResp = await state.cdp.send("Runtime.evaluate", {
-      expression: `(() => {
-        ${wantContextMenu ? "const __cm = window.__lastCM || null; window.__lastCM = null;" : ""}
-        return {
-          url: ${wantUrl ? "location.href" : "undefined"},
-          title: ${wantTitle ? "document.title" : "undefined"},
-          loading: ${wantLoading ? "document.readyState !== 'complete'" : "undefined"},
-          selectionText: ${wantSelection ? "(window.getSelection && window.getSelection().toString()) || ''" : "undefined"},
-          scrollX: ${wantScroll ? "window.scrollX" : "undefined"},
-          scrollY: ${wantScroll ? "window.scrollY" : "undefined"},
-          viewport: ${wantScroll ? "({ width: window.innerWidth, height: window.innerHeight })" : "undefined"},
-          docSize: ${
-            wantScroll
-              ? "({ width: Math.max(document.documentElement.scrollWidth, (document.body && document.body.scrollWidth) || 0), height: Math.max(document.documentElement.scrollHeight, (document.body && document.body.scrollHeight) || 0) })"
-              : "undefined"
-          },
-          lastContextMenu: ${wantContextMenu ? "__cm" : "undefined"},
-        };
-      })()`,
+      expression: `(() => { ${prelude} return { ${projection} }; })()`,
       returnByValue: true,
     });
-    if (evalResp.exceptionDetails) {
-      return { ok: false, error: "eval_failed" };
-    }
+    if (evalResp.exceptionDetails) return { ok: false, error: "eval_failed" };
     const v = evalResp.result?.value || {};
     const out = { ok: true };
-    if (wantUrl) out.url = v.url;
-    if (wantTitle) out.title = v.title;
-    if (wantLoading) out.loading = !!v.loading;
-    if (wantSelection) out.selectionText = v.selectionText ?? "";
-    if (wantScroll) {
-      out.scrollX = v.scrollX ?? 0;
-      out.scrollY = v.scrollY ?? 0;
-      out.viewport = v.viewport ?? null;
-      out.docSize = v.docSize ?? null;
+    for (const f of wanted) {
+      out[f.key] = f.coerce ? f.coerce(v[f.key]) : v[f.key];
     }
-    if (wantContextMenu) out.lastContextMenu = v.lastContextMenu ?? null;
     return out;
   } catch (err) {
     return {
