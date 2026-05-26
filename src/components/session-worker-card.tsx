@@ -141,8 +141,11 @@ export function SessionWorkerCard({
       {/* Action bar — shadcn `CardFooter` gives us the bottom strip (border-t,
           bg-muted/50, rounded-b-xl, size-aware padding). Buttons stack their
           icon over a small label so 3 fit comfortably even on the narrowest
-          card width (220px), mobile-tab-bar style. */}
-      <CardFooter className="p-1">
+          card width (220px), mobile-tab-bar style. `mt-auto` keeps the
+          footer pinned to the bottom of the card so action bars align
+          across rows when cards in the same row have different content
+          heights (e.g. some have an agentTitle / Result badge / repo url). */}
+      <CardFooter className="mt-auto p-1">
         <Link
           to={`/sessions/${session.id}`}
           className={cn(buttonVariants({ variant: "ghost", size: "sm" }), actionButtonClass)}
