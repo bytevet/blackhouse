@@ -189,6 +189,7 @@ describe("Database Schema", () => {
         containerId: null,
         containerImage: "ubuntu:latest",
         hasResult: false,
+        unreadCount: 0,
         createdAt: new Date(),
         updatedAt: new Date(),
       };

@@ -32,11 +32,27 @@ const { resultHtml: _resultHtml, ...sessionColumns } = getTableColumns(schema.co
 const sessionSummary = {
   ...sessionColumns,
   hasResult: sql<boolean>`${schema.codingSessions.resultHtml} is not null`.as("has_result"),
+  // Correlated subquery — one extra index lookup per row, batched
+  // server-side rather than N+1 from the client. Uses the partial
+  // idx_messages_inbox index so the scan is cheap even with millions
+  // of acked messages in history.
+  unreadCount: sql<number>`(
+    SELECT COUNT(*)::int
+    FROM ${schema.sessionMessages}
+    WHERE ${schema.sessionMessages.toSessionId} = ${schema.codingSessions.id}
+      AND ${schema.sessionMessages.status} = 'pending'
+      AND ${schema.sessionMessages.ackAt} IS NULL
+  )`.as("unread_count"),
 };
 
-/** Strip resultHtml from a raw DB row and add hasResult boolean. */
+/**
+ * Strip resultHtml from a raw DB row and add hasResult + unreadCount.
+ * Used by the single-session GET path where we haven't computed unread
+ * server-side yet (the create/restart/stop flows return the full row);
+ * unreadCount defaults to 0 there because a fresh session has no inbox.
+ */
 function toSessionSummary<T extends { resultHtml?: string | null }>({ resultHtml, ...rest }: T) {
-  return { ...rest, hasResult: resultHtml != null };
+  return { ...rest, hasResult: resultHtml != null, unreadCount: 0 };
 }
 
 const app = new Hono<AuthEnv>()

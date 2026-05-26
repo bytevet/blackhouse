@@ -206,6 +206,7 @@ export const dockerConfigs = pgTable("docker_configs", {
 
 export type CodingSession = Omit<typeof codingSessions.$inferSelect, "resultHtml"> & {
   hasResult: boolean;
+  unreadCount: number;
 };
 export type SessionMessage = typeof sessionMessages.$inferSelect;
 export type Template = typeof templates.$inferSelect;
