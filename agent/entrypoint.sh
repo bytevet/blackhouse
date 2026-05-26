@@ -69,6 +69,28 @@ if command -v code-server >/dev/null 2>&1; then
   export CODE_SERVER_PID
 fi
 
+# 2c) Inbox-watcher sidecar — polls the server's per-session unread count
+# every 5s, writes /tmp/.blackhouse-hint when count > 0 so the agent can
+# notice via system-prompt convention or a casual `ls /tmp` check, and
+# removes the file when the inbox empties. Same idiom as 2a / 2b — fully
+# detached background process; if the server is down it logs and retries.
+if [ -n "$SESSION_ID" ] && [ -n "$BLACKHOUSE_URL" ] && [ -n "$SESSION_TOKEN" ]; then
+  mkdir -p "$HOME/.cache"
+  (
+    while sleep 5; do
+      COUNT=$(curl -fsS \
+        -H "Authorization: Bearer $SESSION_TOKEN" \
+        "$BLACKHOUSE_URL/api/sessions/$SESSION_ID/inbox/count" 2>/dev/null \
+        | jq -r '.unread // 0')
+      if [ "${COUNT:-0}" -gt 0 ]; then
+        echo "$COUNT" > /tmp/.blackhouse-hint
+      else
+        rm -f /tmp/.blackhouse-hint 2>/dev/null
+      fi
+    done
+  ) >>"$HOME/.cache/inbox-watcher.log" 2>&1 &
+fi
+
 # 2) Install Blackhouse skills via `npx skills add` from the server
 if [ -n "$SESSION_ID" ] && [ -n "$BLACKHOUSE_URL" ]; then
   if command -v npx &> /dev/null; then

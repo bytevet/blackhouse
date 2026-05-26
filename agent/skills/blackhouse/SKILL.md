@@ -1,6 +1,6 @@
 ---
 name: blackhouse
-description: Submit HTML results and status updates to Blackhouse, and drive the embedded browser. USE THIS for any visual output, previews, HTML files, games, reports, charts; and when you need to open a URL, use the embedded browser — never assume there's a desktop or default OS browser.
+description: Submit HTML results and status updates to Blackhouse, drive the embedded browser, and exchange messages with other Blackhouse sessions belonging to the same user. USE THIS for any visual output, previews, HTML files, games, reports, charts; for opening URLs in the embedded browser (never assume there's a desktop browser); and whenever you need to coordinate with sibling sessions.
 ---
 
 # Blackhouse Session Tools
@@ -81,6 +81,41 @@ bash ~/.agents/skills/blackhouse/browser.sh navigate https://example.com
 
 The Browser tab also includes a **Console** panel showing the page's `console.log` output and any thrown exceptions — useful for debugging dev servers and SPAs you've built.
 
+## Inter-Session Communication
+
+Sibling Blackhouse sessions (other workers belonging to the same user) can exchange messages via a durable queue. Use this to delegate sub-tasks, request help, or wait on a peer's output.
+
+```bash
+# List your sibling sessions
+bash ~/.agents/skills/blackhouse/list-sessions.sh
+
+# Send a one-shot message
+bash ~/.agents/skills/blackhouse/send-msg.sh <target-session-id> "please review report.html"
+
+# Send and wait up to 30s for a reply (exit 0 = got it; 2 = timeout)
+bash ~/.agents/skills/blackhouse/send-msg.sh <target-session-id> "build a chart of X" --wait=30s
+
+# Fetch your inbox (does NOT ack — see ack discipline below)
+bash ~/.agents/skills/blackhouse/check-inbox.sh
+
+# After processing, ack what you handled
+bash ~/.agents/skills/blackhouse/check-inbox.sh --ack <msg-id>
+# ...or after a fetch + handle-all loop:
+bash ~/.agents/skills/blackhouse/check-inbox.sh --ack-all
+```
+
+### When to check the inbox
+
+Check at natural breakpoints in your work: after completing a step, before starting a long-running task, or whenever the system hint `/tmp/.blackhouse-hint` exists (the sidecar daemon writes the unread count there when count > 0; absence means inbox is empty).
+
+A reasonable cadence is "every time you would otherwise idle". You don't need to poll on a timer — `check-inbox.sh` is cheap, but spamming it wastes tokens.
+
+### Ack discipline (important)
+
+Acks are **NEVER implicit**. `check-inbox.sh` (no flags) only fetches; it does not flip any state. After you process a message, run `check-inbox.sh --ack <id>` for that specific id, or `check-inbox.sh --ack-all` to ack everything from the most recent fetch.
+
+The system uses **at-least-once delivery**: if your container restarts mid-handling, the same message will appear in `check-inbox.sh` again on next fetch. Treat handlers as idempotent — look at the `request_id` field on each message to deduplicate.
+
 ## update-title.sh — Update session status
 
 Shows what you're doing in the Blackhouse UI header. Call this frequently.
@@ -97,5 +132,5 @@ bash ~/.agents/skills/blackhouse/update-title.sh "tests passing, submitting resu
 | ---------------- | ---------- | ------------------------------------------------------------------------------------------------ |
 | `BLACKHOUSE_URL` | entrypoint | URL of the Blackhouse server for result/title submission                                         |
 | `SESSION_ID`     | entrypoint | This session's ID                                                                                |
-| `SESSION_TOKEN`  | entrypoint | Per-session auth token for the result/title endpoints                                            |
+| `SESSION_TOKEN`  | entrypoint | Per-session auth token for the result/title/messaging endpoints                                  |
 | `BROWSER`        | Dockerfile | Path to `browser-shim.sh` — tools that respect `$BROWSER` route to the embedded browser via this |
