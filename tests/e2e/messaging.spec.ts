@@ -121,7 +121,7 @@ test.describe("Messaging — security boundary", () => {
     try {
       const userB = process.env.E2E_USER_USERNAME ?? "user";
       const userBPass = process.env.E2E_USER_PASSWORD ?? "test1234";
-      await pageB.goto("/login", { waitUntil: "networkidle" });
+      await pageB.goto("/login", { waitUntil: "domcontentloaded" });
       await pageB.getByPlaceholder("username").fill(userB);
       await pageB.getByPlaceholder("********").fill(userBPass);
       await pageB.getByRole("button", { name: /sign in/i }).click();

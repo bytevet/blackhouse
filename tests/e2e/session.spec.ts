@@ -84,7 +84,7 @@ test.describe.serial("Session lifecycle", () => {
     await signInAsAdmin(page);
 
     await page.goto(`/sessions/${sessionId}`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(page.getByText("E2E Session")).toBeVisible();
     // Terminal should connect
@@ -97,7 +97,7 @@ test.describe.serial("Session lifecycle", () => {
     await signInAsAdmin(page);
 
     await page.goto(`/sessions/${sessionId}`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Sidebar starts collapsed on fresh sessions — open it so the tabs render.
     // Wait for code-server inside the container to bind first so the iframe's
@@ -132,7 +132,7 @@ test.describe.serial("Session lifecycle", () => {
     await signInAsAdmin(page);
 
     await page.goto(`/sessions/${sessionId}`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Post-#54: the action-bar button is now labeled "Send Off-Duty" (was
     // "Stop"). The confirm-dialog title + primary button were renamed too.
@@ -157,7 +157,7 @@ test.describe.serial("Session lifecycle", () => {
     await signInAsAdmin(page);
 
     await page.goto(`/sessions/${sessionId}`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Post-#54: the destructive action is now "Dismiss" (was "Destroy"); the
     // confirm-dialog title is "Dismiss Worker".
@@ -747,7 +747,7 @@ test.describe("IDE tab end-to-end", () => {
     const ideHandle = await ideIframeLocator.elementHandle();
     const ideFrame = await ideHandle?.contentFrame();
     if (!ideFrame) throw new Error("IDE iframe never resolved to a Frame");
-    await ideFrame.waitForLoadState("networkidle");
+    await ideFrame.waitForLoadState("domcontentloaded");
 
     // Step 4: file tree (Explorer view) visible inside code-server.
     await expect(ideFrame.locator(".monaco-workbench")).toBeVisible({ timeout: 60000 });
@@ -835,7 +835,7 @@ test.describe.serial("Dashboard worker-card actions", () => {
 
     try {
       await page.goto("/dashboard");
-      await page.waitForLoadState("networkidle");
+      await page.waitForLoadState("domcontentloaded");
 
       const card = cardByName(page, "E2E Card Surface");
       await expect(card).toBeVisible({ timeout: 10000 });
@@ -858,7 +858,7 @@ test.describe.serial("Dashboard worker-card actions", () => {
 
     try {
       await page.goto("/dashboard");
-      await page.waitForLoadState("networkidle");
+      await page.waitForLoadState("domcontentloaded");
 
       const card = cardByName(page, "E2E Respawn Source");
       await expect(card).toBeVisible({ timeout: 10000 });
@@ -881,7 +881,7 @@ test.describe.serial("Dashboard worker-card actions", () => {
       // name, so after navigating back we expect TWO cards with that name:
       // the original (OFF DUTY) and the freshly-spawned one (ON DUTY).
       await page.goto("/dashboard");
-      await page.waitForLoadState("networkidle");
+      await page.waitForLoadState("domcontentloaded");
       const named = cardByName(page, "E2E Respawn Source");
       await expect(named).toHaveCount(2, { timeout: 10000 });
       await expect(named.filter({ hasText: "OFF DUTY" })).toHaveCount(1);
@@ -898,7 +898,7 @@ test.describe.serial("Dashboard worker-card actions", () => {
 
     try {
       await page.goto("/dashboard");
-      await page.waitForLoadState("networkidle");
+      await page.waitForLoadState("domcontentloaded");
 
       const card = cardByName(page, "E2E Dismiss Target");
       await expect(card).toBeVisible({ timeout: 10000 });

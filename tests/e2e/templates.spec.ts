@@ -18,7 +18,7 @@ test.describe("Templates", () => {
     await signInAsAdmin(page);
     await page.getByRole("link", { name: "My Templates" }).click();
     await expect(page).toHaveURL(/\/templates\/mine/, { timeout: 5000 });
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(page.getByRole("button", { name: /new template/i })).toBeVisible();
   });
@@ -27,7 +27,7 @@ test.describe("Templates", () => {
     await signInAsAdmin(page);
     await page.getByRole("link", { name: "My Templates" }).click();
     await expect(page).toHaveURL(/\/templates\/mine/, { timeout: 5000 });
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Create
     await page.getByRole("button", { name: /new template/i }).click();
@@ -40,7 +40,7 @@ test.describe("Templates", () => {
       .getByRole("dialog")
       .getByRole("button", { name: /new template/i })
       .click();
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await expect(page.getByText("E2E Test Template")).toBeVisible({ timeout: 5000 });
 
     // Edit
@@ -58,7 +58,7 @@ test.describe("Templates", () => {
       .getByRole("dialog")
       .getByRole("button", { name: /update template/i })
       .click();
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await expect(page.getByText("E2E Updated Template")).toBeVisible({ timeout: 5000 });
 
     // Delete
@@ -73,7 +73,7 @@ test.describe("Templates", () => {
       .getByRole("dialog")
       .getByRole("button", { name: /^delete$/i })
       .click();
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     // Use `toBeHidden` (polling) instead of `not.toBeVisible` (instantaneous-
     // at-eval) so the disappearance check survives slow list-refetches under
     // heavy parallel load (see task #32).

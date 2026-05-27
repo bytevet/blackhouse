@@ -44,7 +44,7 @@ test.describe("Dashboard", () => {
 
   test("admin can toggle show all sessions", async ({ page }) => {
     await signInAsAdmin(page);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Admin should see the toggle
     const toggle = page.getByRole("switch");

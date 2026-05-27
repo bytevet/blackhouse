@@ -11,7 +11,7 @@ test.describe("Authentication", () => {
 
   test("login page renders correctly", async ({ page }) => {
     await page.goto("/login");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await expect(page.getByRole("heading", { name: "Blackhouse" })).toBeVisible();
     await expect(page.getByPlaceholder("username")).toBeVisible();
     await expect(page.getByPlaceholder("********")).toBeVisible();
@@ -20,7 +20,7 @@ test.describe("Authentication", () => {
 
   test("no sign-up option is available", async ({ page }) => {
     await page.goto("/login");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await expect(page.getByText("Sign up")).not.toBeVisible();
     await expect(page.getByText("Create your account")).not.toBeVisible();
   });
@@ -33,7 +33,7 @@ test.describe("Authentication", () => {
 
   test("shows error on invalid credentials", async ({ page }) => {
     await page.goto("/login");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.getByPlaceholder("username").fill("nonexistent_user");
     await page.getByPlaceholder("********").fill("wrongpassword");
     await page.getByRole("button", { name: /sign in/i }).click();

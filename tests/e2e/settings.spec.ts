@@ -21,7 +21,7 @@ test.describe("Settings", () => {
     await signInAsAdmin(page);
 
     await page.goto("/settings/profile");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(page.getByText("Display Name")).toBeVisible();
     await expect(page.getByText("Change Password")).toBeVisible();
@@ -32,7 +32,7 @@ test.describe("Settings", () => {
     await signInAsAdmin(page);
 
     await page.goto("/settings/profile");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     const nameInput = page.getByPlaceholder("Your name");
     await nameInput.clear();
@@ -50,7 +50,7 @@ test.describe("Settings", () => {
     await signInAsAdmin(page);
 
     await page.goto("/settings/docker");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(page.getByText("Connection Status")).toBeVisible();
     // Should show either Connected or Disconnected with error message
@@ -63,7 +63,7 @@ test.describe("Settings", () => {
     await signInAsAdmin(page);
 
     await page.goto("/settings/docker");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(
       page.locator("[data-slot='card-title']", { hasText: "Active Containers" }),
@@ -75,7 +75,7 @@ test.describe("Settings", () => {
     await signInAsAdmin(page);
 
     await page.goto("/settings/agents");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Post-#56: CardTitle reads "Agent Configs" (was "Roles" briefly under
     // the workforce rename, but "Role" implied a job function; the things
@@ -97,7 +97,7 @@ test.describe("Settings", () => {
     await signInAsAdmin(page);
 
     await page.goto("/settings/users");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Post-#54: button "Add User" → "Onboard User".
     await expect(page.getByRole("button", { name: /onboard user/i })).toBeVisible();
@@ -108,7 +108,7 @@ test.describe("Settings", () => {
     await signInAsAdmin(page);
 
     await page.goto("/settings/users");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Post-#54: "Add User" → "Onboard User"; delete-confirm title is now
     // "Off-board User" with primary button "Off-board". The "Create User"
@@ -124,7 +124,7 @@ test.describe("Settings", () => {
     await inputs.nth(2).fill("teste2e"); // Username
     await inputs.nth(3).fill("testpass123"); // Password
     await dialog.getByRole("button", { name: /create user/i }).click();
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await expect(page.getByRole("cell", { name: "test-e2e@blackhouse.local" })).toBeVisible({
       timeout: 5000,
     });
@@ -138,7 +138,7 @@ test.describe("Settings", () => {
       .getByRole("dialog")
       .getByRole("button", { name: /^off-board$/i })
       .click();
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await expect(page.getByRole("cell", { name: "test-e2e@blackhouse.local" })).not.toBeVisible({
       timeout: 5000,
     });

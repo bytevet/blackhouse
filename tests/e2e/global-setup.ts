@@ -51,7 +51,7 @@ export default async function globalSetup(_config: FullConfig) {
   const context = await browser.newContext({ baseURL });
   const page = await context.newPage();
 
-  await page.goto("/login", { waitUntil: "networkidle" });
+  await page.goto("/login", { waitUntil: "domcontentloaded" });
   // Force the i18n locale to English for locale-deterministic e2e (#55).
   // Persisted via storageState so subsequent test workers inherit it.
   await page.evaluate(() => localStorage.setItem("blackhouse-lang", "en"));
@@ -59,7 +59,7 @@ export default async function globalSetup(_config: FullConfig) {
   await page.getByPlaceholder("********").fill(password);
   await page.getByRole("button", { name: /sign in/i }).click();
   await page.waitForURL(/\/dashboard/, { timeout: 15000 });
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
 
   await context.storageState({ path: STORAGE_STATE_PATH });
   await browser.close();

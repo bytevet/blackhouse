@@ -15,14 +15,19 @@ export async function signInAsAdmin(page: Page) {
   const username = process.env.E2E_ADMIN_USERNAME ?? "admin";
   const password = process.env.E2E_ADMIN_PASSWORD ?? "test1234";
 
-  await page.goto("/dashboard", { waitUntil: "networkidle" });
+  // `domcontentloaded` (not `networkidle`) — the messaging UI's
+  // InboxEventsProvider holds an SSE EventSource open on every authed
+  // page. `networkidle` waits 500ms of zero-network — the SSE never
+  // closes, so it never fires within the test timeout. The sign-in /
+  // dashboard probes here only need the DOM ready before interacting.
+  await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
   if (page.url().includes("/dashboard")) return;
 
   await page.getByPlaceholder("username").fill(username);
   await page.getByPlaceholder("********").fill(password);
   await page.getByRole("button", { name: /sign in/i }).click();
   await page.waitForURL(/\/dashboard/, { timeout: 15000 });
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
 }
 
 /**
@@ -40,7 +45,7 @@ async function hireWorker(
   pickAgent: () => Promise<void>,
 ): Promise<string> {
   await page.goto("/dashboard");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
 
   await page.getByRole("button", { name: /hire worker/i }).click();
   await page.waitForTimeout(500);
