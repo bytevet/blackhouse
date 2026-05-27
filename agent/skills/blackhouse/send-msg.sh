@@ -41,9 +41,11 @@ if [ "$MESSAGE" = "-" ]; then
 fi
 
 # Generate a request_id so the receiver (or --wait poller) can correlate.
-# Cheap source — 32 hex from /dev/urandom is collision-resistant for the
-# 60s dedup window without dragging in uuidgen.
-REQUEST_ID=$(head -c16 /dev/urandom | xxd -p)
+# 32 hex chars from openssl — collision-resistant for the 60s dedup
+# window without dragging in uuidgen. Picked openssl over `xxd` because
+# xxd ships in `vim-common` and isn't reliably present in our agent
+# images; openssl is everywhere.
+REQUEST_ID=$(openssl rand -hex 16)
 
 PAYLOAD=$(jq -n \
   --arg t "$TARGET" \
