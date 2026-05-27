@@ -1,5 +1,5 @@
 import { useParams, useNavigate } from "react-router";
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, lazy, Suspense } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Square,
@@ -32,10 +32,27 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { TerminalPanel } from "@/components/terminal";
 import { IdeViewer } from "@/components/ide-viewer";
-import { ResultViewer } from "@/components/result-viewer";
-import { BrowserViewer } from "@/components/browser-viewer";
 import type { CodingSession } from "@/db/schema";
 import { sessionStatusConfig } from "@/lib/session-status";
+
+// Code-split heavy panes that aren't always shown. ResultViewer renders raw
+// agent output (potentially large HTML/markdown), BrowserViewer carries the
+// H.264 codec + binary WS RPC layer. Both are deferred until their tab is
+// actually opened, shrinking the initial session-page bundle.
+const ResultViewer = lazy(() =>
+  import("@/components/result-viewer").then((m) => ({ default: m.ResultViewer })),
+);
+const BrowserViewer = lazy(() =>
+  import("@/components/browser-viewer").then((m) => ({ default: m.BrowserViewer })),
+);
+
+function PaneLoader() {
+  return (
+    <div className="flex h-full items-center justify-center">
+      <Loader2 className="size-4 animate-spin text-muted-foreground" />
+    </div>
+  );
+}
 
 export function SessionPage() {
   const { t } = useTranslation();
@@ -84,9 +101,17 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
   const isMobile = useIsMobile();
   const [session, setSession] = useState(initialSession);
   const [explorerOpen, setExplorerOpen] = useState(!!initialSession.hasResult);
-  const [explorerTab, setExplorerTab] = useState<string>(
-    initialSession.hasResult ? "result" : "ide",
-  );
+  const initialTab = initialSession.hasResult ? "result" : "ide";
+  const [explorerTab, setExplorerTab] = useState<string>(initialTab);
+  // Lazy-mount pane content: a tab's children only render after it's been
+  // activated at least once. Combined with `keepMounted` on TabsContent below,
+  // we get lazy-on-first-click + persistent-after — sessions where the user
+  // never opens the Browser tab pay zero cost for the screencast WS + codec.
+  const [activatedTabs, setActivatedTabs] = useState<Set<string>>(() => new Set([initialTab]));
+  const activateTab = useCallback((tab: string) => {
+    setExplorerTab(tab);
+    setActivatedTabs((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)));
+  }, []);
   const [actionLoading, setActionLoading] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ type: "stop" | "destroy" } | null>(null);
   // One-shot URL to navigate the embedded browser to (e.g. from terminal link
@@ -94,11 +119,14 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
   // clicked twice in a row still re-fires.
   const [pendingBrowserNav, setPendingBrowserNav] = useState<string | null>(null);
 
-  const openBrowserAt = useCallback((url: string) => {
-    setExplorerOpen(true);
-    setExplorerTab("browser");
-    setPendingBrowserNav(url);
-  }, []);
+  const openBrowserAt = useCallback(
+    (url: string) => {
+      setExplorerOpen(true);
+      activateTab("browser");
+      setPendingBrowserNav(url);
+    },
+    [activateTab],
+  );
 
   // Keep a ref to the latest session so the polling closure can diff against
   // current state without putting the whole `session` object in the effect's
@@ -134,7 +162,7 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
         setSession(updated);
         if (isNewResult) {
           setExplorerOpen(true);
-          setExplorerTab("result");
+          activateTab("result");
         } else if (resultDisappeared) {
           // The user could be parked on the Result tab when the result is
           // deleted; the trigger is now hidden, so fall back to the IDE tab.
@@ -326,11 +354,7 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
           </ResizablePanel>
           <ResizableHandle withHandle />
           <ResizablePanel id="sidebar" defaultSize={50} minSize={15}>
-            <Tabs
-              value={explorerTab}
-              onValueChange={setExplorerTab}
-              className="flex h-full flex-col"
-            >
+            <Tabs value={explorerTab} onValueChange={activateTab} className="flex h-full flex-col">
               <TabsList variant="line" className="w-full border-b">
                 <TabsTrigger value="ide" className="text-xs">
                   <Code2 className="mr-1 size-3" />
@@ -379,20 +403,22 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
               </TabsContent>
 
               <TabsContent value="result" className="m-0 flex-1 overflow-hidden">
-                {session.hasResult ? (
-                  <ResultViewer
-                    sessionId={session.id}
-                    updatedAt={session.updatedAt}
-                    onDelete={async () => {
-                      await client.api.sessions[":id"].result.$delete({
-                        param: { id: session.id },
-                      });
-                      const updated = await client.api.sessions[":id"]
-                        .$get({ param: { id: session.id } })
-                        .then((r) => unwrap<CodingSession>(r));
-                      if (updated) setSession(updated);
-                    }}
-                  />
+                {session.hasResult && activatedTabs.has("result") ? (
+                  <Suspense fallback={<PaneLoader />}>
+                    <ResultViewer
+                      sessionId={session.id}
+                      updatedAt={session.updatedAt}
+                      onDelete={async () => {
+                        await client.api.sessions[":id"].result.$delete({
+                          param: { id: session.id },
+                        });
+                        const updated = await client.api.sessions[":id"]
+                          .$get({ param: { id: session.id } })
+                          .then((r) => unwrap<CodingSession>(r));
+                        if (updated) setSession(updated);
+                      }}
+                    />
+                  </Suspense>
                 ) : (
                   <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
                     {t("worker.tabs.noResult")}
@@ -405,12 +431,16 @@ function SessionView({ initialSession }: { initialSession: CodingSession }) {
                 keepMounted
                 className="m-0 flex-1 overflow-hidden data-[hidden]:hidden"
               >
-                <BrowserViewer
-                  sessionId={session.id}
-                  status={session.status}
-                  navigateTo={pendingBrowserNav}
-                  onNavigated={() => setPendingBrowserNav(null)}
-                />
+                {activatedTabs.has("browser") ? (
+                  <Suspense fallback={<PaneLoader />}>
+                    <BrowserViewer
+                      sessionId={session.id}
+                      status={session.status}
+                      navigateTo={pendingBrowserNav}
+                      onNavigated={() => setPendingBrowserNav(null)}
+                    />
+                  </Suspense>
+                ) : null}
               </TabsContent>
             </Tabs>
           </ResizablePanel>
