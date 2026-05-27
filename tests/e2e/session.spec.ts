@@ -38,6 +38,31 @@ async function waitForFirstFrame(page: Page, timeout = 60000) {
   );
 }
 
+/**
+ * `browser-viewer.tsx` requires `window.VideoDecoder` (WebCodecs) to decode
+ * the 0x81 H.264 frames. Playwright's bundled Chromium and `channel: chrome`
+ * headless on macOS at the time of writing all ship WITHOUT `VideoDecoder`
+ * (only `VideoFrame` + `EncodedVideoChunk` are exposed). Without the decoder
+ * the canvas stays the `bg-black` background and `waitForFirstFrame` would
+ * false-fail rather than surface the env gap.
+ *
+ * Skip the calling test when WebCodecs/VideoDecoder is unavailable. The
+ * detect uses a throwaway page navigation to `about:blank` since the test
+ * fixture page hasn't loaded the SPA yet; `typeof VideoDecoder` is the same
+ * on any origin (it's a build-time gate, not an origin gate).
+ *
+ * See task #74 for the investigation into a WebCodecs-capable Playwright
+ * env; once that lands this guard can be deleted.
+ */
+async function skipIfNoWebCodecs(page: Page) {
+  await page.goto("about:blank");
+  const hasVideoDecoder = await page.evaluate(() => typeof VideoDecoder !== "undefined");
+  test.skip(
+    !hasVideoDecoder,
+    "VideoDecoder unavailable in this Playwright Chromium build — canvas-paint can't be verified. See task #74.",
+  );
+}
+
 test.describe.serial("Session lifecycle", () => {
   test.skip(() => !process.env.E2E_DOCKER, "Requires Docker — set E2E_DOCKER=1 to enable");
 
@@ -270,6 +295,7 @@ test.describe("Antigravity session happy-path", () => {
  */
 test.describe("Browser tab end-to-end", () => {
   test.skip(() => !process.env.E2E_DOCKER, "Requires Docker — set E2E_DOCKER=1 to enable");
+  test.beforeEach(async ({ page }) => skipIfNoWebCodecs(page));
 
   test("navigate via UI, frame renders, console populates, agent control updates page", async ({
     page,
@@ -419,6 +445,7 @@ test.describe("Browser tab end-to-end", () => {
  */
 test.describe("Browser interactivity (strict)", () => {
   test.skip(() => !process.env.E2E_DOCKER, "Requires Docker — set E2E_DOCKER=1 to enable");
+  test.beforeEach(async ({ page }) => skipIfNoWebCodecs(page));
 
   async function prepareBrowserTab(
     page: Page,
