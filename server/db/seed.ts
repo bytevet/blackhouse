@@ -63,6 +63,49 @@ export async function runSeed() {
     }
   }
 
+  // Seed default non-admin user for e2e + dev convenience. Known
+  // credential (`user` / `test1234`) so qa's cross-user 403 test has a
+  // deterministic non-admin identity to sign in as. Created only when
+  // missing — re-running the seed never overwrites an existing user's
+  // password, so an operator who renames/recustomizes this account
+  // keeps their changes. Blast radius is low: role=user means no admin
+  // surface; the account has no sessions or templates until they're
+  // explicitly created.
+  const existingTestUser = await db
+    .select()
+    .from(schema.user)
+    .where(eq(schema.user.username, "user"))
+    .limit(1);
+
+  if (existingTestUser.length === 0) {
+    const userId = crypto.randomUUID();
+    const hashedPassword = await hashPassword("test1234");
+    await db
+      .insert(schema.user)
+      .values({
+        id: userId,
+        name: "Test User",
+        email: "user@blackhouse.local",
+        emailVerified: true,
+        role: "user",
+        username: "user",
+      })
+      .onConflictDoNothing({ target: schema.user.email });
+
+    await db
+      .insert(schema.account)
+      .values({
+        id: crypto.randomUUID(),
+        accountId: userId,
+        providerId: "credential",
+        userId,
+        password: hashedPassword,
+      })
+      .onConflictDoNothing();
+
+    console.log("[blackhouse] Default non-admin user created (username: user, password: test1234)");
+  }
+
   // Seed default agent configs
   const existingConfigs = await db.select().from(schema.agentConfigs).limit(1);
 

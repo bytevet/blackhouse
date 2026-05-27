@@ -797,8 +797,11 @@ const app = new Hono<AuthEnv>()
   )
 
   // GET /api/sessions/:id/inbox?unread=true&reply_to=...&limit=N — fetch
-  // pending messages. Sets delivered_at on returned rows (observability
-  // only; never flips status or ack_at).
+  // pending messages. Stamps delivered_at on any returned rows where it
+  // was null and reflects that stamp in the response so the caller sees
+  // a consistent `deliveredAt` value in the same request. Observability
+  // only — does NOT flip status or ack_at. Acks remain explicit via
+  // /messages/:msgId/ack or /messages/ack-batch.
   .get(
     "/:id/inbox",
     zValidator(
@@ -840,19 +843,26 @@ const app = new Hono<AuthEnv>()
 
       // Stamp delivered_at on the rows we just handed out, only if it
       // wasn't already set. Pure observability — does NOT flip status
-      // or ack_at. Run async-but-await so the response and the stamp
-      // don't race with a follow-up /inbox call.
-      const toStamp = rows.filter((r) => r.deliveredAt == null).map((r) => r.id);
+      // or ack_at. Run before the response and back-fill the in-memory
+      // rows so the caller's `deliveredAt` matches the DB on this same
+      // request (qa flagged the previous "visible on next read" shape
+      // as a docstring/behavior ambiguity).
+      const now = new Date();
+      const toStamp = rows.filter((r) => r.deliveredAt == null);
       if (toStamp.length > 0) {
         await db
           .update(schema.sessionMessages)
-          .set({ deliveredAt: new Date() })
+          .set({ deliveredAt: now })
           .where(
             and(
-              inArray(schema.sessionMessages.id, toStamp),
+              inArray(
+                schema.sessionMessages.id,
+                toStamp.map((r) => r.id),
+              ),
               isNull(schema.sessionMessages.deliveredAt),
             ),
           );
+        for (const r of toStamp) r.deliveredAt = now;
       }
 
       return c.json({ messages: rows });
