@@ -511,6 +511,7 @@ export function decodeResponse(buf: ArrayBuffer | Uint8Array): WsResponse | null
         const payloadLen = dv.getUint32(6, false);
         if (view.length < 10 + payloadLen) return null;
         const payload = parseJsonPayload(view.subarray(10, 10 + payloadLen));
+        if (payload === SENTINEL_BAD_JSON) return null;
         return { opcode: RESPONSE_OP.evalResult, reqId, ok, payload };
       }
       case RESPONSE_OP.stateSnapshot: {
@@ -519,23 +520,28 @@ export function decodeResponse(buf: ArrayBuffer | Uint8Array): WsResponse | null
         const payloadLen = dv.getUint32(5, false);
         if (view.length < 9 + payloadLen) return null;
         const payload = parseJsonPayload(view.subarray(9, 9 + payloadLen));
+        if (payload === SENTINEL_BAD_JSON) return null;
         return { opcode: RESPONSE_OP.stateSnapshot, reqId, payload };
       }
       default:
         return null;
     }
   } catch {
-    // Out-of-bounds / alignment / malformed JSON — `parseJsonPayload` lets
-    // JSON.parse throw and we land here. Treat as a malformed frame.
+    // Out-of-bounds / alignment — treat as malformed.
     return null;
   }
 }
 
+// Sentinel for `parseJsonPayload` failure so callers can distinguish a
+// legitimate `null` payload from a parse error.
+const SENTINEL_BAD_JSON = Symbol("bad-json");
 function parseJsonPayload(bytes: Uint8Array): unknown {
   if (bytes.length === 0) return null;
-  // JSON.parse throws on malformed bytes — caught by `decodeResponse`'s
-  // outer try/catch, which turns it into the `null` malformed-frame signal.
-  return JSON.parse(textDecoder.decode(bytes));
+  try {
+    return JSON.parse(textDecoder.decode(bytes));
+  } catch {
+    return SENTINEL_BAD_JSON;
+  }
 }
 
 // ─── Server-pushed frame decoders (0x80/0x81/0x85/0x86, #61) ─────────────────
