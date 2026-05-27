@@ -1,5 +1,5 @@
 import Docker from "dockerode";
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 
 /** Base URL for API calls — defaults to the Vite dev server. */
 export function getBaseUrl(): string {
@@ -21,13 +21,28 @@ export async function signInAsAdmin(page: Page) {
   // closes, so it never fires within the test timeout. The sign-in /
   // dashboard probes here only need the DOM ready before interacting.
   await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
-  if (page.url().includes("/dashboard")) return;
+  // Skip the form if storageState already authed us. Match on pathname,
+  // not substring — when unauth'd the server redirects to
+  // `/login?redirect=%2Fdashboard`, which trivially "includes" the
+  // string `/dashboard` and would incorrectly skip the sign-in.
+  if (new URL(page.url()).pathname.startsWith("/dashboard")) return;
 
+  // Wait for the SPA bundle to fully hydrate before driving the form —
+  // the Better Auth client's submit handler is attached on mount, and
+  // clicking before hydration completes can race the JS-handler vs the
+  // native HTML form submit.
+  await page.waitForLoadState("load");
   await page.getByPlaceholder("username").fill(username);
   await page.getByPlaceholder("********").fill(password);
   await page.getByRole("button", { name: /sign in/i }).click();
+  // Don't waitForURL alone — Better Auth's post-login flow briefly bounces
+  // /dashboard → /login?redirect=/dashboard → /dashboard while the
+  // freshly-set cookie propagates through `useSession`. waitForURL would
+  // match the first transition and return mid-bounce. Anchor on the
+  // dashboard's actual content (Roster heading) so the helper returns
+  // only when the page is stable.
   await page.waitForURL(/\/dashboard/, { timeout: 15000 });
-  await page.waitForLoadState("domcontentloaded");
+  await expect(page.getByRole("heading", { name: /roster/i })).toBeVisible({ timeout: 15000 });
 }
 
 /**
