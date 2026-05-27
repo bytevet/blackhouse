@@ -43,6 +43,16 @@ export function useInboxEvents(): UseInboxEventsResult {
   const [unread, setUnread] = useState<Record<string, number>>({});
 
   useEffect(() => {
+    // TEMP DIAGNOSTIC (T8-11 regression): skip EventSource open to test
+    // whether SSE on every authed page is interfering with the BrowserViewer
+    // WebSocket on /sessions/:id. If qa's 4 browser-pane tests pass with
+    // this commit, the regression is in this hook's connection management
+    // and we redesign. If they still fail, restore by deleting this return
+    // and the regression is upstream of the FE. The provider + consumers
+    // still mount; sidebar badge and dashboard chips render with 0 / merged
+    // values from list fetches, just no live deltas during the diagnostic.
+    return;
+
     const es = new EventSource("/api/sessions/inbox-events");
     es.onmessage = (e) => {
       let ev: InboxEvent;
