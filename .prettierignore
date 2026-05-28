@@ -8,3 +8,6 @@ package-lock.json
 .playwright-mcp
 test-results
 playwright-report
+
+# Shell scripts — prettier has no shell parser
+*.sh

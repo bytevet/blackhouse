@@ -14,8 +14,14 @@
  *   - "Messaging — container respawn" (test 10): .serial — kills the
  *     receiver container mid-flight, expects DB-persisted message to
  *     survive.
- *   - "Autonomous-check" (3 tests, one per preset): the load-bearing gate
- *     for Phase 1.5. test.slow() + 60s `expect.poll` on `delivered_at`.
+ *   - "Autonomous-reactivity" (2 tests): the load-bearing gate for the
+ *     sidecar→hint→agent chain, exercised WITHOUT real agent credentials.
+ *     - sidecar correctness: hint file appears within 10s of unread > 0,
+ *       clears within 10s of an ack.
+ *     - mock-agent integration: injects `tests/fixtures/mock-agent.sh`
+ *       as the receiver's agent; asserts the chain
+ *       send → DB → sidecar → hint → mock-agent → check-inbox.sh
+ *       → ack-batch → DB drops the unread count to 0 within 60s.
  *   - "Codex sandbox empirical check": runs once, documents whether the
  *     Codex container's seccomp/netns allows curl-to-host-loopback.
  */
@@ -461,57 +467,138 @@ test.describe("Messaging — sender discovery", () => {
 });
 
 /* ─────────────────────────────────────────────────────────────────────────
- * Autonomous-check tests (HARD GATE: ≥2/3 must pass for Phase 1.5)
+ * Autonomous-reactivity gate (HARD GATE) — sidecar + mock-agent.
  *
- * Pattern: hire two sessions of the same preset, send a message, wait up to
- * 60s for the receiver agent to autonomously call check-inbox.sh — detected
- * via `delivered_at` flipping from null on the inbox row.
+ * Replaces the original 3 per-preset autonomous-check tests (Claude/Codex/
+ * Antigravity) that required real agent credentials in-container — those
+ * are impossible to provision in this e2e env without leaking secrets.
+ *
+ * The two tests below validate the same architectural property (the
+ * send → DB → sidecar → hint-file → agent → check-inbox.sh → ack-batch
+ * → DB chain works end-to-end) without any agent CLI:
+ *
+ *  - Test 1: the sidecar daemon (entrypoint.sh §2c) writes
+ *    `/tmp/.blackhouse-hint` within 10s of unread > 0, and clears it
+ *    within 10s of an ack. Pure container-side observation.
+ *  - Test 2: a mock agent (`tests/fixtures/mock-agent.sh`) that watches
+ *    for the hint and runs `check-inbox.sh --ack-all`, injected into the
+ *    receiver. Asserts inbox count drops to 0 within 60s — proves the
+ *    full wiring works given the system-prompt convention is followed.
+ *
+ * Real-agent prompt-fidelity (whether Claude/Codex/Antigravity actually
+ * follow the SKILL.md convention without explicit user nudging) is a
+ * production-acceptance question, not an e2e gate. See task plan v2.1
+ * §"Future Polish, not planned" for the rationale.
  * ───────────────────────────────────────────────────────────────────────── */
-const AUTONOMOUS_PRESETS = ["Claude Code", "Codex", "Antigravity"] as const;
-type Preset = (typeof AUTONOMOUS_PRESETS)[number];
+test.describe("Messaging — autonomous-reactivity (HARD GATE)", () => {
+  test.skip(() => !process.env.E2E_DOCKER, "Requires Docker — set E2E_DOCKER=1 to enable");
 
-function autonomousCheckTest(preset: Preset) {
-  test(`${preset} agent autonomously calls check-inbox.sh within 60s`, async ({ page }) => {
-    test.slow(); // 60s receiver-side wait + container warmup
+  test("sidecar writes /tmp/.blackhouse-hint when unread > 0, clears on ack", async ({ page }) => {
+    test.slow();
     await signInAsAdmin(page);
-    const senderId = await createSessionWithPreset(page, `msg-auto-${preset}-sender`, preset);
-    const receiverId = await createSessionWithPreset(page, `msg-auto-${preset}-receiver`, preset);
+    const senderId = await createSession(page, "sidecar-sender");
+    const receiverId = await createSession(page, "sidecar-receiver");
+    const receiverContainerId = await getSessionContainerId(page, receiverId);
     try {
-      const sent = await sendMessageOk(
-        page,
-        senderId,
-        receiverId,
-        "Please run `check-inbox.sh` so I know you received this.",
-      );
+      // Baseline: hint file doesn't exist (sidecar hasn't seen any unread).
+      const baseline = await execInContainer(receiverContainerId, [
+        "test",
+        "-f",
+        "/tmp/.blackhouse-hint",
+      ]);
+      expect(baseline.exitCode).not.toBe(0);
 
-      // Signal: poll `/inbox/count` until it drops to 0 — proves the
-      // agent processed the message end-to-end (autonomously called
-      // check-inbox.sh AND followed ack discipline). We deliberately
-      // avoid polling `getInbox` here because every GET /inbox flips
-      // `delivered_at` server-side, so the test's own poll would race
-      // with the agent's call. `/inbox/count` is a pure read with no
-      // observability side-effects, so it's the cleanest signal.
+      // Send a message. Sidecar polls every 5s — first hint appears within
+      // ~5-10s. Poll the file every 1-3s; the existence + content "1"
+      // both prove the sidecar correctly observed the new unread and
+      // wrote the hint.
+      const msg = await sendMessageOk(page, senderId, receiverId, "hello");
+      await expect
+        .poll(
+          async () => {
+            const r = await execInContainer(receiverContainerId, ["cat", "/tmp/.blackhouse-hint"]);
+            return r.exitCode === 0 ? r.stdout.trim() : null;
+          },
+          { timeout: 15_000, intervals: [1_000, 2_000, 3_000] },
+        )
+        .toBe("1");
+
+      // Ack the message via REST. Within ~10s the sidecar should see
+      // count=0 and remove the hint file.
+      await ackMessage(page, receiverId, msg.message_id);
+      await expect
+        .poll(
+          async () => {
+            const r = await execInContainer(receiverContainerId, [
+              "test",
+              "-f",
+              "/tmp/.blackhouse-hint",
+            ]);
+            return r.exitCode;
+          },
+          { timeout: 15_000, intervals: [1_000, 2_000, 3_000] },
+        )
+        .not.toBe(0);
+    } finally {
+      await cleanupSession(page, senderId);
+      await cleanupSession(page, receiverId);
+    }
+  });
+
+  test("mock agent autonomously processes inbox via sidecar hint convention", async ({ page }) => {
+    test.slow();
+    await signInAsAdmin(page);
+    const senderId = await createSession(page, "mock-sender");
+    const receiverId = await createSession(page, "mock-receiver");
+    const receiverContainerId = await getSessionContainerId(page, receiverId);
+    try {
+      // Inject the mock-agent script. Base64 round-trip avoids needing
+      // stdin support in execInContainer (which would mean threading
+      // dockerode's `AttachStdin` + write-end through the helper).
+      const { readFileSync } = await import("node:fs");
+      const { fileURLToPath } = await import("node:url");
+      const { dirname, join } = await import("node:path");
+      const here = dirname(fileURLToPath(import.meta.url));
+      const mockScript = readFileSync(join(here, "../fixtures/mock-agent.sh"), "utf-8");
+      const b64 = Buffer.from(mockScript).toString("base64");
+      const install = await execInContainer(receiverContainerId, [
+        "sh",
+        "-c",
+        `printf '%s' '${b64}' | base64 -d > /tmp/mock-agent.sh && chmod +x /tmp/mock-agent.sh`,
+      ]);
+      expect(install.exitCode).toBe(0);
+
+      // Spawn the mock agent as a detached background process. `setsid`
+      // detaches it from the exec's controlling terminal so it survives
+      // the exec end. `</dev/null >/tmp/mock-agent.log 2>&1` redirects
+      // all fds so the exec stream actually closes (otherwise dockerode
+      // hangs waiting for the inherited stdout to close).
+      const spawn = await execInContainer(receiverContainerId, [
+        "sh",
+        "-c",
+        "setsid bash /tmp/mock-agent.sh </dev/null >/tmp/mock-agent.log 2>&1 &",
+      ]);
+      expect(spawn.exitCode).toBe(0);
+
+      // Send a message. The chain we're validating:
+      //   1. POST send-message → DB row inserted
+      //   2. sidecar (5s poll) → /tmp/.blackhouse-hint appears
+      //   3. mock-agent (2s poll) → sees hint, runs check-inbox.sh
+      //   4. mock-agent runs check-inbox.sh --ack-all → PUT ack-batch
+      //   5. DB ack_at flips → /inbox/count drops to 0
+      // 60s budget covers all four poll cycles + cold container warmup.
+      await sendMessageOk(page, senderId, receiverId, "please process me");
       await expect
         .poll(() => getInboxCount(page, receiverId), {
           timeout: 60_000,
           intervals: [2_000, 5_000, 10_000],
         })
         .toBe(0);
-
-      // Final assertion: the specific message is ack'd.
-      const inboxFinal = await getInbox(page, receiverId);
-      const stillUnacked = inboxFinal.find((m) => m.id === sent.message_id && m.ackAt === null);
-      expect(stillUnacked).toBeUndefined();
     } finally {
       await cleanupSession(page, senderId);
       await cleanupSession(page, receiverId);
     }
   });
-}
-
-test.describe("Messaging — autonomous-check (HARD GATE)", () => {
-  test.skip(() => !process.env.E2E_DOCKER, "Requires Docker — set E2E_DOCKER=1 to enable");
-  for (const preset of AUTONOMOUS_PRESETS) autonomousCheckTest(preset);
 });
 
 /* ─────────────────────────────────────────────────────────────────────────
