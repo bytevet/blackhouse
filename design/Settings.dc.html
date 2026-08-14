@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<script src="icons.js"></script>
+<link rel="stylesheet" href="_ds/not-yet-dashboard-design-system-08a144c3-b949-4751-9eef-342d9527b153/_ds_bundle.css">
+<link rel="stylesheet" href="_ds/not-yet-dashboard-design-system-08a144c3-b949-4751-9eef-342d9527b153/styles.css">
+<script src="_ds/not-yet-dashboard-design-system-08a144c3-b949-4751-9eef-342d9527b153/_ds_bundle.js"></script>
+<style>
+  html,body{margin:0;height:100%}
+  *{box-sizing:border-box}
+  a{color:var(--ny-accent-text)}
+  .bh-scroll::-webkit-scrollbar{width:10px}
+  .bh-scroll::-webkit-scrollbar-thumb{background:var(--ny-border-strong);border-radius:8px;border:2px solid transparent;background-clip:content-box}
+</style>
+</helmet>
+<x-import component-from-global-scope="NotYetUI.ThemeProvider" theme="{{ theme }}" hint-size="100%,100%">
+<div style="height:100vh;width:100%;display:flex;flex-direction:column;background:var(--ny-bg);color:var(--ny-text);font-family:var(--ny-font-sans);font-size:14px;overflow:hidden">
+
+  <!-- INVITE DIALOG -->
+  <x-import component-from-global-scope="NotYetUI.Dialog" open="{{ inviteOpen }}" onClose="{{ closeInvite }}" title="Invite people" description="They get an email invite. Only humans can approve agent dispatches." size="sm" hint-size="0,0">
+    <div style="display:flex;flex-direction:column;gap:15px">
+      <div>
+        <label style="display:block;font-size:12px;font-weight:600;color:var(--ny-text-muted);margin-bottom:6px">Email addresses</label>
+        <textarea placeholder="ada@acme.dev, sam@acme.dev" style="width:100%;min-height:66px;border:1px solid var(--ny-border-strong);border-radius:9px;background:var(--ny-surface-sunken);color:var(--ny-text);font-family:var(--ny-font-mono);font-size:12.5px;line-height:1.6;padding:10px 12px;resize:vertical;outline:none"></textarea>
+        <div style="font-size:11px;color:var(--ny-text-subtle);margin-top:5px">Comma or newline separated.</div>
+      </div>
+      <div>
+        <label style="display:block;font-size:12px;font-weight:600;color:var(--ny-text-muted);margin-bottom:7px">Role</label>
+        <div style="display:flex;flex-direction:column;gap:7px">
+          <sc-for list="{{ roleOpts }}" as="r" hint-placeholder-count="3">
+            <div onClick="{{ r.pick }}" role="button" style="{{ r.style }}">
+              <span style="{{ r.radio }}"></span>
+              <div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:600;{{ r.nameColor }}">{{ r.name }}</div><div style="font-size:11px;color:var(--ny-text-subtle);margin-top:2px">{{ r.desc }}</div></div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <x-import component-from-global-scope="NotYetUI.Button" variant="ghost" size="md" onClick="{{ closeInvite }}" hint-size="auto,34px">Cancel</x-import>
+        <x-import component-from-global-scope="NotYetUI.Button" variant="primary" size="md" onClick="{{ closeInvite }}" hint-size="auto,34px">Send invites</x-import>
+      </div>
+    </div>
+  </x-import>
+
+  <!-- top bar -->
+  <header style="flex:none;display:flex;align-items:center;gap:10px;padding:11px 20px;border-bottom:1px solid var(--ny-border);background:var(--ny-surface-sunken)">
+    <a href="Channel View.dc.html" style="display:flex;align-items:center;gap:7px;text-decoration:none;color:var(--ny-text-subtle);font-family:var(--ny-font-mono);font-size:12.5px" style-hover="color:var(--ny-text)"><dc-import name="Icon" n="chevron-left" sz="15" sw="2" hint-size="15px,15px"></dc-import>Acme Storefront</a>
+    <span style="color:var(--ny-text-subtle)">/</span>
+    <span style="font-family:var(--ny-font-mono);font-size:12.5px;font-weight:600">workspace settings</span>
+    <div style="margin-left:auto"><div onClick="{{ toggleTheme }}" role="button" title="Toggle theme" style="width:30px;height:30px;border-radius:7px;display:grid;place-items:center;cursor:pointer;color:var(--ny-text-subtle);border:1px solid var(--ny-border)" style-hover="background:var(--ny-surface-hover);color:var(--ny-text)"><dc-import name="Icon" n="moon" sz="15" sw="2" hint-size="15px,15px"></dc-import></div></div>
+  </header>
+
+  <div style="flex:1;display:flex;min-height:0">
+    <!-- settings nav -->
+    <aside style="width:230px;flex:none;border-right:1px solid var(--ny-border);background:var(--ny-surface-sunken);padding:14px 10px;display:flex;flex-direction:column;gap:2px">
+      <div style="padding:4px 10px 8px;font-size:10.5px;font-family:var(--ny-font-mono);text-transform:uppercase;letter-spacing:.06em;color:var(--ny-text-subtle)">Workspace</div>
+      <sc-for list="{{ nav }}" as="n" hint-placeholder-count="5">
+        <div onClick="{{ n.pick }}" role="button" style="{{ n.style }}"><dc-import name="Icon" n="{{ n.icon }}" sz="16" sw="2" hint-size="16px,16px"></dc-import><span style="flex:1">{{ n.label }}</span><sc-if value="{{ n.count }}" hint-placeholder-val="{{ false }}"><span style="font-family:var(--ny-font-mono);font-size:11px;color:var(--ny-text-subtle)">{{ n.count }}</span></sc-if></div>
+      </sc-for>
+    </aside>
+
+    <!-- main -->
+    <main class="bh-scroll" style="flex:1;min-width:0;overflow-y:auto;padding:26px 30px 60px">
+      <div style="max-width:900px">
+
+        <!-- BLUEPRINTS -->
+        <sc-if value="{{ isBlueprints }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;align-items:flex-start;gap:16px;margin-bottom:6px">
+            <div style="flex:1"><div style="font-size:20px;font-weight:700;letter-spacing:-.01em">Blueprints</div><div style="font-size:13px;color:var(--ny-text-muted);margin-top:4px;max-width:560px;line-height:1.5">Reusable agent definitions — CLI, base image, system prompt, skills, MCP servers, and default sandbox &amp; egress. Spawning an agent starts from one of these.</div></div>
+            <x-import component-from-global-scope="NotYetUI.Button" variant="primary" size="sm" onClick="{{ goNewBlueprint }}" hint-size="auto,28px">New blueprint</x-import>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:14px;margin-top:20px">
+            <sc-for list="{{ blueprints }}" as="b" hint-placeholder-count="4">
+              <div style="border:1px solid var(--ny-border);border-radius:12px;background:var(--ny-surface);overflow:hidden" style-hover="border-color:var(--ny-border-strong)">
+                <div style="padding:14px 15px 12px">
+                  <div style="display:flex;align-items:center;gap:9px">
+                    <span style="width:34px;height:34px;flex:none;border-radius:9px;background:var(--ny-surface-sunken);border:1px solid var(--ny-border);display:grid;place-items:center;color:var(--ny-text-muted)"><dc-import name="Icon" n="{{ b.icon }}" sz="17" sw="1.8" hint-size="17px,17px"></dc-import></span>
+                    <div style="flex:1;min-width:0"><div style="font-family:var(--ny-font-mono);font-size:13.5px;font-weight:700;color:var(--ny-text)">{{ b.name }}</div><div style="font-family:var(--ny-font-mono);font-size:10.5px;color:var(--ny-info-text);margin-top:1px">{{ b.cli }}</div></div>
+                  </div>
+                  <div style="font-size:12px;color:var(--ny-text-subtle);margin-top:10px;line-height:1.45;min-height:34px">{{ b.desc }}</div>
+                  <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;font-family:var(--ny-font-mono);font-size:10.5px;color:var(--ny-text-subtle)">
+                    <span style="border:1px solid var(--ny-border);border-radius:5px;padding:1px 6px">{{ b.image }}</span>
+                    <span style="border:1px solid var(--ny-border);border-radius:5px;padding:1px 6px">{{ b.sandbox }}</span>
+                    <span style="border:1px solid var(--ny-border);border-radius:5px;padding:1px 6px">{{ b.egress }}</span>
+                  </div>
+                </div>
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 15px;border-top:1px solid var(--ny-border);background:var(--ny-surface-sunken)">
+                  <span style="font-family:var(--ny-font-mono);font-size:11px;color:var(--ny-text-subtle)">{{ b.usage }}</span>
+                  <span role="button" style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-family:var(--ny-font-mono);color:var(--ny-text-muted);cursor:pointer" style-hover="color:var(--ny-text)"><dc-import name="Icon" n="square-pen" sz="12" sw="2" hint-size="12px,12px"></dc-import>edit</span>
+                </div>
+              </div>
+            </sc-for>
+            <div onClick="{{ goNewBlueprint }}" role="button" style="border:1px dashed var(--ny-border-strong);border-radius:12px;background:transparent;display:grid;place-items:center;min-height:150px;color:var(--ny-text-subtle);cursor:pointer;gap:6px" style-hover="border-color:var(--ny-accent-border);color:var(--ny-text-muted)"><div style="display:flex;flex-direction:column;align-items:center;gap:8px"><dc-import name="Icon" n="plus" sz="20" sw="2" hint-size="20px,20px"></dc-import><span style="font-size:12px;font-family:var(--ny-font-mono)">New blueprint</span></div></div>
+          </div>
+        </sc-if>
+
+        <!-- SANDBOX RUNTIMES -->
+        <sc-if value="{{ isRuntimes }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:20px;font-weight:700;letter-spacing:-.01em">Sandbox runtimes</div>
+          <div style="font-size:13px;color:var(--ny-text-muted);margin-top:4px;max-width:560px;line-height:1.5">What this host can actually run. Blueprints requesting an unavailable runtime fall back to the strongest one detected.</div>
+          <div style="display:flex;align-items:center;gap:12px;margin-top:18px;border:1px solid var(--ny-border);border-radius:10px;background:var(--ny-surface-sunken);padding:12px 15px">
+            <span style="width:34px;height:34px;border-radius:9px;background:var(--ny-surface);border:1px solid var(--ny-border);display:grid;place-items:center;color:var(--ny-text-muted)"><dc-import name="Icon" n="server" sz="17" sw="1.8" hint-size="17px,17px"></dc-import></span>
+            <div style="flex:1"><div style="font-size:13px;font-weight:600">blackhouse-host-01</div><div style="font-family:var(--ny-font-mono);font-size:11.5px;color:var(--ny-text-subtle);margin-top:2px">macOS 14.5 · arm64 · Docker Desktop 4.33</div></div>
+            <span style="font-family:var(--ny-font-mono);font-size:11px;color:var(--ny-success-text);display:inline-flex;align-items:center;gap:5px"><span style="width:6px;height:6px;border-radius:50%;background:var(--ny-success)"></span>online</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-top:14px">
+            <sc-for list="{{ runtimes }}" as="r" hint-placeholder-count="3">
+              <div style="{{ r.rowStyle }}">
+                <span style="{{ r.iconWrap }}"><dc-import name="Icon" n="{{ r.icon }}" sz="16" sw="2" hint-size="16px,16px"></dc-import></span>
+                <div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:8px"><span style="font-family:var(--ny-font-mono);font-size:13px;font-weight:600;{{ r.nameColor }}">{{ r.name }}</span><span style="{{ r.badgeStyle }}">{{ r.badge }}</span></div><div style="font-size:11.5px;color:var(--ny-text-subtle);margin-top:3px">{{ r.note }}</div></div>
+                <sc-if value="{{ r.isDefault }}" hint-placeholder-val="{{ false }}"><span style="font-family:var(--ny-font-mono);font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--ny-accent-text);border:1px solid var(--ny-accent-border);background:var(--ny-accent-subtle);border-radius:5px;padding:2px 7px">default</span></sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <!-- EGRESS -->
+        <sc-if value="{{ isEgress }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:flex-start;gap:16px"><div style="flex:1"><div style="font-size:20px;font-weight:700;letter-spacing:-.01em">Egress allowlist</div><div style="font-size:13px;color:var(--ny-text-muted);margin-top:4px;max-width:560px;line-height:1.5">Hosts agents in allowlist mode may reach. Applies workspace-wide unless a blueprint narrows it.</div></div><x-import component-from-global-scope="NotYetUI.Button" variant="secondary" size="sm" hint-size="auto,28px">Add host</x-import></div>
+          <div style="border:1px solid var(--ny-border);border-radius:11px;overflow:hidden;margin-top:18px">
+            <div style="display:grid;grid-template-columns:1.6fr 1fr 1fr 40px;gap:12px;padding:9px 15px;background:var(--ny-surface-sunken);border-bottom:1px solid var(--ny-border);font-family:var(--ny-font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--ny-text-subtle)"><span>Host</span><span>Scope</span><span>Added by</span><span></span></div>
+            <sc-for list="{{ hosts }}" as="h" hint-placeholder-count="5">
+              <div style="display:grid;grid-template-columns:1.6fr 1fr 1fr 40px;gap:12px;padding:11px 15px;border-bottom:1px solid var(--ny-border);align-items:center;font-size:12.5px">
+                <span style="font-family:var(--ny-font-mono);color:var(--ny-text)">{{ h.host }}</span>
+                <span style="font-family:var(--ny-font-mono);color:var(--ny-text-subtle);font-size:11.5px">{{ h.scope }}</span>
+                <span style="color:var(--ny-text-subtle);font-size:11.5px">{{ h.by }}</span>
+                <span role="button" style="display:grid;place-items:center;color:var(--ny-text-subtle);cursor:pointer" style-hover="color:var(--ny-danger-text)"><dc-import name="Icon" n="trash-2" sz="14" sw="2" hint-size="14px,14px"></dc-import></span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <!-- MEMBERS -->
+        <sc-if value="{{ isMembers }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:flex-start;gap:16px"><div style="flex:1"><div style="font-size:20px;font-weight:700;letter-spacing:-.01em">Members</div><div style="font-size:13px;color:var(--ny-text-muted);margin-top:4px;max-width:560px;line-height:1.5">People and agents in this workspace. Only humans can approve agent→agent dispatches.</div></div><x-import component-from-global-scope="NotYetUI.Button" variant="primary" size="sm" onClick="{{ openInvite }}" hint-size="auto,28px">Invite people</x-import></div>
+          <div style="border:1px solid var(--ny-border);border-radius:11px;overflow:hidden;margin-top:18px">
+            <sc-for list="{{ members }}" as="m" hint-placeholder-count="4">
+              <div style="display:flex;align-items:center;gap:12px;padding:12px 15px;border-bottom:1px solid var(--ny-border)">
+                <span style="{{ m.avatarStyle }}">{{ m.initials }}</span>
+                <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;color:var(--ny-text)">{{ m.name }}</div><div style="font-family:var(--ny-font-mono);font-size:11px;color:var(--ny-text-subtle);margin-top:1px">{{ m.sub }}</div></div>
+                <span style="{{ m.kindBadge }}">{{ m.kind }}</span>
+                <span style="{{ m.roleStyle }}">{{ m.role }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+
+      </div>
+    </main>
+  </div>
+</div>
+</x-import>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1280,&quot;height&quot;:860},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  state = { theme: this.props.theme ?? 'dark', section: 'blueprints', inviteOpen: false, inviteRole: 'member' };
+
+  lucideEl(name, size, sw) {
+    const table = window.__bhIcons || {};
+    const kebab = String(name).replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+    const node = table[kebab] || table[name];
+    if (!Array.isArray(node)) return null;
+    const build = (arr) => arr.map((c, i) => {
+      const attrs = { key: i };
+      for (const [k, v] of Object.entries(c[1] || {})) attrs[k.replace(/-([a-z])/g, (_, x) => x.toUpperCase())] = v;
+      return React.createElement(c[0], attrs, c[2] ? build(c[2]) : null);
+    });
+    return React.createElement('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: sw || 2, strokeLinecap: 'round', strokeLinejoin: 'round', style: { flex: 'none', display: 'block', verticalAlign: 'middle' } }, build(node[2] || []));
+  }
+
+  renderVals() {
+    const section = this.state.section;
+    const navDefs = [
+      { id:'blueprints', label:'Blueprints', icon:'layout-grid', count:'4' },
+      { id:'runtimes', label:'Sandbox runtimes', icon:'box', count:'' },
+      { id:'egress', label:'Egress allowlist', icon:'shield-check', count:'5' },
+      { id:'members', label:'Members', icon:'users', count:'7' },
+    ];
+    const nav = navDefs.map(n => ({
+      label: n.label, icon: n.icon, count: n.count,
+      pick: () => this.setState({ section: n.id }),
+      style: 'display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer;font-size:13px;'
+        + (section === n.id ? 'background:var(--ny-surface-selected);color:var(--ny-text);font-weight:600' : 'color:var(--ny-text-muted)'),
+    }));
+
+    const blueprints = [
+      { name:'repo-summariser', cli:'claude-code', icon:'file-search', image:'node:20', sandbox:'gVisor', egress:'allowlist', desc:'Read-only reconnaissance — maps a codebase, cites file:line.', usage:'used by 2 agents' },
+      { name:'code-reviewer', cli:'claude-code', icon:'git-pull-request', image:'node:20', sandbox:'gVisor', egress:'allowlist', desc:'Reviews diffs, runs the test suite, comments on PRs.', usage:'used by 1 agent' },
+      { name:'web-scout', cli:'codex', icon:'globe', image:'python:3.12', sandbox:'gVisor', egress:'open', desc:'Drives the headless browser to research and reproduce bugs.', usage:'used by 1 agent' },
+      { name:'migrator', cli:'claude-code', icon:'database', image:'node:20', sandbox:'gVisor', egress:'allowlist', desc:'Writes and runs schema migrations behind human approval.', usage:'unused' },
+    ];
+
+    const rtDefs = [
+      { id:'runc', name:'runc', available:true, isDefault:true, icon:'box', badge:'available', note:'OCI default · namespace isolation. Strongest runtime on this host.' },
+      { id:'gvisor', name:'gVisor', available:false, icon:'shield-alert', badge:'unavailable', note:'Needs a Linux host with KVM. This host is macOS — not available.' },
+      { id:'kata', name:'Kata Containers', available:false, icon:'shield-alert', badge:'unavailable', note:'Needs nested virtualization. Not detected on this host.' },
+    ];
+    const runtimes = rtDefs.map(r => ({
+      name: r.name, note: r.note, badge: r.badge, icon: r.icon, isDefault: r.isDefault,
+      rowStyle: 'display:flex;gap:12px;align-items:flex-start;border:1px solid var(--ny-border);border-radius:10px;padding:12px 14px;background:var(--ny-surface)' + (r.available ? '' : ';opacity:.72'),
+      iconWrap: 'width:30px;height:30px;flex:none;border-radius:8px;display:grid;place-items:center;'
+        + (r.available ? 'background:var(--ny-success-subtle);color:var(--ny-success-text)' : 'background:var(--ny-surface-sunken);color:var(--ny-text-subtle)'),
+      nameColor: r.available ? 'color:var(--ny-text)' : 'color:var(--ny-text-muted)',
+      badgeStyle: 'font-family:var(--ny-font-mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;border-radius:5px;padding:1px 6px;border:1px solid var(--ny-'
+        + (r.available ? 'success-border);color:var(--ny-success-text);background:var(--ny-success-subtle)' : 'border);color:var(--ny-text-subtle);background:var(--ny-surface-sunken)'),
+    }));
+
+    const hosts = [
+      { host:'github.com', scope:'all agents', by:'Dana Okafor' },
+      { host:'registry.npmjs.org', scope:'all agents', by:'Dana Okafor' },
+      { host:'api.stripe.com', scope:'#backend', by:'Priya Shah' },
+      { host:'*.sentry.io', scope:'all agents', by:'Priya Shah' },
+      { host:'files.pythonhosted.org', scope:'web-scout', by:'system' },
+    ];
+
+    const mkAvatar = (tone) => 'width:32px;height:32px;flex:none;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700;background:var(--ny-' + tone + '-subtle);color:var(--ny-' + tone + '-text)';
+    const mkAgentAvatar = 'width:32px;height:32px;flex:none;border-radius:9px;display:grid;place-items:center;font-family:var(--ny-font-mono);font-size:11px;font-weight:700;background:var(--ny-surface-raised);border:1px solid var(--ny-accent-border);color:var(--ny-accent-text)';
+    const kindHuman = 'font-family:var(--ny-font-mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;border-radius:5px;padding:1px 6px;border:1px solid var(--ny-border);color:var(--ny-text-subtle);background:var(--ny-surface-sunken)';
+    const kindAgent = 'font-family:var(--ny-font-mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;border-radius:5px;padding:1px 6px;border:1px solid var(--ny-accent-border);color:var(--ny-accent-text);background:var(--ny-accent-subtle)';
+    const members = [
+      { initials:'DO', name:'Dana Okafor', sub:'dana@acme.dev', kind:'human', role:'owner', avatarStyle:mkAvatar('info'), kindBadge:kindHuman },
+      { initials:'PS', name:'Priya Shah', sub:'priya@acme.dev', kind:'human', role:'admin', avatarStyle:mkAvatar('warning'), kindBadge:kindHuman },
+      { initials:'SC', name:'@scout', sub:'repo-summariser · running', kind:'agent', role:'—', avatarStyle:mkAgentAvatar, kindBadge:kindAgent },
+      { initials:'BE', name:'@backend', sub:'code-reviewer · running', kind:'agent', role:'—', avatarStyle:mkAgentAvatar, kindBadge:kindAgent },
+      { initials:'RV', name:'@reviewer', sub:'code-reviewer · stopped', kind:'agent', role:'—', avatarStyle:mkAgentAvatar, kindBadge:kindAgent },
+      { initials:'AD', name:'ada@acme.dev', sub:'invite sent 2h ago', kind:'pending', role:'member', avatarStyle:'width:32px;height:32px;flex:none;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700;background:var(--ny-surface-sunken);border:1px dashed var(--ny-border-strong);color:var(--ny-text-subtle)', kindBadge:'font-family:var(--ny-font-mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;border-radius:5px;padding:1px 6px;border:1px solid var(--ny-warning-border);color:var(--ny-warning-text);background:var(--ny-warning-subtle)' },
+    ].map(m => ({ ...m, roleStyle: 'font-family:var(--ny-font-mono);font-size:11.5px;min-width:66px;text-align:right;'
+      + (m.role === '—' ? 'color:var(--ny-text-subtle)' : 'color:var(--ny-text-muted)') }));
+
+    return {
+      theme: this.state.theme,
+      toggleTheme: () => this.setState(s => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
+      nav,
+      isBlueprints: section === 'blueprints',
+      isRuntimes: section === 'runtimes',
+      isEgress: section === 'egress',
+      isMembers: section === 'members',
+      blueprints, runtimes, hosts, members,
+      plusIcon: this.lucideEl('plus', 15, 2.2),
+      inviteOpen: this.state.inviteOpen,
+      openInvite: () => this.setState({ inviteOpen: true }),
+      closeInvite: () => this.setState({ inviteOpen: false }),
+      roleOpts: [
+        { id:'admin', name:'Admin', desc:'Manage blueprints, runtimes, egress and members.' },
+        { id:'member', name:'Member', desc:'Use channels, spawn agents, approve dispatches.' },
+        { id:'viewer', name:'Viewer', desc:'Read channels and transcripts. Cannot approve.' },
+      ].map(r => ({
+        name: r.name, desc: r.desc,
+        pick: () => this.setState({ inviteRole: r.id }),
+        style: 'display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:9px;cursor:pointer;border:1px solid var(--ny-'
+          + (this.state.inviteRole === r.id ? 'accent);background:var(--ny-accent-subtle)' : 'border);background:var(--ny-surface)'),
+        radio: 'width:15px;height:15px;flex:none;margin-top:2px;border-radius:50%;border:2px solid var(--ny-'
+          + (this.state.inviteRole === r.id ? 'accent);background:var(--ny-accent)' : 'border-strong)'),
+        nameColor: this.state.inviteRole === r.id ? 'color:var(--ny-accent-text)' : 'color:var(--ny-text)',
+      })),
+      goNewBlueprint: () => { window.location.href = 'Create Blueprint.dc.html'; },
+    };
+  }
+}
+</script>
+</body>
+</html>

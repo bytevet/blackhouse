@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<script src="icons.js"></script>
+<link rel="stylesheet" href="_ds/not-yet-dashboard-design-system-08a144c3-b949-4751-9eef-342d9527b153/_ds_bundle.css">
+<link rel="stylesheet" href="_ds/not-yet-dashboard-design-system-08a144c3-b949-4751-9eef-342d9527b153/styles.css">
+<script src="_ds/not-yet-dashboard-design-system-08a144c3-b949-4751-9eef-342d9527b153/_ds_bundle.js"></script>
+<style>
+  html,body{margin:0;height:100%}
+  *{box-sizing:border-box}
+  a{color:var(--ny-accent-text)}
+  .bh-scroll::-webkit-scrollbar{width:10px}
+  .bh-scroll::-webkit-scrollbar-thumb{background:var(--ny-border-strong);border-radius:8px;border:2px solid transparent;background-clip:content-box}
+</style>
+</helmet>
+<x-import component-from-global-scope="NotYetUI.ThemeProvider" theme="{{ theme }}" hint-size="100%,100%">
+<div style="min-height:100vh;width:100%;background:var(--ny-bg);color:var(--ny-text);font-family:var(--ny-font-sans);font-size:14px;display:flex;align-items:flex-start;justify-content:center;padding:40px 20px">
+
+  <div style="position:fixed;top:16px;right:16px"><div onClick="{{ toggleTheme }}" role="button" title="Toggle theme" style="width:32px;height:32px;border-radius:8px;display:grid;place-items:center;cursor:pointer;color:var(--ny-text-subtle);border:1px solid var(--ny-border);background:var(--ny-surface)" style-hover="background:var(--ny-surface-hover);color:var(--ny-text)"><dc-import name="Icon" n="moon" sz="16" sw="2" hint-size="16px,16px"></dc-import></div></div>
+
+  <!-- WIZARD PANEL -->
+  <div style="width:680px;max-width:100%;background:var(--ny-surface);border:1px solid var(--ny-border-strong);border-radius:16px;box-shadow:var(--ny-shadow-lg);overflow:hidden;display:flex;flex-direction:column;max-height:calc(100vh - 80px)">
+
+    <!-- header + steps -->
+    <div style="flex:none;padding:18px 22px 14px;border-bottom:1px solid var(--ny-border)">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="width:30px;height:30px;border-radius:8px;background:var(--ny-accent);color:var(--ny-text-on-accent);display:grid;place-items:center"><dc-import name="Icon" n="bot" sz="17" sw="2" hint-size="17px,17px"></dc-import></span>
+        <div style="flex:1"><div style="font-size:16px;font-weight:700">New agent</div><div style="font-size:12px;color:var(--ny-text-subtle);font-family:var(--ny-font-mono)">in #backend · acme/storefront</div></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:15px">
+        <div style="display:flex;align-items:center;gap:8px;{{ step1LabelColor }}"><span style="{{ step1DotStyle }}">1</span><span style="font-size:12.5px;font-weight:600">Blueprint</span></div>
+        <div style="flex:1;height:1px;background:var(--ny-border)"></div>
+        <div style="display:flex;align-items:center;gap:8px;{{ step2LabelColor }}"><span style="{{ step2DotStyle }}">2</span><span style="font-size:12.5px;font-weight:600">Configure</span></div>
+      </div>
+    </div>
+
+    <div class="bh-scroll" style="flex:1;min-height:0;overflow-y:auto;padding:20px 22px">
+
+      <!-- STEP 1: BLUEPRINT -->
+      <sc-if value="{{ isStep1 }}" hint-placeholder-val="{{ true }}">
+        <div style="font-size:12.5px;color:var(--ny-text-muted);margin-bottom:14px">A blueprint bundles the CLI, base image, system prompt, skills, MCP servers, and default sandbox &amp; egress policy. You can override everything in the next step.</div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <sc-for list="{{ blueprints }}" as="b" hint-placeholder-count="4">
+            <div onClick="{{ b.pick }}" role="button" style="{{ b.cardStyle }}">
+              <span style="width:38px;height:38px;flex:none;border-radius:10px;display:grid;place-items:center;background:var(--ny-surface-sunken);border:1px solid var(--ny-border);color:var(--ny-text-muted)"><dc-import name="Icon" n="{{ b.icon }}" sz="19" sw="1.8" hint-size="19px,19px"></dc-import></span>
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:center;gap:8px"><span style="font-family:var(--ny-font-mono);font-size:13.5px;font-weight:700;color:var(--ny-text)">{{ b.name }}</span><span style="{{ b.cliStyle }}">{{ b.cli }}</span></div>
+                <div style="font-size:12px;color:var(--ny-text-subtle);margin-top:3px">{{ b.desc }}</div>
+                <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;font-family:var(--ny-font-mono);font-size:10.5px;color:var(--ny-text-subtle)">
+                  <span style="border:1px solid var(--ny-border);border-radius:5px;padding:1px 6px">{{ b.image }}</span>
+                  <span style="border:1px solid var(--ny-border);border-radius:5px;padding:1px 6px">sandbox {{ b.sandbox }}</span>
+                  <span style="border:1px solid var(--ny-border);border-radius:5px;padding:1px 6px">egress {{ b.egress }}</span>
+                </div>
+              </div>
+              <span style="{{ b.checkStyle }}"><dc-import name="Icon" n="check" sz="13" sw="3" hint-size="13px,13px"></dc-import></span>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <!-- STEP 2: CONFIGURE -->
+      <sc-if value="{{ isStep2 }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:18px">
+          <!-- identity -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div>
+              <label style="display:block;font-size:12px;font-weight:600;color:var(--ny-text-muted);margin-bottom:6px">Handle</label>
+              <div style="display:flex;align-items:center;gap:6px;border:1px solid var(--ny-border-strong);border-radius:9px;background:var(--ny-surface-sunken);padding:0 11px"><span style="font-family:var(--ny-font-mono);color:var(--ny-accent-text)">@</span><input value="scout-2" style="flex:1;border:none;background:transparent;color:var(--ny-text);font-family:var(--ny-font-mono);font-size:13.5px;padding:9px 0;outline:none"></div>
+            </div>
+            <div>
+              <label style="display:block;font-size:12px;font-weight:600;color:var(--ny-text-muted);margin-bottom:6px">Display name</label>
+              <div style="border:1px solid var(--ny-border-strong);border-radius:9px;background:var(--ny-surface-sunken);padding:0 11px"><input value="Scout II" style="width:100%;border:none;background:transparent;color:var(--ny-text);font-size:13.5px;padding:9px 0;outline:none"></div>
+            </div>
+          </div>
+          <div>
+            <label style="display:block;font-size:12px;font-weight:600;color:var(--ny-text-muted);margin-bottom:6px">Repository &amp; branch</label>
+            <div style="display:flex;align-items:center;border:1px solid var(--ny-border-strong);border-radius:9px;background:var(--ny-surface-sunken);padding:0 11px"><span style="color:var(--ny-text-subtle);margin-right:8px;display:inline-flex"><dc-import name="Icon" n="git-branch" sz="14" sw="2" hint-size="14px,14px"></dc-import></span><input value="acme/storefront" style="flex:1;border:none;background:transparent;color:var(--ny-text);font-family:var(--ny-font-mono);font-size:13.5px;padding:9px 0;outline:none"><span style="color:var(--ny-text-subtle);font-family:var(--ny-font-mono)">@</span><input value="main" style="width:70px;border:none;background:transparent;color:var(--ny-text);font-family:var(--ny-font-mono);font-size:13.5px;padding:9px 0 9px 6px;outline:none"></div>
+          </div>
+
+          <!-- sandbox runtime -->
+          <div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><label style="font-size:12px;font-weight:600;color:var(--ny-text-muted)">Sandbox runtime</label><span style="font-size:11px;font-family:var(--ny-font-mono);color:var(--ny-text-subtle)">detected on this host</span></div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <sc-for list="{{ runtimes }}" as="r" hint-placeholder-count="3">
+                <div onClick="{{ r.pick }}" role="button" style="{{ r.cardStyle }}">
+                  <span style="{{ r.radioStyle }}"><sc-if value="{{ r.selected }}" hint-placeholder-val="{{ false }}"><span style="width:8px;height:8px;border-radius:50%;background:var(--ny-text-on-accent)"></span></sc-if></span>
+                  <div style="flex:1;min-width:0">
+                    <div style="display:flex;align-items:center;gap:8px"><span style="font-family:var(--ny-font-mono);font-size:13px;font-weight:600;{{ r.nameColor }}">{{ r.name }}</span><span style="{{ r.badgeStyle }}">{{ r.badge }}</span></div>
+                    <div style="font-size:11.5px;color:var(--ny-text-subtle);margin-top:3px">{{ r.note }}</div>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <!-- egress -->
+          <div>
+            <label style="display:block;font-size:12px;font-weight:600;color:var(--ny-text-muted);margin-bottom:8px">Network egress</label>
+            <div style="display:flex;gap:8px">
+              <sc-for list="{{ egressOpts }}" as="e" hint-placeholder-count="3">
+                <div onClick="{{ e.pick }}" role="button" style="{{ e.cardStyle }}">
+                  <span style="display:inline-flex;margin-bottom:6px;{{ e.iconColor }}"><dc-import name="Icon" n="{{ e.icon }}" sz="16" sw="2" hint-size="16px,16px"></dc-import></span>
+                  <div style="font-family:var(--ny-font-mono);font-size:12px;font-weight:600;{{ e.nameColor }}">{{ e.name }}</div>
+                  <div style="font-size:10.5px;color:var(--ny-text-subtle);margin-top:2px;line-height:1.35">{{ e.note }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <!-- budget -->
+          <div style="display:flex;align-items:center;justify-content:space-between;border:1px solid var(--ny-border);border-radius:10px;padding:12px 14px;background:var(--ny-surface-sunken)">
+            <div><div style="font-size:12.5px;font-weight:600;color:var(--ny-text)">Daily budget cap</div><div style="font-size:11px;color:var(--ny-text-subtle);margin-top:2px">Agent pauses when it hits the cap.</div></div>
+            <div style="display:flex;align-items:center;gap:4px;border:1px solid var(--ny-border-strong);border-radius:8px;background:var(--ny-surface);padding:0 10px"><span style="color:var(--ny-text-subtle);font-family:var(--ny-font-mono)">$</span><input value="10.00" style="width:56px;border:none;background:transparent;color:var(--ny-text);font-family:var(--ny-font-mono);font-size:13.5px;padding:8px 0;outline:none;text-align:right"></div>
+          </div>
+        </div>
+      </sc-if>
+    </div>
+
+    <!-- footer -->
+    <div style="flex:none;display:flex;align-items:center;gap:10px;padding:14px 22px;border-top:1px solid var(--ny-border);background:var(--ny-surface-sunken)">
+      <sc-if value="{{ isStep2 }}" hint-placeholder-val="{{ false }}">
+        <x-import component-from-global-scope="NotYetUI.Button" variant="ghost" size="md" onClick="{{ back }}" hint-size="auto,34px">Back</x-import>
+      </sc-if>
+      <span style="margin-left:auto"></span>
+      <x-import component-from-global-scope="NotYetUI.Button" variant="ghost" size="md" onClick="{{ goChannel }}" hint-size="auto,34px">Cancel</x-import>
+      <sc-if value="{{ isStep1 }}" hint-placeholder-val="{{ true }}">
+        <x-import component-from-global-scope="NotYetUI.Button" variant="primary" size="md" onClick="{{ next }}" hint-size="auto,34px">Continue</x-import>
+      </sc-if>
+      <sc-if value="{{ isStep2 }}" hint-placeholder-val="{{ false }}">
+        <x-import component-from-global-scope="NotYetUI.Button" variant="primary" size="md" onClick="{{ goChannel }}" hint-size="auto,34px">Create agent</x-import>
+      </sc-if>
+    </div>
+  </div>
+</div>
+</x-import>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:760,&quot;height&quot;:900},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  state = {
+    theme: this.props.theme ?? 'dark',
+    step: 1,
+    blueprint: 'repo-summariser',
+    runtime: 'runc',
+    egress: 'allowlist',
+  };
+
+  lucideEl(name, size, sw) {
+    const table = window.__bhIcons || {};
+    const kebab = String(name).replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+    const node = table[kebab] || table[name];
+    if (!Array.isArray(node)) return null;
+    const build = (arr) => arr.map((c, i) => {
+      const attrs = { key: i };
+      for (const [k, v] of Object.entries(c[1] || {})) attrs[k.replace(/-([a-z])/g, (_, x) => x.toUpperCase())] = v;
+      return React.createElement(c[0], attrs, c[2] ? build(c[2]) : null);
+    });
+    return React.createElement('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: sw || 2, strokeLinecap: 'round', strokeLinejoin: 'round', style: { flex: 'none', display: 'block', verticalAlign: 'middle' } }, build(node[2] || []));
+  }
+
+  renderVals() {
+    const step = this.state.step;
+    const stepDot = (n, active) => `width:22px;height:22px;flex:none;border-radius:50%;display:grid;place-items:center;font-family:var(--ny-font-mono);font-size:11px;font-weight:700;`
+      + (active ? 'background:var(--ny-accent);color:var(--ny-text-on-accent)' : 'background:var(--ny-surface-active);color:var(--ny-text-subtle)');
+
+    const bpDefs = [
+      { id:'repo-summariser', name:'repo-summariser', cli:'claude-code', icon:'file-search', image:'node:20', sandbox:'gVisor', egress:'allowlist', desc:'Read-only reconnaissance — maps a codebase and cites file:line.' },
+      { id:'code-reviewer', name:'code-reviewer', cli:'claude-code', icon:'git-pull-request', image:'node:20', sandbox:'gVisor', egress:'allowlist', desc:'Reviews diffs, runs the test suite, comments on PRs.' },
+      { id:'web-scout', name:'web-scout', cli:'codex', icon:'globe', image:'python:3.12', sandbox:'gVisor', egress:'open', desc:'Drives the headless browser to research and reproduce bugs.' },
+      { id:'blank', name:'blank', cli:'choose CLI', icon:'square-dashed', image:'ubuntu:24.04', sandbox:'runc', egress:'no network', desc:'Start from an empty definition and configure everything yourself.' },
+    ];
+    const blueprints = bpDefs.map(b => {
+      const sel = this.state.blueprint === b.id;
+      return {
+        ...b,
+        pick: () => this.setState({ blueprint: b.id }),
+        cardStyle: 'display:flex;gap:13px;align-items:flex-start;padding:13px 14px;border-radius:12px;cursor:pointer;transition:all .12s;border:1px solid var(--ny-'
+          + (sel ? 'accent);background:var(--ny-accent-subtle)' : 'border);background:var(--ny-surface)'),
+        cliStyle: 'font-family:var(--ny-font-mono);font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--ny-info-text);background:var(--ny-info-subtle);border:1px solid var(--ny-info-border);border-radius:5px;padding:1px 6px',
+        checkStyle: 'width:22px;height:22px;flex:none;border-radius:50%;display:grid;place-items:center;color:var(--ny-text-on-accent);background:var(--ny-accent);'
+          + (sel ? 'opacity:1' : 'opacity:0'),
+      };
+    });
+
+    const rtDefs = [
+      { id:'runc', name:'runc', available:true, badge:'available', note:'OCI default. Namespace isolation — fine for trusted first-party code.' },
+      { id:'gvisor', name:'gVisor', available:false, badge:'Linux host only', note:'Needs a Linux host with KVM. This workspace runs on macOS — will fall back to runc.' },
+      { id:'kata', name:'Kata Containers', available:false, badge:'not detected', note:'Needs nested virtualization. Not available on this host.' },
+    ];
+    const runtimes = rtDefs.map(r => {
+      const sel = this.state.runtime === r.id && r.available;
+      return {
+        name: r.name, note: r.note, badge: r.badge, selected: sel,
+        pick: () => { if (r.available) this.setState({ runtime: r.id }); },
+        cardStyle: 'display:flex;gap:12px;align-items:flex-start;padding:11px 13px;border-radius:10px;transition:all .12s;'
+          + (r.available ? 'cursor:pointer;' : 'cursor:not-allowed;opacity:.72;')
+          + 'border:1px solid var(--ny-' + (sel ? 'accent);background:var(--ny-accent-subtle)' : 'border);background:var(--ny-surface)'),
+        radioStyle: 'width:18px;height:18px;flex:none;margin-top:1px;border-radius:50%;display:grid;place-items:center;border:2px solid var(--ny-'
+          + (sel ? 'accent);background:var(--ny-accent)' : 'border-strong)'),
+        nameColor: r.available ? 'color:var(--ny-text)' : 'color:var(--ny-text-muted)',
+        badgeStyle: 'font-family:var(--ny-font-mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;border-radius:5px;padding:1px 6px;border:1px solid var(--ny-'
+          + (r.available ? 'success-border);color:var(--ny-success-text);background:var(--ny-success-subtle)' : 'border);color:var(--ny-text-subtle);background:var(--ny-surface-sunken)'),
+      };
+    });
+
+    const egDefs = [
+      { id:'allowlist', name:'Allowlist', icon:'shield-check', note:'Only named hosts. Recommended.' },
+      { id:'open', name:'Open', icon:'globe', note:'Full internet access.' },
+      { id:'none', name:'No network', icon:'shield-off', note:'Fully air-gapped.' },
+    ];
+    const egressOpts = egDefs.map(e => {
+      const sel = this.state.egress === e.id;
+      return {
+        name: e.name, note: e.note, icon: e.icon,
+        pick: () => this.setState({ egress: e.id }),
+        cardStyle: 'flex:1;display:flex;flex-direction:column;padding:11px 12px;border-radius:10px;cursor:pointer;transition:all .12s;border:1px solid var(--ny-'
+          + (sel ? 'accent);background:var(--ny-accent-subtle)' : 'border);background:var(--ny-surface)'),
+        iconColor: sel ? 'color:var(--ny-accent-text)' : 'color:var(--ny-text-muted)',
+        nameColor: sel ? 'color:var(--ny-accent-text)' : 'color:var(--ny-text)',
+      };
+    });
+
+    return {
+      theme: this.state.theme,
+      toggleTheme: () => this.setState(s => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
+      isStep1: step === 1,
+      isStep2: step === 2,
+      next: () => this.setState({ step: 2 }),
+      back: () => this.setState({ step: 1 }),
+      goChannel: () => { window.location.href = 'Channel View.dc.html'; },
+      step1DotStyle: stepDot(1, true),
+      step2DotStyle: stepDot(2, step === 2),
+      step1LabelColor: step === 1 ? 'color:var(--ny-text)' : 'color:var(--ny-text-muted)',
+      step2LabelColor: step === 2 ? 'color:var(--ny-text)' : 'color:var(--ny-text-subtle)',
+      blueprints, runtimes, egressOpts,
+      createIcon: this.lucideEl('circle-plus', 16, 2),
+    };
+  }
+}
+</script>
+</body>
+</html>
