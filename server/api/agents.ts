@@ -124,6 +124,53 @@ const app = new Hono<AuthEnv>()
     return c.json(toAgentSummary(agent));
   })
 
+  .get("/:id/artifacts", authMiddleware, async (c) => {
+    const agent = await requireAgentAccess(c.req.param("id")!, c.get("session").user);
+    const rows = await db
+      .select({
+        id: schema.artifacts.id,
+        channelId: schema.artifacts.channelId,
+        kind: schema.artifacts.kind,
+        title: schema.artifacts.title,
+        contentType: schema.artifacts.contentType,
+        url: schema.artifacts.url,
+        sizeBytes: schema.artifacts.sizeBytes,
+        createdAt: schema.artifacts.createdAt,
+      })
+      .from(schema.artifacts)
+      .where(eq(schema.artifacts.agentId, agent.id))
+      .orderBy(desc(schema.artifacts.createdAt))
+      .limit(50);
+    return c.json(rows);
+  })
+
+  /**
+   * The agent's most recent rendered artifact, served as a document.
+   *
+   * Returned as raw HTML rather than JSON because the result viewer renders it
+   * in a sandboxed iframe — the body is agent-authored and therefore untrusted,
+   * so it is served with a restrictive CSP and never interpolated into the SPA.
+   */
+  .get("/:id/results/latest", authMiddleware, async (c) => {
+    const agent = await requireAgentAccess(c.req.param("id")!, c.get("session").user);
+    const [artifact] = await db
+      .select()
+      .from(schema.artifacts)
+      .where(and(eq(schema.artifacts.agentId, agent.id), eq(schema.artifacts.kind, "html")))
+      .orderBy(desc(schema.artifacts.createdAt))
+      .limit(1);
+
+    if (!artifact?.body) return c.json({ error: "No result yet" }, 404);
+
+    return c.body(artifact.body, 200, {
+      "Content-Type": "text/html; charset=utf-8",
+      "Content-Security-Policy":
+        "default-src 'none'; img-src data: https:; style-src 'unsafe-inline' https:; " +
+        "script-src 'unsafe-inline' https:; font-src https: data:; connect-src 'none'",
+      "X-Content-Type-Options": "nosniff",
+    });
+  })
+
   .post("/:id/start", authMiddleware, async (c) => {
     const agent = await requireAgentAccess(c.req.param("id")!, c.get("session").user);
     if (agent.status === "running") return c.json(toAgentSummary(agent));

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Languages } from "lucide-react";
-import { Button, Popover } from "@notyet.im/ui";
+import { Popover } from "@notyet.im/ui";
 
 interface LangOption {
   code: string;
@@ -21,6 +21,11 @@ const LANGUAGES: LangOption[] = [
  * plain button list. The distinction the library draws is deliberate — a menu
  * is interactive content, which is exactly what `Popover` is for, whereas
  * `Select` is a form control and would submit rather than act.
+ *
+ * The trigger is a bare `<button>`, not NotYet's `Button`: `Popover` clones
+ * `aria-expanded` and `aria-controls` onto its child, and a component that
+ * does not spread unknown props silently drops them. It is sized and coloured
+ * to match `ThemeToggle`, which it always sits beside.
  */
 export function LanguageSwitcher() {
   const { i18n, t } = useTranslation();
@@ -64,9 +69,25 @@ export function LanguageSwitcher() {
         </div>
       }
     >
-      <Button iconOnly label={t("nav.language")} variant="ghost" size="sm">
+      <button
+        type="button"
+        aria-label={t("nav.language")}
+        style={{
+          width: "var(--ny-control-height-md)",
+          height: "var(--ny-control-height-md)",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 0,
+          borderRadius: "var(--ny-radius-lg)",
+          border: "1px solid var(--ny-border)",
+          background: "var(--ny-surface)",
+          color: "var(--ny-text-muted)",
+          cursor: "pointer",
+        }}
+      >
         <Languages size={15} strokeWidth={2} />
-      </Button>
+      </button>
     </Popover>
   );
 }
