@@ -3,6 +3,8 @@ import { db } from "../db/index.js";
 import * as schema from "../db/schema.js";
 import { routeMention } from "../api/channels.js";
 import { expireStaleDispatches } from "../agents/dispatch.js";
+import { pruneEgressProxies } from "../egress/proxy-manager.js";
+import { resolveAgentEgress } from "../egress/rules.js";
 
 /**
  * One in-process interval drives every periodic job: expiring dispatch cards
@@ -132,13 +134,53 @@ export async function runDueSchedules(now = new Date()): Promise<number> {
   return fired;
 }
 
+/**
+ * Reap egress proxies whose policy no longer has a running agent.
+ *
+ * A stale proxy is harmless — once no agent sits on its internal network,
+ * nothing can reach it — it just holds ~30MB of RSS. So this runs on the slow
+ * tick rather than on agent teardown, where it would add a Docker round trip
+ * to every stop.
+ */
+async function pruneProxies(): Promise<void> {
+  const running = await db
+    .select({ agent: schema.agents, blueprint: schema.agentBlueprints })
+    .from(schema.agents)
+    .innerJoin(schema.agentBlueprints, eq(schema.agents.blueprintId, schema.agentBlueprints.id))
+    .where(eq(schema.agents.status, "running"));
+
+  const keys = new Set<string>();
+  for (const row of running) {
+    // Abandon the whole sweep if any agent's policy cannot be resolved. The
+    // reap set is defined by what is NOT in `keys`, so an incomplete set would
+    // tear down a proxy that something is still using. Skipping the run costs
+    // nothing — a stale proxy is harmless and the next tick retries.
+    const resolved = await resolveAgentEgress(row.agent, row.blueprint).catch(() => null);
+    if (!resolved) return;
+    keys.add(resolved.policyKey);
+  }
+
+  const removed = await pruneEgressProxies([...keys]);
+  if (removed.length) {
+    console.log(`[blackhouse] reaped ${removed.length} unused egress prox(ies)`);
+  }
+}
+
 export function startBackgroundJobs(): void {
   if (timer) return;
+  let tick = 0;
   timer = setInterval(() => {
     void expireStaleDispatches().catch((err) =>
       console.error("[blackhouse] dispatch sweep failed:", err),
     );
     void runDueSchedules().catch((err) => console.error("[blackhouse] schedule run failed:", err));
+
+    // Proxy reaping needs a Docker round trip per policy, so it runs every
+    // tenth tick (~5 min) rather than every 30 seconds.
+    tick += 1;
+    if (tick % 10 === 0) {
+      void pruneProxies().catch((err) => console.error("[blackhouse] proxy reap failed:", err));
+    }
   }, TICK_MS);
   // Do not hold the process open on this timer alone.
   timer.unref?.();
