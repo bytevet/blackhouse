@@ -7,6 +7,8 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { createNodeWebSocket } from "@hono/node-ws";
 import { runMigrations } from "./db/migrate.js";
 import { runSeed } from "./db/seed.js";
+import { startBackgroundJobs } from "./lib/scheduler.js";
+import { detectRuntimes } from "./sandbox/registry.js";
 
 // API route modules
 import authRoutes from "./api/auth.js";
@@ -86,6 +88,20 @@ async function start() {
   console.log("[blackhouse] Running seed...");
   await runSeed();
   console.log("[blackhouse] Seed complete.");
+
+  // Probe once at boot so the UI can show what this host actually supports.
+  // Non-fatal: a Docker daemon that is not reachable yet must not stop the
+  // server from serving the settings page that explains why.
+  const runtimes = await detectRuntimes().catch(() => null);
+  if (runtimes) {
+    console.log(
+      `[blackhouse] container runtimes: ${runtimes.runtimes.join(", ") || "(none reported)"}`,
+    );
+  } else {
+    console.warn("[blackhouse] could not probe container runtimes — is the Docker socket mounted?");
+  }
+
+  startBackgroundJobs();
 
   const port = Number(process.env.PORT || 3000);
 
