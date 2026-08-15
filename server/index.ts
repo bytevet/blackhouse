@@ -11,6 +11,8 @@ import { runSeed } from "./db/seed.js";
 // API route modules
 import authRoutes from "./api/auth.js";
 import agentsRoutes from "./api/agents.js";
+import channelsRoutes from "./api/channels.js";
+import streamRoutes from "./api/stream.js";
 import settingsRoutes from "./api/settings.js";
 import skillsRoutes from "./api/skills.js";
 import { createTerminalRoute } from "./ws/terminal.js";
@@ -52,6 +54,8 @@ app.get("/api/config", (c) =>
 const routes = app
   .route("/api/auth", authRoutes)
   .route("/api/agents", agentsRoutes)
+  .route("/api/channels", channelsRoutes)
+  .route("/api/stream", streamRoutes)
   .route("/api/settings", settingsRoutes)
   .route("/.well-known/agent-skills", skillsRoutes);
 
