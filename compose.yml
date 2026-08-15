@@ -125,9 +125,10 @@ networks:
     name: blackhouse
     driver: bridge
 
-  # The default landing network for agents whose policy is `open`, and the
-  # network the egress proxies use as their route out. Declared here rather
-  # than created by the API so that `docker compose down` reaps it.
+  # The harness's internal leg. Declared here rather than created through the
+  # API so that a fresh install is dual-homed from first boot and `docker
+  # compose down` reaps it. Agents whose policy is `open` stay on the
+  # `blackhouse` bridge above; the proxies use that bridge as their route out.
   #
   # Per-policy internal networks are NOT declared here: their names contain a
   # hash of the allowlist, so they are created on demand by
