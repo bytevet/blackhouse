@@ -49,6 +49,10 @@ const PAGE_SIZE = 50;
  */
 const REFRESH_DEBOUNCE_MS = 150;
 
+/** Ceiling on that coalescing, so a busy agent's steady event stream still
+ *  reaches the screen instead of resetting the timer forever. */
+const MAX_REFRESH_DELAY_MS = 600;
+
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -253,12 +257,30 @@ export function useChannelData(slug: string, currentUser: UserView | null): Chan
    * `hasMore` — those describe how far *back* we have read.
    */
   const refreshTimer = useRef<number | null>(null);
+  const refreshDeadline = useRef(0);
+
   const refreshNewest = useCallback(() => {
-    if (refreshTimer.current !== null) return;
+    const now = Date.now();
+    if (refreshTimer.current === null) {
+      refreshDeadline.current = now + MAX_REFRESH_DELAY_MS;
+    } else if (now + REFRESH_DEBOUNCE_MS > refreshDeadline.current) {
+      // A continuous burst must not starve the refresh forever: past the
+      // deadline, let the already-scheduled fetch fire instead of pushing it.
+      return;
+    } else {
+      window.clearTimeout(refreshTimer.current);
+    }
+
+    // Captured at *schedule* time, not fire time. Without this, a frame that
+    // arrives just before you switch channels lands a page from the channel
+    // you left into the channel you opened.
+    const mine = generation.current;
+    const key = slug;
+
     refreshTimer.current = window.setTimeout(() => {
       refreshTimer.current = null;
-      const mine = generation.current;
-      fetchMessages(slug, { limit: PAGE_SIZE })
+      if (mine !== generation.current) return;
+      fetchMessages(key, { limit: PAGE_SIZE })
         .then((page) => {
           if (mine !== generation.current) return;
           mergeRows(page.messages);
@@ -567,7 +589,8 @@ export function useChannelData(slug: string, currentUser: UserView | null): Chan
     transcriptLoading,
     transcriptError,
     reloadTranscript: useCallback(() => setReloadNonce((n) => n + 1), []),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- resource reloads are stable
+    // `reload` on each resource is a stable `useCallback`, so this identity
+    // only changes when a resource is genuinely replaced.
     reload: useCallback(() => {
       channelsResource.reload();
       agentsResource.reload();

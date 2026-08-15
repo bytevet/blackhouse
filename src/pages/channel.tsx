@@ -130,6 +130,7 @@ export function ChannelPage() {
           <>
             <ChannelHeader
               channel={channel}
+              live={data.live}
               onToggleAutoApprove={(next) => void data.setAutoApprove(next)}
               onOpenSidebar={narrow ? () => setDrawerOpen(true) : undefined}
             />

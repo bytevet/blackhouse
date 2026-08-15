@@ -44,7 +44,13 @@ const EVENT_TYPES = [
 ] as const;
 
 export interface ChannelStream {
-  /** False between a drop and the browser's automatic retry. */
+  /**
+   * False between a drop and the browser's automatic retry.
+   *
+   * Optimistic on open: it starts true and only goes false on a real error, so
+   * the UI does not flash "reconnecting" for the few milliseconds every page
+   * load spends waiting for the first frame.
+   */
   connected: boolean;
 }
 
@@ -52,7 +58,7 @@ export function useChannelStream(
   topics: string[],
   onEvent: (event: ChannelStreamEvent) => void,
 ): ChannelStream {
-  const [connected, setConnected] = useState(false);
+  const [connected, setConnected] = useState(true);
 
   // The handler changes on nearly every render (it closes over state). Holding
   // it in a ref keeps it out of the effect's dependencies, so a re-render never
@@ -68,6 +74,7 @@ export function useChannelStream(
     if (!key) return;
 
     const source = new EventSource(`/api/stream?topics=${encodeURIComponent(key)}`);
+    setConnected(true);
 
     const listeners = EVENT_TYPES.map((type) => {
       const listener = (event: MessageEvent<string>) => {
@@ -93,7 +100,6 @@ export function useChannelStream(
       }
       source.removeEventListener("ready", onReady);
       source.close();
-      setConnected(false);
     };
   }, [key]);
 

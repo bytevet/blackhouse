@@ -5,7 +5,8 @@
  * `Pick<>`ed from the inferred row type wherever the shape allows it, so a
  * column rename breaks this file rather than silently rendering `undefined`.
  * The components are pure and presentational: they take these shapes and
- * nothing else, so replacing `mock-data.ts` with a fetch is a one-file change.
+ * nothing else. Server rows are projected onto them by `channel-mapping.ts`,
+ * which is where every `messages.kind` → entry-kind decision lives.
  */
 
 import type {

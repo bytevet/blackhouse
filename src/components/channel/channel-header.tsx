@@ -14,12 +14,17 @@ import type { ChannelView } from "./types";
  */
 export function ChannelHeader({
   channel,
+  live = true,
   onToggleAutoApprove,
   onEditChannel,
   onLeaveChannel,
   onOpenSidebar,
 }: {
   channel: ChannelView;
+  /** State of the multiplexed SSE connection. A transcript that has silently
+   *  stopped updating looks exactly like a quiet channel, so the header says
+   *  when it is no longer live. */
+  live?: boolean;
   onToggleAutoApprove: (next: boolean) => void;
   onEditChannel?: () => void;
   onLeaveChannel?: () => void;
@@ -109,6 +114,38 @@ export function ChannelHeader({
           )}
         </div>
       </div>
+
+      {!live && (
+        <span
+          role="status"
+          title="Live updates are interrupted — reconnecting"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            flex: "none",
+            padding: "5px 10px",
+            borderRadius: 8,
+            border: "1px solid var(--ny-warning-border)",
+            background: "var(--ny-warning-subtle)",
+            fontFamily: "var(--ny-font-mono)",
+            fontSize: 11,
+            color: "var(--ny-warning-text)",
+          }}
+        >
+          <span
+            aria-hidden
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              background: "var(--ny-warning)",
+              animation: "bhPulse 1.6s ease-in-out infinite",
+            }}
+          />
+          reconnecting
+        </span>
+      )}
 
       {channel.autoApproveDispatch && (
         <span

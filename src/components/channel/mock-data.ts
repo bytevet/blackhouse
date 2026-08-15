@@ -1,14 +1,16 @@
 /* ------------------------------------------------------------------------- *
  *                                                                             *
- *   ███  MOCK DATA — THE ONLY NON-PRESENTATIONAL FILE IN THIS DIRECTORY  ███  *
+ *   ███  FIXTURE DATA — NOT WIRED INTO THE RUNNING APP  ███                   *
  *                                                                             *
- *   The channels/messages API does not exist yet (Phase 3, server side).      *
- *   Everything below is hand-written and shaped like the real rows in         *
- *   `src/db/schema.ts`, so swapping it for `client.api.channels...` is a      *
- *   one-file change: every component in this directory takes its data as      *
- *   props and calls nothing.                                                  *
+ *   The Channel View reads the real API now: `use-channel-data.ts` fetches,    *
+ *   `channel-mapping.ts` projects, and `channel.tsx` lays out. Nothing in      *
+ *   `src/` imports this file any more.                                        *
  *                                                                             *
- *   DELETE THIS FILE when `GET /api/channels/:slug/messages` lands.           *
+ *   It is kept because it is a hand-checked, fully populated example of every  *
+ *   transcript kind — the five entry shapes, an expanded turn, an artifact     *
+ *   card, a pending dispatch and a queued chip — which makes it the cheapest   *
+ *   fixture for tests and stories that need a believable channel without a     *
+ *   server. Keep it in step with `types.ts`; do not import it from a page.     *
  *                                                                             *
  * ------------------------------------------------------------------------- */
 
