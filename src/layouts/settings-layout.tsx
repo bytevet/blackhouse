@@ -8,7 +8,8 @@ import { LanguageSwitcher } from "@/components/language-switcher";
 
 interface NavEntry {
   to: string;
-  labelKey: string;
+  /** Literal, not `string`, so `t()` keeps checking these against `en.json`. */
+  labelKey: `settings.nav.${"blueprints" | "runtimes" | "egress" | "members" | "profile"}`;
   icon: ReactNode;
 }
 

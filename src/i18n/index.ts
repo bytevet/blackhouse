@@ -1,4 +1,4 @@
-import i18n, { type TFunction } from "i18next";
+import i18n, { type ParseKeys } from "i18next";
 import { initReactI18next } from "react-i18next";
 import LanguageDetector from "i18next-browser-languagedetector";
 
@@ -48,7 +48,13 @@ i18n.on("languageChanged", syncHtmlLang);
  * `lib/` and must not depend on the locale files. Those call sites assert
  * through this type rather than through `any`, so a typo still fails at
  * runtime in the obvious way but the rest of the call keeps its checking.
+ *
+ * Narrowed to the string members with `Extract`: `ParseKeys` also admits
+ * `string[]` and `TemplateStringsArray` for i18next's fallback-key and
+ * tagged-template forms, and a union containing those does not match the
+ * single-key `t()` overload — so the unnarrowed type fails at every call site
+ * it was introduced to fix.
  */
-export type TranslationKey = Parameters<TFunction>[0];
+export type TranslationKey = Extract<ParseKeys, string>;
 
 export default i18n;

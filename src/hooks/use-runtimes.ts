@@ -21,8 +21,9 @@ export interface RuntimeDescriptor {
   /** The daemon's own name for it, when detected. */
   detectedAs: string | null;
   isDefault: boolean;
-  /** i18n key for the one-line explanation of what this buys or costs. */
-  noteKey: string;
+  /** i18n key for the one-line explanation of what this buys or costs.
+   *  Literal, not `string`, so `t()` keeps checking it against `en.json`. */
+  noteKey: `runtimes.notes.${RuntimeId}`;
 }
 
 /**
@@ -51,7 +52,7 @@ function matchRuntime(id: RuntimeId, names: string[]): string | null {
   );
 }
 
-const TIERS: { id: RuntimeId; name: string; noteKey: string }[] = [
+const TIERS: Pick<RuntimeDescriptor, "id" | "name" | "noteKey">[] = [
   { id: "runc", name: "runc", noteKey: "runtimes.notes.runc" },
   { id: "runsc", name: "gVisor", noteKey: "runtimes.notes.runsc" },
   { id: "kata", name: "Kata Containers", noteKey: "runtimes.notes.kata" },

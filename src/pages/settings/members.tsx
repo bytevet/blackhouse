@@ -8,6 +8,7 @@ import { useSession } from "@/lib/auth-client";
 import { SettingsHeader } from "@/layouts/settings-layout";
 import { agentStatusConfig, toneVar } from "@/lib/agent-status";
 import type { AgentStatus } from "@/db/schema";
+import type { TranslationKey } from "@/i18n";
 
 interface UserRow {
   id: string;
@@ -285,7 +286,7 @@ export function MembersPage() {
                         background: toneVar(statusEntry.tone),
                       }}
                     />
-                    {agent.displayName} · {t(statusEntry.labelKey)}
+                    {agent.displayName} · {t(statusEntry.labelKey as TranslationKey)}
                   </Text>
                 </div>
                 <Badge tone="accent" variant="outline" size="sm">

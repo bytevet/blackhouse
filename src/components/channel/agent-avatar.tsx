@@ -59,7 +59,7 @@ export function AgentAvatar({
           width: size,
           height: size,
           borderRadius: Math.max(6, Math.round(size * 0.26)),
-          background: emphasis ? "var(--ny-surface-raised)" : "var(--ny-surface-raised)",
+          background: "var(--ny-surface-raised)",
           border: `1px solid ${emphasis ? "var(--ny-accent-border)" : "var(--ny-border-strong)"}`,
           color: emphasis ? "var(--ny-accent-text)" : "var(--ny-text)",
           fontFamily: "var(--ny-font-mono)",

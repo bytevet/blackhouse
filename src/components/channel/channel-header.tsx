@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Bell, Ellipsis, LogOut, Menu, SquarePen, TriangleAlert, Zap } from "lucide-react";
-import { Button, Dialog, Popover, Switch } from "@notyet.im/ui";
+import { Button, Dialog, Popover, Switch, VisuallyHidden } from "@notyet.im/ui";
 import type { ChannelView } from "./types";
 
 /**
@@ -327,7 +327,9 @@ function ChannelMenu({
               size="sm"
               checked={on}
               onChange={onToggleAutoApprove}
-              label="Auto-approve dispatches"
+              // The visible title is to the left; this is the switch's own
+              // accessible name, which it renders inside the control.
+              label={<VisuallyHidden>Auto-approve dispatches</VisuallyHidden>}
             />
           </div>
         </div>

@@ -15,6 +15,7 @@ import {
   type StatusTone,
 } from "@/lib/agent-status";
 import type { AgentActivity, AgentStatus } from "@/db/schema";
+import type { TranslationKey } from "@/i18n";
 
 /** Wire shape of `GET /api/agents` — the agent row minus its bearer token. */
 interface AgentRow {
@@ -257,7 +258,7 @@ export function AgentsPage() {
                               handle — they fail independently, so they are drawn
                               as two signals rather than one. */}
                           <span
-                            title={t(statusEntry.labelKey)}
+                            title={t(statusEntry.labelKey as TranslationKey)}
                             style={{
                               position: "absolute",
                               right: -2,
@@ -299,7 +300,7 @@ export function AgentsPage() {
                                   }}
                                 />
                               )}
-                              {t(activityEntry.labelKey)}
+                              {t(activityEntry.labelKey as TranslationKey)}
                             </span>
                           </div>
                           <Text size="xs" tone="subtle" truncate>
