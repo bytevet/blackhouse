@@ -239,6 +239,47 @@ const routes = app
     return c.json({ channels: rows, peers: peers.filter((p) => p.handle !== agent.handle) });
   })
 
+  /**
+   * Read a channel's recent history as this agent.
+   *
+   * Agents need this to catch up on a room before acting, and the failure mode
+   * if it is missing is genuinely dangerous: an agent that cannot distinguish
+   * "no history returned" from "the channel is empty" will treat silence as
+   * consensus and proceed. `read.sh` exits non-zero and says so explicitly
+   * rather than printing nothing.
+   *
+   * Returns oldest-first, which is the order an agent wants to read.
+   */
+  .get("/channels/:key/messages", async (c) => {
+    const agent = await callerAgent(c);
+    if (agent instanceof Response) return agent;
+
+    const channel = await resolveChannel(c.req.param("key")!);
+    if (!channel) return c.json({ error: "Channel not found" }, 404);
+
+    const limit = Math.min(Number(c.req.query("limit") ?? 50) || 50, 200);
+
+    const rows = await db
+      .select({
+        id: schema.messages.id,
+        kind: schema.messages.kind,
+        authorKind: schema.messages.authorKind,
+        authorAgentId: schema.messages.authorAgentId,
+        authorUserId: schema.messages.authorUserId,
+        body: schema.messages.body,
+        createdAt: schema.messages.createdAt,
+      })
+      .from(schema.messages)
+      .where(eq(schema.messages.channelId, channel.id))
+      .orderBy(sql`${schema.messages.createdAt} DESC`)
+      .limit(limit);
+
+    return c.json({
+      channel: { id: channel.id, slug: channel.slug },
+      messages: rows.reverse(),
+    });
+  })
+
   /** Post a message to a channel as this agent. */
   .post("/messages", async (c) => {
     const agent = await callerAgent(c);

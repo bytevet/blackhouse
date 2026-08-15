@@ -5,6 +5,7 @@ import * as schema from "../db/schema.js";
 import { getDriver, selectDriver } from "../sandbox/registry.js";
 import type { SandboxHandle, SandboxSpec } from "../sandbox/types.js";
 import { invalidateContainerEndpointCache } from "../lib/docker.js";
+import { prepareAgentEgress, type EgressAttachment } from "../egress/attach.js";
 
 type AgentRow = typeof schema.agents.$inferSelect;
 type BlueprintRow = typeof schema.agentBlueprints.$inferSelect;
@@ -45,7 +46,17 @@ export function stateVolumeName(agentId: string): string {
 export function buildAgentSpec(
   agent: AgentRow,
   blueprint: BlueprintRow,
-  opts: { blackhouseUrl: string; networkName?: string } = { blackhouseUrl: "" },
+  opts: {
+    blackhouseUrl: string;
+    networkName?: string;
+    /**
+     * Egress placement from `server/egress/attach.ts`. When enforcement is on
+     * this replaces the network with a policy-scoped `internal: true` one and
+     * supplies the proxy environment; when it is off it only confirms the
+     * host-gateway decision below.
+     */
+    egress?: EgressAttachment;
+  } = { blackhouseUrl: "" },
 ): SandboxSpec {
   const stateMountPath = blueprint.stateMountPath || DEFAULT_STATE_MOUNT_PATH;
 
@@ -66,6 +77,11 @@ export function buildAgentSpec(
   for (const entry of blueprint.envVars ?? []) {
     env.push(`${entry.key}=${entry.value}`);
   }
+
+  // Proxy variables last, so a blueprint cannot override its own agent's
+  // egress by setting `HTTPS_PROXY` in `envVars`. Docker takes the last
+  // occurrence of a repeated key.
+  env.push(...(opts.egress?.env ?? []));
 
   const mounts: NonNullable<SandboxSpec["mounts"]> = [
     { source: agent.workspaceVolume, target: "/workspace" },
@@ -93,10 +109,13 @@ export function buildAgentSpec(
       pidsLimit: blueprint.pidsLimit ?? undefined,
     },
     network: {
-      name: opts.networkName,
+      // Under enforcement this is the policy-scoped `internal: true` network,
+      // which has no gateway — the agent's only way out is the proxy named in
+      // the env above. Otherwise it is the ordinary bridge.
+      name: opts.egress?.networkName ?? opts.networkName,
       // A host-gateway alias is a direct route to the host and would defeat
       // egress control entirely, so it is only granted under `open`.
-      hostGateway: egressPolicy === "open",
+      hostGateway: opts.egress?.hostGateway ?? egressPolicy === "open",
     },
     tty: true,
     openStdin: true,
@@ -139,10 +158,16 @@ export async function startAgent(agentId: string): Promise<AgentRow> {
     );
   }
 
-  const spec = buildAgentSpec(agent, blueprint, {
-    blackhouseUrl: process.env.BLACKHOUSE_CONTAINER_URL || "http://host.docker.internal:3000",
-    networkName: process.env.BLACKHOUSE_NETWORK,
-  });
+  const blackhouseUrl = process.env.BLACKHOUSE_CONTAINER_URL || "http://host.docker.internal:3000";
+  const networkName = process.env.BLACKHOUSE_NETWORK;
+
+  // Resolve the egress policy and stand up its network/proxy before the
+  // container exists. This throws rather than degrading if enforcement was
+  // requested but could not be established — an agent that believes it is
+  // sandboxed when it is not is worse than an agent that failed to start.
+  const egress = await prepareAgentEgress(agent, blueprint, { blackhouseUrl, networkName });
+
+  const spec = buildAgentSpec(agent, blueprint, { blackhouseUrl, networkName, egress });
 
   const handle = await driver.create(spec);
   await driver.start(handle);

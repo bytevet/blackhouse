@@ -1,10 +1,14 @@
 /**
  * Batching, retrying event poster.
  *
- * POST $BLACKHOUSE_URL/api/agents/$AGENT_ID/events
+ * POST $BLACKHOUSE_URL/api/agent-runtime/events
  *   Authorization: Bearer $AGENT_TOKEN
  *   X-Blackhouse-Agent: $AGENT_ID
  *   { "events": [ ...<=200 events, <=1MB... ] }
+ *
+ * Both headers are required. The bearer token alone is not enough — the
+ * server resolves the calling agent from `X-Blackhouse-Agent` and 400s
+ * without it.
  *
  * Every failure mode here is non-fatal by design. The endpoint may not exist
  * yet, the server may be restarting, the network may be gone — none of that
@@ -104,12 +108,9 @@ export function createPoster(options = {}) {
       while (queue.length) {
         const batch = takeBatch();
         if (!batch.length) break;
-        const body = {
-          agentId: cfg.agentId,
-          adapter: cfg.adapter,
-          droppedEvents: dropped,
-          events: batch.map((item) => item.event),
-        };
+        // `ingestSchema` is a strict object: extra top-level keys are
+        // stripped, so identity travels in the headers, not the body.
+        const body = { events: batch.map((item) => item.event) };
         const ok = await post(body);
         if (!ok) {
           // Put the batch back at the head, preserving order, and back off.

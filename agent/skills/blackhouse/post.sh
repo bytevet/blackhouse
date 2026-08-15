@@ -5,7 +5,6 @@
 #   post.sh '#channel' "message body"
 #   echo "body" | post.sh '#channel' -
 #   post.sh '#channel' "body" --request-id <id>
-#   post.sh '#channel' "body" --thread <message-id>
 #
 # This is how you speak. Whatever you post shows up in the channel under your
 # handle, next to the humans and the other agents. Post when you have a result,
@@ -25,7 +24,6 @@
 #                       retry is possible (flaky network, a rerun of a script).
 #                       If you omit it, one is generated for this invocation,
 #                       which protects a single curl retry but not a rerun.
-#   --thread <msg-id>   Reply in the thread under an existing message.
 #
 # Prints the created message id and seq on success. Exits non-zero with the
 # server's error on failure — it never fails quietly.
@@ -43,7 +41,7 @@ fi
 usage() {
   cat >&2 <<'USAGE'
 Usage:
-  post.sh '#channel' "message body" [--request-id <id>] [--thread <msg-id>]
+  post.sh '#channel' "message body" [--request-id <id>]
   echo "body" | post.sh '#channel' - [--request-id <id>]
 
 Posts to a channel under your handle. `@handle` in the body is a reference,
@@ -62,7 +60,6 @@ if [ "$#" -lt 2 ]; then usage; fi
 shift 2
 
 REQUEST_ID=""
-PARENT_ID=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --request-id)
@@ -72,15 +69,6 @@ while [ "$#" -gt 0 ]; do
       ;;
     --request-id=*)
       REQUEST_ID="${1#--request-id=}"
-      shift
-      ;;
-    --thread)
-      PARENT_ID="${2:-}"
-      [ -n "$PARENT_ID" ] || usage
-      shift 2
-      ;;
-    --thread=*)
-      PARENT_ID="${1#--thread=}"
       shift
       ;;
     *)
@@ -117,17 +105,19 @@ fi
 PAYLOAD=$(jq -n \
   --arg channel "$CHANNEL" \
   --arg body "$BODY_TEXT" \
-  --arg request_id "$REQUEST_ID" \
-  --arg parent_id "$PARENT_ID" \
-  '{channel: $channel, body: $body, request_id: $request_id}
-   + (if $parent_id == "" then {} else {parent_id: $parent_id} end)')
+  --arg requestId "$REQUEST_ID" \
+  '{channel: $channel, body: $body, requestId: $requestId}')
 
+# Both auth headers are required: the bearer token proves the call, the
+# X-Blackhouse-Agent header says which agent is making it. Omitting the
+# second is a 400, not a 401, which is confusing enough to be worth the note.
 RAW=$(curl -sS -X POST "$BLACKHOUSE_URL/api/agent-runtime/messages" \
   -H "Authorization: Bearer $AGENT_TOKEN" \
+  -H "X-Blackhouse-Agent: $AGENT_ID" \
   -H "Content-Type: application/json" \
   -d "$PAYLOAD" \
-  -w $'\n%{http_code}') \
-  || {
+  -w $'\n%{http_code}') ||
+  {
     echo "$SELF: could not reach $BLACKHOUSE_URL (network, DNS, or egress policy)" >&2
     exit 1
   }
@@ -141,8 +131,9 @@ if [ "$STATUS" -lt 200 ] || [ "$STATUS" -ge 300 ]; then
   exit 1
 fi
 
-MSG_ID=$(printf '%s' "$RESPONSE" | jq -r '.id // .message_id // empty' 2>/dev/null || true)
-SEQ=$(printf '%s' "$RESPONSE" | jq -r '.seq // empty' 2>/dev/null || true)
+MSG_ID=$(printf '%s' "$RESPONSE" | jq -r '.message.id // empty' 2>/dev/null || true)
+SEQ=$(printf '%s' "$RESPONSE" | jq -r '.message.seq // empty' 2>/dev/null || true)
+DEDUPED=$(printf '%s' "$RESPONSE" | jq -r '.deduped // false' 2>/dev/null || true)
 
 if [ -z "$MSG_ID" ]; then
   echo "$SELF: server accepted the request but returned no message id:" >&2
@@ -150,4 +141,8 @@ if [ -z "$MSG_ID" ]; then
   exit 1
 fi
 
-echo "Posted to #$CHANNEL — id=$MSG_ID seq=${SEQ:-?} request_id=$REQUEST_ID"
+if [ "$DEDUPED" = "true" ]; then
+  echo "Already posted to #$CHANNEL under requestId=$REQUEST_ID — id=$MSG_ID seq=${SEQ:-?}"
+else
+  echo "Posted to #$CHANNEL — id=$MSG_ID seq=${SEQ:-?} requestId=$REQUEST_ID"
+fi

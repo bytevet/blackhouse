@@ -10,12 +10,15 @@
 # only post to channels you are in — you cannot add yourself to one; a human
 # does that.
 #
-# Channel columns:  #slug  members  unread  topic (repo @ branch, if bound)
-# Peer columns:     @handle  activity  status line
+# Channel columns:  #slug  name  auto-approve?  topic
+# Peer columns:     @handle  activity  status  status line
 #
 # `activity` is idle / busy / unknown. A busy peer is mid-task; a request you
 # file against it will queue until it goes idle. `unknown` means the harness
 # has not heard from it recently — do not read that as available.
+#
+# `auto` on a channel means dispatch requests filed there skip human approval.
+# You cannot turn that on, and you must not assume it — see mention.sh.
 set -euo pipefail
 
 SELF="list-channels.sh"
@@ -52,9 +55,10 @@ done
 
 RAW=$(curl -sS \
   -H "Authorization: Bearer $AGENT_TOKEN" \
+  -H "X-Blackhouse-Agent: $AGENT_ID" \
   "$BLACKHOUSE_URL/api/agent-runtime/channels" \
-  -w $'\n%{http_code}') \
-  || {
+  -w $'\n%{http_code}') ||
+  {
     echo "$SELF: could not reach $BLACKHOUSE_URL (network, DNS, or egress policy)" >&2
     exit 1
   }
@@ -89,10 +93,7 @@ echo "Channels ($COUNT):"
 # Tab-joined so a human, grep, and awk all cope.
 printf '%s' "$RESPONSE" | jq -r '
   .channels[] |
-  "  #\(.slug)\t\(.member_count // .memberCount // "?") members\t\(.unread // 0) unread\t\(.topic // "")\(
-    if (.git_repo_url // .gitRepoUrl // "") == "" then ""
-    else "  [" + (.git_repo_url // .gitRepoUrl) + " @ " + (.git_branch // .gitBranch // "main") + "]"
-    end)"
+  "  #\(.slug)\t\(.name // "")\t\(if .autoApproveDispatch then "auto-approve" else "human-gated" end)\t\(.topic // "")"
 '
 
 PEERS=$(printf '%s' "$RESPONSE" | jq -r '(.peers // []) | length' 2>/dev/null || echo "0")
@@ -101,7 +102,7 @@ if [ "${PEERS:-0}" != "0" ]; then
   echo "Peers ($PEERS):"
   printf '%s' "$RESPONSE" | jq -r '
     .peers[] |
-    "  @\(.handle)\t\(.activity // "unknown")\t\(.status_line // .statusLine // "")"
+    "  @\(.handle)\t\(.activity // "unknown")\t\(.status // "")\t\(.statusLine // "")"
   '
   echo
   echo "Reminder: mention.sh files a request a human must approve. It does not dispatch."

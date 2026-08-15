@@ -2,10 +2,8 @@
 # Ask a human to dispatch another agent. THIS DOES NOT DISPATCH ANYTHING.
 #
 # Usage:
-#   mention.sh '@handle' "what you want them to do"
-#   mention.sh '@handle' "prompt" --channel '#channel'
-#   echo "prompt" | mention.sh '@handle' -
-#   mention.sh '@handle' "prompt" --request-id <id>
+#   mention.sh '@handle' "what you want them to do" --channel '#channel'
+#   echo "prompt" | mention.sh '@handle' - --channel '#channel'
 #
 # READ THIS BEFORE YOU USE IT
 #
@@ -34,14 +32,17 @@
 #   budget and gets you paused.
 #
 # Options:
-#   --channel '#chan'   Which channel the card lands in. Defaults to the
-#                       channel of the run you are currently handling; required
-#                       if the server cannot infer one.
-#   --request-id <id>   Idempotency key, so a retry does not file the same
-#                       request twice. Generated if omitted.
+#   --channel '#chan'   Which channel the card lands in. REQUIRED — the server
+#                       does not infer it. If you don't know, run
+#                       list-channels.sh; you can only file into a channel you
+#                       are a member of.
 #
-# Prints the dispatch request id and its status (normally `pending`). Check the
-# channel with read.sh later if you need to know how it was decided.
+# There is a cap on how many dispatch requests can sit pending in one channel
+# at a time. Past it the server refuses with an explanation rather than
+# queueing — that cap is the only backstop against an @a → @b → @a loop when a
+# channel has auto-approve on.
+#
+# Prints the dispatch request id and its status (normally `pending`).
 set -euo pipefail
 
 SELF="mention.sh"
@@ -56,8 +57,8 @@ fi
 usage() {
   cat >&2 <<'USAGE'
 Usage:
-  mention.sh '@handle' "what you want them to do" [--channel '#chan'] [--request-id <id>]
-  echo "prompt" | mention.sh '@handle' -
+  mention.sh '@handle' "what you want them to do" --channel '#chan'
+  echo "prompt" | mention.sh '@handle' - --channel '#chan'
 
 This does NOT dispatch. It files a request as a pending card in the channel;
 a human approves, edits, denies, or lets it expire. Assume the peer has not
@@ -76,7 +77,6 @@ if [ "$#" -lt 2 ]; then usage; fi
 shift 2
 
 CHANNEL=""
-REQUEST_ID=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --channel)
@@ -86,15 +86,6 @@ while [ "$#" -gt 0 ]; do
       ;;
     --channel=*)
       CHANNEL="${1#--channel=}"
-      shift
-      ;;
-    --request-id)
-      REQUEST_ID="${2:-}"
-      [ -n "$REQUEST_ID" ] || usage
-      shift 2
-      ;;
-    --request-id=*)
-      REQUEST_ID="${1#--request-id=}"
       shift
       ;;
     *)
@@ -121,24 +112,24 @@ if [ -z "$PROMPT" ]; then
   exit 1
 fi
 
-if [ -z "$REQUEST_ID" ]; then
-  REQUEST_ID=$(openssl rand -hex 16)
+if [ -z "$CHANNEL" ]; then
+  echo "$SELF: --channel is required. Run list-channels.sh to see yours." >&2
+  exit 1
 fi
 
 PAYLOAD=$(jq -n \
-  --arg to "$HANDLE" \
+  --arg handle "$HANDLE" \
   --arg prompt "$PROMPT" \
   --arg channel "$CHANNEL" \
-  --arg request_id "$REQUEST_ID" \
-  '{to_handle: $to, prompt: $prompt, request_id: $request_id}
-   + (if $channel == "" then {} else {channel: $channel} end)')
+  '{channel: $channel, handle: $handle, prompt: $prompt}')
 
-RAW=$(curl -sS -X POST "$BLACKHOUSE_URL/api/agent-runtime/dispatches" \
+RAW=$(curl -sS -X POST "$BLACKHOUSE_URL/api/agent-runtime/mention" \
   -H "Authorization: Bearer $AGENT_TOKEN" \
+  -H "X-Blackhouse-Agent: $AGENT_ID" \
   -H "Content-Type: application/json" \
   -d "$PAYLOAD" \
-  -w $'\n%{http_code}') \
-  || {
+  -w $'\n%{http_code}') ||
+  {
     echo "$SELF: could not reach $BLACKHOUSE_URL (network, DNS, or egress policy)" >&2
     exit 1
   }
@@ -147,28 +138,33 @@ STATUS="${RAW##*$'\n'}"
 RESPONSE="${RAW%$'\n'*}"
 
 if [ "$STATUS" -lt 200 ] || [ "$STATUS" -ge 300 ]; then
-  echo "$SELF: POST /api/agent-runtime/dispatches failed with HTTP $STATUS" >&2
+  echo "$SELF: POST /api/agent-runtime/mention failed with HTTP $STATUS" >&2
   printf '%s\n' "$RESPONSE" >&2
   echo "$SELF: nothing was requested. @$HANDLE has not been contacted." >&2
   exit 1
 fi
 
-DISPATCH_ID=$(printf '%s' "$RESPONSE" | jq -r '.id // .dispatch_id // empty' 2>/dev/null || true)
+DISPATCH_ID=$(printf '%s' "$RESPONSE" | jq -r '.dispatchId // empty' 2>/dev/null || true)
 DISPATCH_STATUS=$(printf '%s' "$RESPONSE" | jq -r '.status // empty' 2>/dev/null || true)
+AUTO=$(printf '%s' "$RESPONSE" | jq -r '.autoApproved // false' 2>/dev/null || true)
+NOTE=$(printf '%s' "$RESPONSE" | jq -r '.message // empty' 2>/dev/null || true)
 
+# An empty dispatchId with a 2xx is the "too many pending in this channel"
+# refusal — a real outcome, not a malformed response. Surface it as failure so
+# a caller that checks the exit code does not think it filed something.
 if [ -z "$DISPATCH_ID" ]; then
-  echo "$SELF: server accepted the request but returned no dispatch id:" >&2
-  printf '%s\n' "$RESPONSE" >&2
+  echo "$SELF: the request was NOT filed." >&2
+  printf '%s\n' "${NOTE:-$RESPONSE}" >&2
   exit 1
 fi
 
 echo "Filed a dispatch request for @$HANDLE — id=$DISPATCH_ID status=${DISPATCH_STATUS:-pending}"
-case "$DISPATCH_STATUS" in
-  approved | auto_approved)
-    echo "Auto-approved by channel policy — @$HANDLE is being dispatched."
-    ;;
-  *)
-    echo "NOT dispatched. A human must approve the card in the channel."
-    echo "Assume @$HANDLE knows nothing about this. Keep working on your own part."
-    ;;
-esac
+if [ -n "$NOTE" ]; then echo "$NOTE"; fi
+if [ "$AUTO" = "true" ]; then
+  echo "Auto-approved by #$CHANNEL policy — @$HANDLE is being dispatched."
+  echo "It may still be busy; delivery happens when it next goes idle."
+else
+  echo "NOT dispatched. A human must approve the card in #$CHANNEL."
+  echo "Assume @$HANDLE knows nothing about this. Keep working on your own part."
+fi
+exit 0

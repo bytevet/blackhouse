@@ -9,14 +9,16 @@ const INDEX = {
     {
       name: "blackhouse",
       description:
-        "Blackhouse session tools — submit visual results, update session status, and exchange messages with sibling sessions",
+        "Blackhouse agent tools — post to channels, publish artifacts, set your status line, drive the embedded browser, and request a dispatch to another agent",
       files: [
         "SKILL.md",
+        "post.sh",
+        "mention.sh",
+        "read.sh",
+        "list-channels.sh",
         "submit-result.sh",
         "update-title.sh",
-        "send-msg.sh",
-        "check-inbox.sh",
-        "list-sessions.sh",
+        "browser.sh",
       ],
     },
   ],

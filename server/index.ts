@@ -17,8 +17,10 @@ import channelsRoutes from "./api/channels.js";
 import streamRoutes from "./api/stream.js";
 import agentRuntimeRoutes from "./api/agent-runtime.js";
 import dispatchRoutes from "./api/dispatches.js";
+import egressRoutes from "./api/egress.js";
 import settingsRoutes from "./api/settings.js";
 import skillsRoutes from "./api/skills.js";
+import sidecarDistRoutes from "./api/sidecar-dist.js";
 import { createTerminalRoute } from "./ws/terminal.js";
 import { createBrowserWsRoute } from "./ws/browser.js";
 import { createIdeProxy } from "./proxy/ide.js";
@@ -62,8 +64,10 @@ const routes = app
   .route("/api/stream", streamRoutes)
   .route("/api/agent-runtime", agentRuntimeRoutes)
   .route("/api/dispatches", dispatchRoutes)
+  .route("/api/egress", egressRoutes)
   .route("/api/settings", settingsRoutes)
-  .route("/.well-known/agent-skills", skillsRoutes);
+  .route("/.well-known/agent-skills", skillsRoutes)
+  .route("/.well-known/blackhouse", sidecarDistRoutes);
 
 // WebSocket terminal
 app.route("/api/terminal", createTerminalRoute(upgradeWebSocket));
