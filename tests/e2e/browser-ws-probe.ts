@@ -1,13 +1,11 @@
 /**
- * Browser-pane WS probe (#61).
+ * Browser-pane WS probe.
  *
- * Replaces the legacy REST + SSE probes (`POST /browser/control`,
- * `POST /browser/eval`, `GET /browser/state`, `EventSource(/browser/console)`)
- * with the single binary-opcode protocol the FE now speaks against
- * `/api/browser-ws/:sessionId`. Reuses the FE's TS codec
- * (`src/lib/browser-input-codec.ts`) — be is the wire-format authority and
- * the FE codec mirrors it; the unit-test layer already pins both ends to the
- * same byte vectors.
+ * Speaks the binary-opcode protocol the browser viewer uses against
+ * `/api/browser-ws/:agentId`, reusing the FE's own codec
+ * (`src/lib/browser-input-codec.ts`) — the server is the wire-format
+ * authority and the FE codec mirrors it, with the unit layer pinning both
+ * ends to the same byte vectors.
  *
  * Surface:
  *   - `request(opcode, body)` — request/response for 0x11 eval / 0x12 state,
@@ -17,32 +15,26 @@
  *     which the FE's BrowserViewer observes on its own WS.
  *   - `close()` — reject pending requests + close the socket.
  *
- * Projection: as of 87578f8 the 0x84 stateSnapshot carries every field this
- * suite reads — url/title/loading + selectionText + scrollX/Y + viewport +
- * docSize + lastContextMenu — behind opt-in include-bits. Zero REST/SSE
- * dependencies on the browser pane after this lands.
+ * NOTHING IN THE SUITE CALLS THIS YET. The browser pane needs a running
+ * agent container with the browser service inside it, which means a
+ * multi-GB image and provider credentials; those specs are on hold until
+ * the `mock` blueprint from `tests/fixtures/` can stand one up. The file is
+ * kept because the wire format is the expensive part to re-derive.
  *
  * AGENT-IMAGE STALENESS HAZARD (read before debugging a black canvas):
- * `agent/browser-service/service.mjs` ships INSIDE the per-preset Docker
- * image, baked at build time. Pulling new code (#61 wire format, 87578f8
- * state-flag bits, etc.) does NOT update existing containers — only a
- * `POST /api/settings/agent-configs/:id/build` rebuild does. Symptoms of
- * a stale agent image:
+ * `agent/browser-service/service.mjs` ships INSIDE the per-blueprint Docker
+ * image, baked at build time. Pulling new code does NOT update existing
+ * containers — only a `POST /api/settings/blueprints/:id/build` rebuild
+ * does. Symptoms of a stale agent image:
  *   - SPA console logs `[browser-viewer] unknown WS opcode 0x1` and the
- *     canvas stays black (in-container encoder emits the pre-#61 bare
- *     `[type, pts, nalu]` video frame, no 0x81 prefix).
+ *     canvas stays black (in-container encoder emits the older bare
+ *     `[type, pts, nalu]` video frame, with no 0x81 prefix).
  *   - `selectionText` / `scrollY` / `lastContextMenu` come back undefined
- *     even when the page clearly has selection / scroll / contextmenu
- *     state (pre-87578f8 image masks the new include-bits to 0).
- *   - `waitForFirstFrame` in `session.spec.ts` times out at 60s.
- * Repro path for sanity-checking: hire a session, observe the failure;
- * Settings → Docker → Rebuild on the preset; hire a NEW session (existing
- * containers stay frozen at the pre-rebuild image); failures clear.
- *
- * Every helper in `tests/e2e/helpers.ts` (`createSession`, `createSession-
- * WithPreset`) hires a fresh worker per call — none reuse pre-existing
- * containers. Don't shortcut by attaching to an existing sessionId unless
- * you've verified the container was spawned post-rebuild.
+ *     even when the page clearly has that state (an older image masks the
+ *     include-bits to 0).
+ * Repro path: start an agent, observe the failure; rebuild the blueprint
+ * image from Settings → Blueprints; create a NEW agent — existing
+ * containers stay frozen at the pre-rebuild image.
  */
 
 import { WebSocket as NodeWebSocket } from "ws";
@@ -88,12 +80,12 @@ export interface BrowserWsProbe {
 const DEFAULT_TIMEOUT_MS = 10_000;
 
 /**
- * Open a WS to `/api/browser-ws/:sessionId`, authenticated via the
+ * Open a WS to `/api/browser-ws/:agentId`, authenticated via the
  * `better-auth.session_token` cookie carried by Playwright's context. Mirrors
- * the FE's connection logic in `src/components/browser-viewer.tsx`: token is
- * pulled from the cookie jar and passed as a `?token=...` query param (the
- * server's `validateSessionForContainer` only inspects that param — cookies
- * on the WS upgrade are ignored).
+ * the FE's connection logic in `src/components/browser-viewer.tsx`: the token
+ * is pulled from the cookie jar and passed as a `?token=...` query param (the
+ * server's `validateAgentForContainer` only inspects that param — cookies on
+ * the WS upgrade are ignored).
  *
  * Resolves after the WS reaches OPEN. Rejects if open fails or times out
  * (5s). Caller should `await openBrowserWs(...)` at the start of the test
@@ -101,7 +93,7 @@ const DEFAULT_TIMEOUT_MS = 10_000;
  */
 export async function openBrowserWs(
   page: Page,
-  sessionId: string,
+  agentId: string,
   opts: { openTimeoutMs?: number } = {},
 ): Promise<BrowserWsProbe> {
   const cookies = await page.context().cookies();
@@ -109,15 +101,14 @@ export async function openBrowserWs(
   // Better Auth's signed cookie is `<token>.<signature>` URL-encoded on the
   // wire — Playwright returns it URL-decoded. REST routes need the whole
   // signed value (BA verifies the signature each request); the WS auth path
-  // (`validateSessionForContainer`) does `eq(session.token, token)` against
-  // the DB's raw token column, which is the pre-`.` half. Mirror the split
-  // documented in `scripts/smoke-browser-ws.ts`. No-token connects work for
-  // owned `running` sessions (server gates by status alone when token is
-  // absent) but never cross-user.
+  // (`validateAgentForContainer`) does `eq(session.token, token)` against the
+  // DB's raw token column, which is the pre-`.` half. No-token connects work
+  // for `running` agents (the server gates by status alone when the token is
+  // absent) but never across users.
   const wsToken = session ? session.value.split(".")[0] : "";
   const tokenParam = wsToken ? `?token=${encodeURIComponent(wsToken)}` : "";
 
-  const wsUrl = getBaseUrl().replace(/^http/i, "ws") + `/api/browser-ws/${sessionId}${tokenParam}`;
+  const wsUrl = getBaseUrl().replace(/^http/i, "ws") + `/api/browser-ws/${agentId}${tokenParam}`;
 
   const ws = new NodeWebSocket(wsUrl, { perMessageDeflate: false });
 

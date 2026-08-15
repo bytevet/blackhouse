@@ -225,6 +225,7 @@ export function AgentsPage() {
                 return (
                   <div
                     key={agent.id}
+                    data-testid={`agent-card-${agent.id}`}
                     style={{
                       border: "1px solid var(--ny-border)",
                       borderRadius: 12,

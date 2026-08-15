@@ -211,6 +211,7 @@ export function BlueprintsPage() {
           {(blueprints.data ?? []).map((bp) => (
             <div
               key={bp.id}
+              data-testid={`blueprint-card-${bp.id}`}
               style={{
                 border: "1px solid var(--ny-border)",
                 borderRadius: 12,

@@ -189,7 +189,7 @@ export function MembersPage() {
           }}
         >
           {(users.data?.data ?? []).map((user) => (
-            <div key={user.id} style={rowStyle}>
+            <div key={user.id} data-testid={`member-row-${user.id}`} style={rowStyle}>
               <span
                 style={{
                   width: 32,

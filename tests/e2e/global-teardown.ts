@@ -4,32 +4,34 @@ import { readFileSync, existsSync } from "node:fs";
 const STORAGE_STATE_PATH = "tests/e2e/.auth/admin.json";
 
 /**
- * Sweep leftover E2E-named sessions + templates at the end of a Playwright run.
+ * Sweep leftover E2E-created objects at the end of a Playwright run.
  *
- * Docker-gated tests each spawn a ~3 GB Podman container; when a test fails
- * mid-flight its inline `cleanupSession` never runs and the container leaks.
- * Across back-to-back runs that accumulates resource pressure on the Podman
- * VM and causes unrelated tests to flake (see task #32). Tests that succeed
- * and cleaned themselves up are no-ops here.
+ * A test that fails mid-flight never reaches its inline cleanup. Agents are the
+ * expensive case: under `E2E_DOCKER=1` each started agent holds a multi-GB
+ * container, and across back-to-back runs that accumulates until unrelated
+ * specs start flaking. Tests that cleaned up after themselves are no-ops here.
  *
- * Name patterns: every E2E-created session/template starts with "E2E " (the
- * "WS Test" prefix from the WebSocket suite is the only outlier).
+ * Naming contract (`helpers.ts`): agent handles and channel slugs start with
+ * `e2e`, blueprint names and member emails with `E2E ` / `e2e-`.
  */
-const isE2eName = (n: string) => /^(E2E|WS Test)/i.test(n);
+const isE2eAgent = (handle: string) => /^e2e[-_]/i.test(handle);
+const isE2eBlueprint = (name: string) => /^E2E\b/i.test(name);
+const isE2eEmail = (email: string) => /^e2e-/i.test(email);
 
-async function sweep(
+async function sweep<T>(
   request: APIRequestContext,
-  listUrl: string,
-  deleteUrlForId: (id: string) => string,
   kind: string,
+  listUrl: string,
+  rows: (body: unknown) => T[],
+  keep: (row: T) => boolean,
+  deleteUrl: (row: T) => string,
 ) {
   const res = await request.get(listUrl);
   if (!res.ok()) return;
-  const body = (await res.json()) as { data?: Array<{ id: string; name: string }> };
-  const leftover = (body.data ?? []).filter((x) => isE2eName(x.name));
+  const leftover = rows(await res.json()).filter(keep);
   if (leftover.length === 0) return;
   console.log(`[global-teardown] sweeping ${leftover.length} leftover E2E ${kind}(s)`);
-  await Promise.all(leftover.map((x) => request.delete(deleteUrlForId(x.id)).catch(() => {})));
+  await Promise.all(leftover.map((row) => request.delete(deleteUrl(row)).catch(() => {})));
 }
 
 export default async function globalTeardown(_config: FullConfig) {
@@ -42,20 +44,40 @@ export default async function globalTeardown(_config: FullConfig) {
   });
 
   try {
-    await sweep(
+    // Agents first: destroying one force-removes its container, which is the
+    // resource that actually hurts if it leaks.
+    await sweep<{ id: string; handle: string }>(
       context.request,
-      `${baseURL}/api/sessions`,
-      (id) => `${baseURL}/api/sessions/${id}`,
-      "session",
+      "agent",
+      `${baseURL}/api/agents`,
+      (body) => (Array.isArray(body) ? (body as { id: string; handle: string }[]) : []),
+      (row) => isE2eAgent(row.handle),
+      (row) => `${baseURL}/api/agents/${row.id}`,
     );
-    // Templates: the create/edit/delete test leaves "E2E Test Template" /
-    // "E2E Updated Template" behind if it fails mid-flight.
-    await sweep(
+
+    await sweep<{ id: string; name: string }>(
       context.request,
-      `${baseURL}/api/templates?mine=true&page=1&perPage=50`,
-      (id) => `${baseURL}/api/templates/${id}`,
-      "template",
+      "blueprint",
+      `${baseURL}/api/settings/blueprints`,
+      (body) => (Array.isArray(body) ? (body as { id: string; name: string }[]) : []),
+      (row) => isE2eBlueprint(row.name),
+      (row) => `${baseURL}/api/settings/blueprints/${row.id}`,
     );
+
+    await sweep<{ id: string; email: string }>(
+      context.request,
+      "member",
+      `${baseURL}/api/settings/users?page=1&perPage=100`,
+      (body) => {
+        const data = (body as { data?: unknown }).data;
+        return Array.isArray(data) ? (data as { id: string; email: string }[]) : [];
+      },
+      (row) => isE2eEmail(row.email),
+      (row) => `${baseURL}/api/settings/users/${row.id}`,
+    );
+
+    // Channels are deliberately absent: the API has no delete route, so no spec
+    // creates one server-side. The create-channel dialog is client-state only.
   } finally {
     await browser.close();
   }
