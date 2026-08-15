@@ -21,6 +21,10 @@ export function ChannelSidebar({
   activeSlug,
   agents,
   currentUser,
+  channelsLoading = false,
+  channelsError = null,
+  agentsLoading = false,
+  agentsError = null,
   onCreateChannel,
   onClose,
 }: {
@@ -29,6 +33,13 @@ export function ChannelSidebar({
   activeSlug: string;
   agents: AgentView[];
   currentUser: UserView;
+  channelsLoading?: boolean;
+  /** A roster that failed to load must say so. An empty rail would read as
+   *  "this workspace has no agents", which is a different and much worse
+   *  claim than "we could not reach the server". */
+  channelsError?: string | null;
+  agentsLoading?: boolean;
+  agentsError?: string | null;
   onCreateChannel: () => void;
   /** Set on narrow viewports, where the sidebar is a drawer. */
   onClose?: () => void;
@@ -124,6 +135,15 @@ export function ChannelSidebar({
               onNavigate={onClose}
             />
           ))}
+          {channelsError && (
+            <RailNote tone="danger">Channels unavailable — {channelsError}</RailNote>
+          )}
+          {!channelsError && channelsLoading && channels.length === 0 && (
+            <RailNote>Loading channels…</RailNote>
+          )}
+          {!channelsError && !channelsLoading && channels.length === 0 && (
+            <RailNote>No channels yet</RailNote>
+          )}
         </div>
 
         <SectionHeading
@@ -136,6 +156,13 @@ export function ChannelSidebar({
           {agents.map((agent) => (
             <AgentRow key={agent.id} agent={agent} onNavigate={onClose} />
           ))}
+          {agentsError && <RailNote tone="danger">Roster unavailable — {agentsError}</RailNote>}
+          {!agentsError && agentsLoading && agents.length === 0 && (
+            <RailNote>Loading agents…</RailNote>
+          )}
+          {!agentsError && !agentsLoading && agents.length === 0 && (
+            <RailNote>No agents yet — create one to mention it here</RailNote>
+          )}
         </div>
       </div>
 
@@ -190,6 +217,31 @@ export function ChannelSidebar({
         </Link>
       </div>
     </aside>
+  );
+}
+
+/** One quiet line in the rail — loading, empty, or a load failure. */
+function RailNote({
+  children,
+  tone = "muted",
+}: {
+  children: React.ReactNode;
+  tone?: "muted" | "danger";
+}) {
+  return (
+    <div
+      role={tone === "danger" ? "alert" : undefined}
+      style={{
+        padding: "6px 10px",
+        fontSize: 11,
+        lineHeight: 1.45,
+        fontFamily: "var(--ny-font-mono)",
+        color: tone === "danger" ? "var(--ny-danger-text)" : "var(--ny-text-subtle)",
+        overflowWrap: "anywhere",
+      }}
+    >
+      {children}
+    </div>
   );
 }
 
