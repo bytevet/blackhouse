@@ -1,215 +1,156 @@
+/*
+ * Global stylesheet.
+ *
+ * The design system is **NotYet UI** (`@notyet.im/ui`). It owns every colour,
+ * every control and both themes through ~140 `--ny-*` semantic tokens, which
+ * are defined by `<ThemeProvider>` on the `.ny-root` element it renders.
+ *
+ * Tailwind stays, but only as a *layout* utility engine — flex, grid, spacing,
+ * sizing. It no longer carries a palette of its own: the `@theme inline` block
+ * below re-points Tailwind's colour utilities at the `--ny-*` tokens so that
+ * `bg-surface` / `text-muted` / `border-border` flip with the theme for free.
+ *
+ * `inline` is load-bearing. A plain `@theme` would resolve `var(--ny-surface)`
+ * once at `:root` (where the dark palette is defined) and inherit that computed
+ * colour everywhere, so light mode would silently never apply. `@theme inline`
+ * substitutes the `var()` into the utility itself, which resolves per element —
+ * i.e. against the nearest `[data-theme]` ancestor. Do not drop `inline`.
+ *
+ * `@notyet.im/ui/styles.css` and `/fonts.css` are imported from `main.tsx`,
+ * deliberately *after* this file: at equal specificity the design system then
+ * wins over Tailwind's preflight, and `fonts.css`'s own `@import url(...)` of
+ * the IBM Plex faces stays at the top of its own sheet where CSS requires it.
+ */
 @import "tailwindcss";
-@import "tw-animate-css";
-@import "shadcn/tailwind.css";
-@import "@fontsource-variable/source-code-pro";
-@import "@fontsource-variable/geist-mono";
-@import "@fontsource-variable/figtree";
-@import "@fontsource-variable/jetbrains-mono";
 
-@custom-variant dark (&:is(.dark *));
+/* xterm's typeface — self-hosted, unlike the IBM Plex faces `fonts.css` pulls
+ * from Google. The terminal must render offline on a self-hosted box. */
+@import "@fontsource-variable/source-code-pro";
+
+/* There is no `.dark` class any more. `ThemeProvider` stamps `data-theme` on
+ * `.ny-root`, so this is the escape hatch for the rare rule that genuinely
+ * cannot be expressed with a theme-flipping token. Reach for a token first. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 :root {
-  color-scheme: light dark;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.141 0.005 285.823);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.141 0.005 285.823);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.141 0.005 285.823);
-  --primary: oklch(0.21 0.006 285.885);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.21 0.006 285.885);
-  --muted: oklch(0.967 0.001 286.375);
-  --muted-foreground: oklch(0.552 0.016 285.938);
-  --accent: oklch(0.967 0.001 286.375);
-  --accent-foreground: oklch(0.21 0.006 285.885);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.92 0.004 286.32);
-  --input: oklch(0.92 0.004 286.32);
-  --ring: oklch(0.705 0.015 286.067);
-  --chart-1: oklch(0.811 0.111 293.571);
-  --chart-2: oklch(0.606 0.25 292.717);
-  --chart-3: oklch(0.541 0.281 293.009);
-  --chart-4: oklch(0.491 0.27 292.581);
-  --chart-5: oklch(0.432 0.232 292.759);
-  --radius: 0.45rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.141 0.005 285.823);
-  --sidebar-primary: oklch(0.21 0.006 285.885);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.967 0.001 286.375);
-  --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
-  --sidebar-border: oklch(0.92 0.004 286.32);
-  --sidebar-ring: oklch(0.705 0.015 286.067);
-  --terminal: oklch(0.1 0.005 285.823);
-
-  /* Semantic status tokens (#52) — used by session-status.ts + agent/docker
-   * health badges + dashboard status indicators. Each has a core (`--xxx`),
-   * a foreground for text-on-bg pairs (`--xxx-fg`), and a soft bg
-   * (`--xxx-bg`) for badge/pill backgrounds. */
-  --success: oklch(0.62 0.16 142);
-  --success-fg: oklch(0.32 0.1 142);
-  --success-bg: oklch(0.95 0.05 142);
-  --warning: oklch(0.74 0.16 70);
-  --warning-fg: oklch(0.42 0.1 70);
-  --warning-bg: oklch(0.96 0.05 70);
-  --error: oklch(0.62 0.18 25);
-  --error-fg: oklch(0.32 0.12 25);
-  --error-bg: oklch(0.95 0.05 25);
-  --info: oklch(0.58 0.18 250);
-  --info-fg: oklch(0.3 0.12 250);
-  --info-bg: oklch(0.95 0.05 250);
 }
 
-.dark {
-  --background: oklch(0.141 0.005 285.823);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.21 0.006 285.885);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.21 0.006 285.885);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.92 0.004 286.32);
-  --primary-foreground: oklch(0.21 0.006 285.885);
-  --secondary: oklch(0.274 0.006 286.033);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.274 0.006 286.033);
-  --muted-foreground: oklch(0.705 0.015 286.067);
-  --accent: oklch(0.274 0.006 286.033);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.552 0.016 285.938);
-  --chart-1: oklch(0.811 0.111 293.571);
-  --chart-2: oklch(0.606 0.25 292.717);
-  --chart-3: oklch(0.541 0.281 293.009);
-  --chart-4: oklch(0.491 0.27 292.581);
-  --chart-5: oklch(0.432 0.232 292.759);
-  --sidebar: oklch(0.21 0.006 285.885);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.274 0.006 286.033);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.552 0.016 285.938);
-  --terminal: oklch(0.1 0.005 285.823);
-
-  /* Semantic status tokens — dark variants. Foreground (-fg) is brightened
-   * for contrast on dark surfaces; background (-bg) is darkened to a low-
-   * chroma muted tone that reads as elevated without glare. */
-  --success: oklch(0.74 0.15 142);
-  --success-fg: oklch(0.85 0.13 142);
-  --success-bg: oklch(0.28 0.08 142);
-  --warning: oklch(0.82 0.15 70);
-  --warning-fg: oklch(0.88 0.12 70);
-  --warning-bg: oklch(0.3 0.08 70);
-  --error: oklch(0.74 0.18 25);
-  --error-fg: oklch(0.85 0.14 25);
-  --error-bg: oklch(0.28 0.09 25);
-  --info: oklch(0.7 0.17 250);
-  --info-fg: oklch(0.85 0.13 250);
-  --info-bg: oklch(0.28 0.08 250);
+html,
+body,
+#root {
+  height: 100%;
 }
 
+body {
+  margin: 0;
+  /* `.ny-root` paints the real background, but the body sits behind it during
+   * hydration and under overscroll. `--ny-bg` at `:root` is the dark value;
+   * `color-scheme` keeps the browser's own chrome in step. */
+  background: var(--ny-bg);
+}
+
+/* Tailwind's colour vocabulary, expressed entirely in NotYet tokens. Every
+ * name here is a `--ny-*` semantic role, not a shadcn one — there is no
+ * `primary` / `card` / `popover` / `destructive` any more. */
 @theme inline {
-  --font-heading: "JetBrains Mono Variable", monospace;
-  --font-mono: "Geist Mono Variable", monospace;
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
-  --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-border: var(--border);
-  --color-destructive: var(--destructive);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-primary: var(--primary);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-popover: var(--popover);
-  --color-card-foreground: var(--card-foreground);
-  --color-card: var(--card);
-  --color-foreground: var(--foreground);
-  --color-terminal: var(--terminal);
-  --color-background: var(--background);
-  --color-success: var(--success);
-  --color-success-fg: var(--success-fg);
-  --color-success-bg: var(--success-bg);
-  --color-warning: var(--warning);
-  --color-warning-fg: var(--warning-fg);
-  --color-warning-bg: var(--warning-bg);
-  --color-error: var(--error);
-  --color-error-fg: var(--error-fg);
-  --color-error-bg: var(--error-bg);
-  --color-info: var(--info);
-  --color-info-fg: var(--info-fg);
-  --color-info-bg: var(--info-bg);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
-  --font-sans: "Figtree Variable", sans-serif;
+  --font-sans: var(--ny-font-sans);
+  --font-mono: var(--ny-font-mono);
+
+  --color-bg: var(--ny-bg);
+  --color-surface: var(--ny-surface);
+  --color-surface-sunken: var(--ny-surface-sunken);
+  --color-surface-raised: var(--ny-surface-raised);
+  --color-surface-hover: var(--ny-surface-hover);
+  --color-surface-active: var(--ny-surface-active);
+  --color-surface-selected: var(--ny-surface-selected);
+  --color-overlay: var(--ny-overlay);
+
+  --color-border: var(--ny-border);
+  --color-border-strong: var(--ny-border-strong);
+
+  --color-text: var(--ny-text);
+  --color-muted: var(--ny-text-muted);
+  --color-subtle: var(--ny-text-subtle);
+  --color-disabled: var(--ny-text-disabled);
+  --color-inverse: var(--ny-text-inverse);
+
+  --color-accent: var(--ny-accent);
+  --color-accent-subtle: var(--ny-accent-subtle);
+  --color-accent-border: var(--ny-accent-border);
+  --color-accent-text: var(--ny-accent-text);
+  --color-on-accent: var(--ny-text-on-accent);
+
+  --color-success: var(--ny-success);
+  --color-success-subtle: var(--ny-success-subtle);
+  --color-success-text: var(--ny-success-text);
+  --color-warning: var(--ny-warning);
+  --color-warning-subtle: var(--ny-warning-subtle);
+  --color-warning-text: var(--ny-warning-text);
+  --color-danger: var(--ny-danger);
+  --color-danger-subtle: var(--ny-danger-subtle);
+  --color-danger-text: var(--ny-danger-text);
+  --color-info: var(--ny-info);
+  --color-info-subtle: var(--ny-info-subtle);
+  --color-info-text: var(--ny-info-text);
+
+  /* The terminal is always dark, in both themes — a light xterm is not a
+   * thing anyone wants. `--ny-ink-0` is theme-invariant. */
+  --color-terminal: var(--ny-ink-0);
+
+  --radius-xs: var(--ny-radius-xs);
+  --radius-sm: var(--ny-radius-sm);
+  --radius-md: var(--ny-radius-md);
+  --radius-lg: var(--ny-radius-lg);
+  --radius-xl: var(--ny-radius-xl);
 }
 
-@layer base {
-  * {
-    @apply border-border outline-ring/50;
-  }
-  body {
-    @apply bg-background text-foreground;
-  }
-  html {
-    @apply font-sans;
-  }
+/* `ThemeProvider` renders a plain `<div>`; the app shell needs it to be the
+ * full-height flex root, and nothing in the library's props can say that. */
+.ny-root {
+  height: 100%;
+  min-height: 0;
 }
 
-/* Terminal scrollbar */
+/* ── Scrollbars ─────────────────────────────────────────────────────────── */
+
+.bh-scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.bh-scroll::-webkit-scrollbar-thumb {
+  background: var(--ny-border-strong);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.bh-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 .xterm .xterm-viewport::-webkit-scrollbar {
   width: 6px;
 }
-
 .xterm .xterm-viewport::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: rgb(255 255 255 / 0.15);
   border-radius: 3px;
 }
-
 .xterm .xterm-viewport::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: rgb(255 255 255 / 0.25);
 }
-
 .xterm .xterm-viewport::-webkit-scrollbar-track {
   background: transparent;
 }
 
-/* Shiki line numbers via CSS counters */
+/* ── Shiki ──────────────────────────────────────────────────────────────── */
+
+/* Line numbers via CSS counters. */
 .line-numbers .shiki code {
   counter-reset: line;
 }
-
 .line-numbers .shiki code > .line::before {
   counter-increment: line;
   content: counter(line);
@@ -221,13 +162,38 @@
   user-select: none;
 }
 
-/* Shiki dual-theme: swap token colors in dark mode */
+/* Dual-theme token swap. Shiki emits both palettes as custom properties and
+ * we pick one — keyed off `data-theme`, since `.dark` is gone. */
 .shiki,
 .shiki span {
   color: var(--shiki-light);
 }
-
-.dark .shiki,
-.dark .shiki span {
+[data-theme="dark"] .shiki,
+[data-theme="dark"] .shiki span {
   color: var(--shiki-dark);
+}
+
+/* ── Keyframes the design uses ──────────────────────────────────────────── */
+
+@keyframes nyPulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.82);
+  }
+}
+
+@keyframes nyBlink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
 }

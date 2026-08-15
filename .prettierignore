@@ -11,3 +11,6 @@ playwright-report
 
 # Shell scripts — prettier has no shell parser
 *.sh
+
+# Vendored design-tool prototype — not ours to format
+design

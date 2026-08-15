@@ -1,120 +1,46 @@
 import { Hono } from "hono";
-import type { WSContext } from "hono/ws";
 import type { createNodeWebSocket } from "@hono/node-ws";
 import { getDockerClient } from "../lib/docker.js";
 import { db } from "../db/index.js";
-import { codingSessions } from "../db/schema.js";
+import { agents } from "../db/schema.js";
 import { eq } from "drizzle-orm";
-import { validateSessionForContainer } from "../lib/session-auth.js";
+import { validateAgentForContainer } from "../lib/agent-ws-auth.js";
 import { dataToBuffer } from "../lib/ws-binary.js";
-
-const SCROLLBACK_LIMIT = 256 * 1024; // 256KB of recent output
-
-const DEFAULT_COLS = 120;
-const DEFAULT_ROWS = 30;
-
-interface TerminalState {
-  stream: NodeJS.ReadWriteStream & { destroyed?: boolean };
-  containerId: string;
-  scrollback: Buffer[];
-  scrollbackSize: number;
-  errored: boolean;
-  peers: Set<WSContext>;
-  cols: number;
-  rows: number;
-}
-
-const activeTerminals = new Map<string, TerminalState>();
-
-// Periodic cleanup of stale terminal sessions (every 5 minutes)
-setInterval(
-  () => {
-    for (const [id, terminal] of activeTerminals) {
-      try {
-        if (terminal.stream.destroyed || terminal.errored) {
-          activeTerminals.delete(id);
-        }
-      } catch {
-        activeTerminals.delete(id);
-      }
-    }
-  },
-  5 * 60 * 1000,
-);
-
-function tagOutput(chunk: Buffer): ArrayBuffer {
-  const tagged = Buffer.allocUnsafe(1 + chunk.length);
-  tagged[0] = 0x00;
-  chunk.copy(tagged, 1);
-  return tagged.buffer.slice(tagged.byteOffset, tagged.byteOffset + tagged.byteLength);
-}
-
-const DOCKER_ATTACH_KEYS = new Set(["stream", "stdin", "stdout", "stderr", "hijack", "Tty"]);
+import { configurePtyHub, type PtyDocker, type PtyHub, type PtyPeer } from "../agents/pty-hub.js";
 
 /**
- * Strip the dockerode attach metadata that can leak as the first data chunk.
+ * Terminal WebSocket route — a thin subscriber over `PtyHub`.
+ *
+ * The PTY itself (attach stream, scrollback, broadcast, write mutex) lives in
+ * `server/agents/pty-hub.ts` so the injector can share it. This file only
+ * speaks the binary protocol and authorizes peers:
+ *
+ *   0x00  terminal data (both directions)
+ *   0x01  resize, payload "cols:rows" (client → server)
+ *   0x02  system notice, JSON payload (server → client, e.g. injecting…)
  */
-function stripAttachMetadata(buf: Buffer): Buffer {
-  if (buf.length === 0 || buf[0] !== 0x7b /* '{' */) return buf;
 
-  const scanLimit = Math.min(buf.length, 256);
-
-  let depth = 0;
-  let jsonEnd = -1;
-  for (let i = 0; i < scanLimit; i++) {
-    const b = buf[i];
-    if (b > 0x7e || (b < 0x20 && b !== 0x09 && b !== 0x0a && b !== 0x0d)) return buf;
-    if (b === 0x7b) depth++;
-    else if (b === 0x7d) {
-      depth--;
-      if (depth === 0) {
-        jsonEnd = i + 1;
-        break;
-      }
-    }
-  }
-  if (jsonEnd === -1) return buf;
-
-  try {
-    const obj = JSON.parse(buf.subarray(0, jsonEnd).toString("utf-8"));
-    if (typeof obj !== "object" || obj === null || Array.isArray(obj)) return buf;
-
-    const keys = Object.keys(obj);
-    if (keys.length === 0) return buf;
-    if (!keys.every((k) => DOCKER_ATTACH_KEYS.has(k))) return buf;
-
-    const remaining = buf.subarray(jsonEnd);
-    return remaining.length > 0 ? remaining : Buffer.alloc(0);
-  } catch {
-    return buf;
-  }
-}
+let hub: PtyHub | null = null;
 
 /**
- * Strip Docker log multiplexing headers if present.
+ * Wire the process-wide hub against the `agents` table.
+ * `resolveContainer` is the only coupling point: the hub itself knows nothing
+ * about agents, sessions, or Docker lookups.
  */
-function stripDockerLogHeaders(buf: Buffer): Buffer {
-  if (
-    buf.length >= 8 &&
-    (buf[0] === 1 || buf[0] === 2) &&
-    buf[1] === 0 &&
-    buf[2] === 0 &&
-    buf[3] === 0
-  ) {
-    const chunks: Buffer[] = [];
-    let offset = 0;
-    while (offset + 8 <= buf.length) {
-      const size = buf.readUInt32BE(offset + 4);
-      if (offset + 8 + size > buf.length) break;
-      chunks.push(buf.subarray(offset + 8, offset + 8 + size));
-      offset += 8 + size;
-    }
-    if (offset < buf.length) {
-      chunks.push(buf.subarray(offset));
-    }
-    return Buffer.concat(chunks);
-  }
-  return buf;
+function terminalHub(): PtyHub {
+  if (hub) return hub;
+  hub = configurePtyHub({
+    resolveContainer: (agentId) => validateAgentForContainer(agentId),
+    getDocker: async () => (await getDockerClient()) as unknown as PtyDocker,
+    onDetached: async (agentId) => {
+      // Attach stream ended → the container's main process exited.
+      await db
+        .update(agents)
+        .set({ status: "stopped", updatedAt: new Date() })
+        .where(eq(agents.id, agentId));
+    },
+  });
+  return hub;
 }
 
 /**
@@ -127,189 +53,25 @@ export function createTerminalRoute(
   const app = new Hono();
 
   app.get(
-    "/:sessionId",
+    "/:agentId",
     upgradeWebSocket((c) => {
-      const sessionId = c.req.param("sessionId")!;
+      const agentId = c.req.param("agentId")!;
       const token = c.req.query("token");
 
       return {
         async onOpen(_evt, ws) {
-          const result = await validateSessionForContainer(sessionId, token);
+          const result = await validateAgentForContainer(agentId, token);
           if (!result) {
-            ws.send("[Auth failed or session not running]");
+            ws.send("[Auth failed or agent not running]");
             ws.close(4001, "Unauthorized");
             return;
           }
 
           try {
-            const existing = activeTerminals.get(sessionId);
-            let terminal: TerminalState;
-
-            if (existing && !existing.stream.destroyed && !existing.errored) {
-              terminal = existing;
-
-              // Replay cached scrollback so the new peer sees previous output
-              for (const chunk of existing.scrollback) {
-                try {
-                  ws.send(tagOutput(chunk));
-                } catch {
-                  break;
-                }
-              }
-            } else {
-              const docker = await getDockerClient();
-              const container = docker.getContainer(result.containerId);
-
-              // Fetch recent container logs
-              let initialLogs: Buffer | null = null;
-              try {
-                const logStream = await container.logs({
-                  stdout: true,
-                  stderr: true,
-                  tail: 200,
-                });
-                if (Buffer.isBuffer(logStream)) {
-                  initialLogs = logStream;
-                } else if (typeof logStream === "string") {
-                  initialLogs = Buffer.from(logStream, "utf-8");
-                }
-              } catch {
-                // ignore log fetch errors
-              }
-
-              // Attach to the container's main process
-              let stream: NodeJS.ReadWriteStream | null = null;
-              let lastErr: unknown;
-
-              for (let attempt = 0; attempt < 3; attempt++) {
-                try {
-                  stream = (await container.attach({
-                    stream: true,
-                    stdin: true,
-                    stdout: true,
-                    stderr: true,
-                    hijack: true,
-                  })) as unknown as NodeJS.ReadWriteStream;
-                  lastErr = null;
-                  break;
-                } catch (err) {
-                  lastErr = err;
-                  if (attempt < 2) {
-                    await new Promise((r) => setTimeout(r, 2000));
-                  }
-                }
-              }
-              if (lastErr || !stream) throw lastErr || new Error("Failed to attach to terminal");
-
-              terminal = {
-                stream,
-                containerId: result.containerId,
-                scrollback: [],
-                scrollbackSize: 0,
-                errored: false,
-                peers: new Set(),
-                cols: DEFAULT_COLS,
-                rows: DEFAULT_ROWS,
-              };
-              activeTerminals.set(sessionId, terminal);
-
-              terminal.stream.on("error", () => {
-                terminal.errored = true;
-              });
-
-              // Set initial terminal size (better default than Docker's 80x24)
-              try {
-                await container.resize({ h: DEFAULT_ROWS, w: DEFAULT_COLS });
-              } catch {
-                // ignore — container may not support resize yet
-              }
-
-              // Send initial logs to scrollback
-              if (initialLogs && initialLogs.length > 0) {
-                const cleaned = stripDockerLogHeaders(initialLogs);
-                if (cleaned.length > 0) {
-                  terminal.scrollback.push(cleaned);
-                  terminal.scrollbackSize += cleaned.length;
-                }
-              }
-
-              // Replay scrollback to this first peer
-              for (const chunk of terminal.scrollback) {
-                try {
-                  ws.send(tagOutput(chunk));
-                } catch {
-                  break;
-                }
-              }
-
-              // Set up stream listeners ONCE (shared across all peers)
-              // Dual guard for stripping Docker attach metadata:
-              // - Counter: first 10 chunks
-              // - Grace period: first 2 seconds after attach
-              let stripCounter = 10;
-              const stripDeadline = Date.now() + 2000;
-
-              terminal.stream.on("data", (rawChunk: Buffer) => {
-                let chunk: Buffer = Buffer.from(rawChunk) as Buffer;
-
-                // Strip Docker log multiplexing headers (can appear intermittently)
-                chunk = stripDockerLogHeaders(chunk);
-                if (chunk.length === 0) return;
-
-                // Strip attach metadata during grace window
-                if (stripCounter > 0 && Date.now() < stripDeadline) {
-                  stripCounter--;
-                  chunk = stripAttachMetadata(chunk);
-                  if (chunk.length === 0) return;
-                }
-
-                // Cache in scrollback ring buffer
-                terminal.scrollback.push(chunk);
-                terminal.scrollbackSize += chunk.length;
-                while (
-                  terminal.scrollbackSize > SCROLLBACK_LIMIT &&
-                  terminal.scrollback.length > 1
-                ) {
-                  const removed = terminal.scrollback.shift()!;
-                  terminal.scrollbackSize -= removed.length;
-                }
-
-                // Broadcast to ALL connected peers
-                const data = tagOutput(chunk);
-                for (const p of terminal.peers) {
-                  try {
-                    p.send(data);
-                  } catch {
-                    terminal.peers.delete(p);
-                  }
-                }
-              });
-
-              terminal.stream.on("end", async () => {
-                activeTerminals.delete(sessionId);
-
-                try {
-                  await db
-                    .update(codingSessions)
-                    .set({ status: "stopped", updatedAt: new Date() })
-                    .where(eq(codingSessions.id, sessionId));
-                } catch {
-                  // ignore
-                }
-
-                for (const p of terminal.peers) {
-                  try {
-                    p.close(1000, "Stream ended");
-                  } catch {
-                    // already closed
-                  }
-                }
-                terminal.peers.clear();
-              });
-            }
-
-            // Add this peer to the set
-            terminal.peers.add(ws);
+            const pty = terminalHub();
+            await pty.ensureAttached(agentId);
+            // Replays scrollback to this peer, then subscribes it.
+            pty.addPeer(agentId, ws as PtyPeer);
           } catch (err) {
             const msg = err instanceof Error ? err.message : "Failed to create terminal";
             ws.send(`[Error: ${msg}]`);
@@ -317,9 +79,9 @@ export function createTerminalRoute(
           }
         },
 
-        async onMessage(evt, ws) {
-          const terminal = activeTerminals.get(sessionId);
-          if (!terminal) return;
+        async onMessage(evt) {
+          const pty = terminalHub();
+          if (!pty.isAttached(agentId)) return;
 
           const raw = dataToBuffer(evt.data);
           if (!raw || raw.length === 0) return;
@@ -329,27 +91,16 @@ export function createTerminalRoute(
 
           switch (type) {
             case 0x00: {
-              // Terminal input -> write to container stdin
-              terminal.stream.write(payload);
+              // Terminal input -> container stdin, serialized against the
+              // injector and buffered if an injection is in flight.
+              await pty.write(agentId, payload, { source: "peer" });
               break;
             }
             case 0x01: {
               // Resize command -> payload is "cols:rows"
               const parts = payload.toString("utf-8").split(":");
               if (parts.length === 2) {
-                const cols = parseInt(parts[0], 10);
-                const rows = parseInt(parts[1], 10);
-                if (cols > 0 && rows > 0 && (cols !== terminal.cols || rows !== terminal.rows)) {
-                  terminal.cols = cols;
-                  terminal.rows = rows;
-                  try {
-                    const docker = await getDockerClient();
-                    const container = docker.getContainer(terminal.containerId);
-                    await container.resize({ h: rows, w: cols });
-                  } catch {
-                    // ignore resize errors
-                  }
-                }
+                await pty.resize(agentId, parseInt(parts[0], 10), parseInt(parts[1], 10));
               }
               break;
             }
@@ -360,10 +111,7 @@ export function createTerminalRoute(
         },
 
         onClose(_evt, ws) {
-          const terminal = activeTerminals.get(sessionId);
-          if (terminal) {
-            terminal.peers.delete(ws);
-          }
+          terminalHub().removePeer(agentId, ws as PtyPeer);
         },
       };
     }),

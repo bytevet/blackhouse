@@ -2,14 +2,14 @@ import { Hono } from "hono";
 import type { WSContext } from "hono/ws";
 import type { createNodeWebSocket } from "@hono/node-ws";
 import WebSocket, { type RawData } from "ws";
-import { validateSessionForContainer } from "../lib/session-auth.js";
+import { validateAgentForContainer } from "../lib/agent-ws-auth.js";
 import { getContainerEndpoint } from "../lib/docker.js";
 import { dataToBuffer, rawDataToArrayBuffer } from "../lib/ws-binary.js";
 
 /**
  * Browser WebSocket proxy.
  *
- * Client connects to `ws://server/api/browser-ws/:sessionId?token=<sess>`.
+ * Client connects to `ws://server/api/browser-ws/:agentId?token=<sess>`.
  * After auth, we open a server-side WS to the in-container browser-service
  * at `ws://127.0.0.1:<hostPort>/browser/ws` and pipe binary frames in both
  * directions: screencast (0x80/0x81/0x83–0x86) downstream and input events
@@ -63,9 +63,9 @@ export function createBrowserWsRoute(
   const app = new Hono();
 
   app.get(
-    "/:sessionId",
+    "/:agentId",
     upgradeWebSocket((c) => {
-      const sessionId = c.req.param("sessionId")!;
+      const agentId = c.req.param("agentId")!;
       const token = c.req.query("token");
 
       let upstream: WebSocket | null = null;
@@ -80,10 +80,10 @@ export function createBrowserWsRoute(
 
       return {
         async onOpen(_evt, ws) {
-          const auth = await validateSessionForContainer(sessionId, token);
+          const auth = await validateAgentForContainer(agentId, token);
           if (!auth) {
             try {
-              ws.send("[Auth failed or session not running]");
+              ws.send("[Auth failed or agent not running]");
             } catch {
               /* peer gone */
             }
@@ -93,7 +93,7 @@ export function createBrowserWsRoute(
 
           let endpoint: Awaited<ReturnType<typeof getContainerEndpoint>>;
           try {
-            endpoint = await getContainerEndpoint(sessionId, 9223);
+            endpoint = await getContainerEndpoint(agentId, 9223);
           } catch (err) {
             try {
               ws.send(`[Browser unavailable: ${err instanceof Error ? err.message : String(err)}]`);

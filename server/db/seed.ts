@@ -106,36 +106,58 @@ export async function runSeed() {
     console.log("[blackhouse] Default non-admin user created (username: user, password: test1234)");
   }
 
-  // Seed default agent configs
-  const existingConfigs = await db.select().from(schema.agentConfigs).limit(1);
+  // Seed default agent blueprints.
+  //
+  // Note what is deliberately NOT here: a shared `claude-config` volume mounted
+  // at `~/.claude`. Every agent gets its own state volume (see
+  // `server/agents/lifecycle.ts`), because the sidecar tails
+  // `~/.claude/projects` for the channel transcript — one shared volume would
+  // let every agent read every other agent's conversation.
+  //
+  // `*-auth` volumes ARE shared: they hold provider credentials, which is the
+  // one thing agents legitimately have in common.
+  const existingBlueprints = await db.select().from(schema.agentBlueprints).limit(1);
 
-  if (existingConfigs.length === 0) {
-    await db.insert(schema.agentConfigs).values([
+  if (existingBlueprints.length === 0) {
+    await db.insert(schema.agentBlueprints).values([
       {
-        preset: "claude-code",
-        displayName: "Claude Code",
+        cli: "claude-code",
+        name: "Claude Code",
+        description: "Anthropic's CLI. Rich structured transcripts via session JSONL.",
         agentCommand: "claude --dangerously-skip-permissions",
-        volumeMounts: [
-          { name: "claude-config", mountPath: "/home/workspace/.claude" },
-          { name: "claude-auth", mountPath: "/home/workspace/.config/claude-auth" },
-        ],
+        stateMountPath: "/home/workspace",
+        volumeMounts: [{ name: "claude-auth", mountPath: "/home/workspace/.config/claude-auth" }],
       },
       {
-        preset: "antigravity",
-        displayName: "Antigravity",
+        cli: "antigravity",
+        name: "Antigravity",
+        description: "Transcript is PTY-scraped server-side; no in-container adapter.",
         agentCommand: "agy --dangerously-skip-permissions",
-        // `agy` writes config to `~/.gemini` (inherits Gemini's layout) —
-        // see agent-presets.ts comment and 0004 migration.
-        volumeMounts: [{ name: "antigravity-config", mountPath: "/home/workspace/.gemini" }],
+        stateMountPath: "/home/workspace",
+        // `agy` writes config to `~/.gemini` (it inherits Gemini's layout).
+        volumeMounts: [{ name: "antigravity-auth", mountPath: "/home/workspace/.gemini-auth" }],
       },
       {
-        preset: "codex",
-        displayName: "Codex",
+        cli: "codex",
+        name: "Codex",
+        description: "Transcript is PTY-scraped server-side; no in-container adapter.",
         agentCommand: "codex --sandbox workspace-write --ask-for-approval on-request",
-        volumeMounts: [{ name: "codex-config", mountPath: "/home/workspace/.codex" }],
+        stateMountPath: "/home/workspace",
+        volumeMounts: [{ name: "codex-auth", mountPath: "/home/workspace/.codex-auth" }],
       },
     ]);
-    console.log("[blackhouse] Default agent configs created.");
+    console.log("[blackhouse] Default agent blueprints created.");
+  }
+
+  // Seed a default channel so a fresh install has somewhere to talk.
+  const existingChannels = await db.select().from(schema.channels).limit(1);
+  if (existingChannels.length === 0) {
+    await db.insert(schema.channels).values({
+      slug: "general",
+      name: "general",
+      topic: "Everything, until it needs its own room.",
+    });
+    console.log("[blackhouse] Default #general channel created.");
   }
 
   // Seed default docker config

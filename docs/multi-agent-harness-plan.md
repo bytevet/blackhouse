@@ -25,28 +25,28 @@ channel UI → `@mention` injects into the live TUI → sidecar streams the tran
 
 ## Decisions (settled in the interview)
 
-| Area | Decision |
-| --- | --- |
-| Scope | Greenfield rewrite of the domain model; same repo, name, and stack |
-| Agent model | Persistent named personas with durable identity + workspace. **No hibernation in v1** |
-| Mention → TUI | Inject into the live TUI. Per message: **queue-until-idle** (default) or **interrupt-then-inject** |
-| Agent ↔ agent | Mention-driven, **human-gated** via an inline approve/deny card in the channel |
-| Channels | Flat; agents joined ad hoc. **Channels replace the DM inbox** |
-| Transcript | Structured sidecar. Rich for Claude Code, degraded PTY-scrape for others, documented BYO contract |
-| Sandbox | Pluggable driver interface. `runsc` default on Linux, hardened `runc` fallback, Kata as a stub |
-| Egress | Per-agent policy `none` \| `allowlist` \| `open`, default allowlist via harness proxy |
-| Workspace | Per-agent repo checkout + per-agent state volume. **No shared scratch** — agents hand off via channel artifacts and git |
-| Hosts | Linux VPS (bare metal / nested virt) **and** local macOS/Docker Desktop/Podman |
-| Users | Small team, shared instance. Keep Better Auth. No orgs/tenants/quotas |
-| Keep | Terminal/TUI attach, code-server IDE tab, embedded browser tab, HTML result viewer |
-| UI stack | **shadcn removed**; `@notyet.im/ui` + `--ny-*` tokens, matching the prototype |
-| First UI pass | Channel View + Agent Detail |
-| CLIs | Claude Code, Codex, Antigravity, + generic BYO adapter contract |
-| Migration | **Nuke everything, fresh DB**, re-seed admin |
-| Agent defs | `agent_blueprints` (reusable definition) + `agents` (named instance) |
-| Also in scope | Per-agent daily budget cap (pauses on hit); scheduled/triggered agents |
-| From the design | Channel-level auto-approve toggle; channel repo/branch; workspace egress-rule table; resizable split view on Agent Detail |
-| Deferred | Git/PR handoff between agents; hibernation; multi-tenancy; **SAML SSO** (on the login mockup, but it's a Better Auth plugin and independent of the harness — ship password + GitHub first) |
+| Area            | Decision                                                                                                                                                                                   |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Scope           | Greenfield rewrite of the domain model; same repo, name, and stack                                                                                                                         |
+| Agent model     | Persistent named personas with durable identity + workspace. **No hibernation in v1**                                                                                                      |
+| Mention → TUI   | Inject into the live TUI. Per message: **queue-until-idle** (default) or **interrupt-then-inject**                                                                                         |
+| Agent ↔ agent   | Mention-driven, **human-gated** via an inline approve/deny card in the channel                                                                                                             |
+| Channels        | Flat; agents joined ad hoc. **Channels replace the DM inbox**                                                                                                                              |
+| Transcript      | Structured sidecar. Rich for Claude Code, degraded PTY-scrape for others, documented BYO contract                                                                                          |
+| Sandbox         | Pluggable driver interface. `runsc` default on Linux, hardened `runc` fallback, Kata as a stub                                                                                             |
+| Egress          | Per-agent policy `none` \| `allowlist` \| `open`, default allowlist via harness proxy                                                                                                      |
+| Workspace       | Per-agent repo checkout + per-agent state volume. **No shared scratch** — agents hand off via channel artifacts and git                                                                    |
+| Hosts           | Linux VPS (bare metal / nested virt) **and** local macOS/Docker Desktop/Podman                                                                                                             |
+| Users           | Small team, shared instance. Keep Better Auth. No orgs/tenants/quotas                                                                                                                      |
+| Keep            | Terminal/TUI attach, code-server IDE tab, embedded browser tab, HTML result viewer                                                                                                         |
+| UI stack        | **shadcn removed**; `@notyet.im/ui` + `--ny-*` tokens, matching the prototype                                                                                                              |
+| First UI pass   | Channel View + Agent Detail                                                                                                                                                                |
+| CLIs            | Claude Code, Codex, Antigravity, + generic BYO adapter contract                                                                                                                            |
+| Migration       | **Nuke everything, fresh DB**, re-seed admin                                                                                                                                               |
+| Agent defs      | `agent_blueprints` (reusable definition) + `agents` (named instance)                                                                                                                       |
+| Also in scope   | Per-agent daily budget cap (pauses on hit); scheduled/triggered agents                                                                                                                     |
+| From the design | Channel-level auto-approve toggle; channel repo/branch; workspace egress-rule table; resizable split view on Agent Detail                                                                  |
+| Deferred        | Git/PR handoff between agents; hibernation; multi-tenancy; **SAML SSO** (on the login mockup, but it's a Better Auth plugin and independent of the harness — ship password + GitHub first) |
 
 ---
 
@@ -88,7 +88,7 @@ better known now than mid-build.
 ### What the design decides (adopt as-is)
 
 - **Process state and activity are separate signals.** A colored dot on the avatar for the container
-  (running / stopped / error) and a *pill* for activity (idle / busy). The design note is explicit about why:
+  (running / stopped / error) and a _pill_ for activity (idle / busy). The design note is explicit about why:
   "they fail independently — a running agent can be idle." This confirms the `agents.status` +
   `agents.activity` split already in the schema.
 - **Agent activity turns are collapsed by default** into one summary row —
@@ -96,15 +96,15 @@ better known now than mid-build.
   rendered as `glyph · verb · target · meta` (`◇ Read src/db/schema.ts 340 ln`, `▶ Ran rg --files 0.4s`).
   Prose replies are full-width rich text with markdown, lists, and syntax-highlighted code. That is the
   signal/noise hierarchy the brief asked for.
-- **Queued messages stay in the transcript**, in place, under a dashed chip: *"Queued · @backend is busy
-  (running tests) · delivers when idle · cancel"*. No separate outbox.
+- **Queued messages stay in the transcript**, in place, under a dashed chip: _"Queued · @backend is busy
+  (running tests) · delivers when idle · cancel"_. No separate outbox.
 - **Interrupt reads as heavier than Queue.** A `SegmentedControl` plus a live hint that restyles to the danger
   tone: "Stops the agent mid-task and runs this now" vs "Delivers when the agent is idle".
 - **The dispatch card uses the warning surface** with a pulsing icon, an expiry countdown, and
   Approve / Edit & approve / Deny. Resolved states collapse to a quiet one-liner so history stays skimmable.
 - **Artifacts are inline cards** with a mini preview that expands in place (150px → 300px).
 - **`@mention` autocomplete shows live status** — handle, activity pill, and status line — so you can see an
-  agent is busy *before* sending.
+  agent is busy _before_ sending.
 
 ### What the design adds (not previously in scope)
 
@@ -131,7 +131,7 @@ better known now than mid-build.
 
 These are not hypothetical; each one silently breaks a core requirement.
 
-1. **`agent/entrypoint.sh:121` ends with `exec /bin/bash`.** After the agent CLI exits, the PTY is a *shell* —
+1. **`agent/entrypoint.sh:121` ends with `exec /bin/bash`.** After the agent CLI exits, the PTY is a _shell_ —
    so an injected prompt becomes a shell command. Fix: `exec "$AGENT_COMMAND"` so container-exit means
    agent-exit, with the bash fallback behind a `BLACKHOUSE_DEBUG_SHELL` flag. The dispatcher must also refuse
    to inject unless the sidecar has confirmed the agent process is alive.
@@ -144,14 +144,14 @@ These are not hypothetical; each one silently breaks a core requirement.
    booting-but-broken app. Make it throw, with leniency behind `BLACKHOUSE_MIGRATE_LENIENT=1`.
 4. **One stdin, many writers.** `container.attach()` yields exactly one stdin, and both browser peers and the
    injector write to it. Interleaving a multi-KB paste with human keystrokes corrupts both. Needs a per-agent
-   async mutex, with peer input *buffered* (not dropped) during injection.
+   async mutex, with peer input _buffered_ (not dropped) during injection.
 5. **`server/lib/pagination.ts` is offset-based.** A live transcript that appends while you scroll will
    double-render rows. Must be keyset (`before=<createdAt>,<id>`).
 6. **`HostConfig.ExtraHosts: ["host.docker.internal:host-gateway"]`** is set unconditionally at
    `sessions.ts:470`. That is a direct route to the host and defeats egress control — drop it whenever
    `egress_mode !== 'open'`.
 7. **`tests/unit/mcp-protocol.test.ts` tests a `result-server.ts` that does not exist in the tree.** Dead test; delete.
-8. *(Resolved by the NotYet UI decision — `src/components/ui/` is deleted rather than extended.)*
+8. _(Resolved by the NotYet UI decision — `src/components/ui/` is deleted rather than extended.)_
 
 ## What exists today (verified, reuse these)
 
@@ -165,7 +165,7 @@ These are not hypothetical; each one silently breaks a core requirement.
 - `server/lib/docker.ts` — `getDockerClient()`, `getContainerEndpoint()` + cache, TLS/socket from `docker_configs`.
 - `server/proxy/ide.ts`, `server/ws/browser.ts`, `agent/browser-service/` — IDE and browser tabs, keep.
 - `server/lib/{session-token-auth,messaging-rate-limit,inbox-events,pagination,validation,ws-binary}.ts` —
-  port the *mechanisms* (bearer-token auth, rate limiting, SSE fan-out, request_id dedup) onto the new model.
+  port the _mechanisms_ (bearer-token auth, rate limiting, SSE fan-out, request_id dedup) onto the new model.
 - `tests/fixtures/mock-agent.sh` — credential-free agent stand-in; extend it rather than inventing a new one.
 - `compose.yml` — pins the Docker network name to `blackhouse`; the egress work builds on this.
 
@@ -341,7 +341,7 @@ Re-home `terminal.ts`, `ws/browser.ts`, `proxy/ide.ts` onto `:agentId`.
 
 `server/agents/reconcile.ts` runs at startup: list containers labelled `blackhouse.managed=true`, re-link by a
 `blackhouse.agent_id` label, mark vanished containers as `stopped`. This replaces the inline auto-detect block
-at `sessions.ts:254-274`, which currently runs a `container.inspect()` on *every* session read.
+at `sessions.ts:254-274`, which currently runs a `container.inspect()` on _every_ session read.
 
 **Sequencing note:** `server/api/sessions.ts` is chained into `AppType` and consumed by `hc<AppType>` in
 `src/lib/api.ts`, so deleting it breaks every client call site simultaneously. Plan this as one large mechanical
@@ -350,7 +350,7 @@ commit driven by `npx tsc --noEmit`, not as an incremental refactor.
 **Test the browser service under gVisor here**, not in Phase 6. Chromium + ffmpeg + Playwright is the workload
 most likely to misbehave under `runsc`, and Phase 2 is while backing out is still cheap.
 
-✅ *End state: create an agent, it starts under runsc-or-runc, attach to its TUI, use the IDE and browser tabs.*
+✅ _End state: create an agent, it starts under runsc-or-runc, attach to its TUI, use the IDE and browser tabs._
 
 ---
 
@@ -483,12 +483,12 @@ and a sweeper expires stale cards.
 When the channel has `auto_approve_dispatch` on, the dispatch skips `pending_approval` and goes straight to
 `queued`, and the card renders in the info tone as an after-the-fact record ("Auto-approved · dispatched with no
 hold · override in channel settings"). The card is still written to the transcript — auto-approve removes the
-*hold*, not the *record*. Budget checks and loop guards still apply; auto-approve is not a bypass of those.
+_hold_, not the _record_. Budget checks and loop guards still apply; auto-approve is not a bypass of those.
 
 ## Phase 6 — Egress policy
 
 Two networks: `blackhouse-internal` (`internal: true` — no route out) for agents, and the existing
-`blackhouse` bridge, with the app joined to both. Because the internal network has no gateway, *all* agent
+`blackhouse` bridge, with the app joined to both. Because the internal network has no gateway, _all_ agent
 egress must traverse the harness proxy — that is the enforcement, not the allowlist itself.
 
 `agent/egress-proxy/proxy.mjs` — a ~200-line CONNECT proxy on raw `node:http` + `node:net`, zero deps, built
@@ -499,7 +499,7 @@ source-IP matching, which is brittle across restarts. Policy is refetched every 
 Containers get `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` in `SandboxSpec.env`.
 
 **No CA is needed in v1** — a CONNECT-level domain allowlist never terminates TLS, so there is nothing to sign.
-Shipping a trust root means installing it into every image *and* into node/npm/pip/git/curl individually: a
+Shipping a trust root means installing it into every image _and_ into node/npm/pip/git/curl individually: a
 large brittle surface for zero v1 benefit. Leave a documented hook for TLS interception if body-level auditing
 is ever needed.
 
@@ -508,7 +508,7 @@ one each. `open` additionally attaches the bridge network; `none` grants no prox
 Drop `ExtraHosts: host-gateway` whenever the mode isn't `open` (landmine 6). Update `compose.yml`.
 
 **Verify empirically before designing this phase in detail:** in container-network mode the harness reaches
-agents over `BLACKHOUSE_NETWORK`, a normal bridge *with* internet access — so `none`/`allowlist` would be a lie
+agents over `BLACKHOUSE_NETWORK`, a normal bridge _with_ internet access — so `none`/`allowlist` would be a lie
 unless that network is itself internal and the app is dual-homed. And in host-mode dev it is not obvious that
 port publishing works at all on an `internal: true` network. Ship `docker_configs.egress_enforce=false` as the
 dev escape hatch.
@@ -611,7 +611,7 @@ Ordered by how much they'll hurt.
    in resource shape from today's lazy per-peer attach. Watch for leaks on container restart.
 6. **Auto-approve is a real safety surface, not a convenience toggle.** It disables the only human gate on
    agent→agent dispatch for an entire channel. Loop guards (hop depth, cycle detection) and budget caps become
-   the sole backstop when it is on, so they must exist *before* the toggle ships — not after. Log every flip as
+   the sole backstop when it is on, so they must exist _before_ the toggle ships — not after. Log every flip as
    a channel message, and keep writing dispatch cards so the history still shows what was dispatched.
 7. **Bulk handoff has no filesystem path.** With shared scratch dropped, an agent that produces something large
    (a build output, a dataset) can only hand it over via git or a channel artifact. If that proves too

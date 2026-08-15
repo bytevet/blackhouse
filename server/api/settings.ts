@@ -70,6 +70,17 @@ function addDirToTar(pack: tar.Pack, relDir: string, opts?: { skip?: string[] })
   walk(root);
 }
 
+/** Safe projection of an agent for the container listing — never includes `agentToken`. */
+type AgentContainerInfo = {
+  id: string;
+  handle: string;
+  displayName: string;
+  status: string;
+  activity: string;
+  statusLine: string | null;
+  runtimeUsed: string | null;
+};
+
 const app = new Hono<AuthEnv>()
   // ---------------------------------------------------------------------------
   // PUT /api/settings/profile — update profile (requires auth)
@@ -117,22 +128,22 @@ const app = new Hono<AuthEnv>()
   // ---------------------------------------------------------------------------
   // Agent Configs — list requires auth, mutations require admin
   // ---------------------------------------------------------------------------
-  .get("/agent-configs", authMiddleware, async (c) => {
+  .get("/blueprints", authMiddleware, async (c) => {
     const rows = await db
       .select()
-      .from(schema.agentConfigs)
-      .orderBy(desc(schema.agentConfigs.createdAt));
+      .from(schema.agentBlueprints)
+      .orderBy(desc(schema.agentBlueprints.createdAt));
     return c.json(rows);
   })
 
   .post(
-    "/agent-configs",
+    "/blueprints",
     adminMiddleware,
     zValidator(
       "json",
       z.object({
-        preset: z.string(),
-        displayName: z.string(),
+        cli: z.enum(["claude-code", "codex", "antigravity", "custom"]),
+        name: z.string(),
         agentCommand: z.string().optional(),
         envVars: z.array(z.object({ key: z.string(), value: z.string() })).optional(),
         volumeMounts: volumeMountSchema.optional(),
@@ -142,9 +153,9 @@ const app = new Hono<AuthEnv>()
     async (c) => {
       const data = c.req.valid("json");
 
-      const values: Partial<typeof schema.agentConfigs.$inferInsert> = {
-        preset: data.preset,
-        displayName: data.displayName,
+      const values: Partial<typeof schema.agentBlueprints.$inferInsert> = {
+        cli: data.cli,
+        name: data.name,
         agentCommand: data.agentCommand ?? null,
         envVars: data.envVars ?? null,
         volumeMounts: data.volumeMounts ?? null,
@@ -153,7 +164,7 @@ const app = new Hono<AuthEnv>()
       };
 
       const inserted = await db
-        .insert(schema.agentConfigs)
+        .insert(schema.agentBlueprints)
         .values(values as Required<typeof values>)
         .returning();
 
@@ -162,13 +173,13 @@ const app = new Hono<AuthEnv>()
   )
 
   .put(
-    "/agent-configs/:id",
+    "/blueprints/:id",
     adminMiddleware,
     zValidator(
       "json",
       z.object({
-        preset: z.string(),
-        displayName: z.string(),
+        cli: z.enum(["claude-code", "codex", "antigravity", "custom"]),
+        name: z.string(),
         agentCommand: z.string().optional(),
         envVars: z.array(z.object({ key: z.string(), value: z.string() })).optional(),
         volumeMounts: volumeMountSchema.optional(),
@@ -179,9 +190,9 @@ const app = new Hono<AuthEnv>()
       const id = c.req.param("id");
       const data = c.req.valid("json");
 
-      const values: Partial<typeof schema.agentConfigs.$inferInsert> = {
-        preset: data.preset,
-        displayName: data.displayName,
+      const values: Partial<typeof schema.agentBlueprints.$inferInsert> = {
+        cli: data.cli,
+        name: data.name,
         agentCommand: data.agentCommand ?? null,
         envVars: data.envVars ?? null,
         volumeMounts: data.volumeMounts ?? null,
@@ -192,8 +203,8 @@ const app = new Hono<AuthEnv>()
       // Check if dockerfileContent changed - if so, reset build status
       const existing = await db
         .select()
-        .from(schema.agentConfigs)
-        .where(eq(schema.agentConfigs.id, id))
+        .from(schema.agentBlueprints)
+        .where(eq(schema.agentBlueprints.id, id))
         .limit(1);
 
       if (
@@ -204,9 +215,9 @@ const app = new Hono<AuthEnv>()
       }
 
       const updated = await db
-        .update(schema.agentConfigs)
+        .update(schema.agentBlueprints)
         .set(values)
-        .where(eq(schema.agentConfigs.id, id))
+        .where(eq(schema.agentBlueprints.id, id))
         .returning();
 
       if (updated.length === 0) return c.json({ error: "Agent config not found" }, 404);
@@ -214,22 +225,22 @@ const app = new Hono<AuthEnv>()
     },
   )
 
-  .delete("/agent-configs/:id", adminMiddleware, async (c) => {
+  .delete("/blueprints/:id", adminMiddleware, async (c) => {
     const id = c.req.param("id");
-    await db.delete(schema.agentConfigs).where(eq(schema.agentConfigs.id, id));
+    await db.delete(schema.agentBlueprints).where(eq(schema.agentBlueprints.id, id));
     return c.json({ success: true });
   })
 
   // ---------------------------------------------------------------------------
   // Build Agent Image (admin only)
   // ---------------------------------------------------------------------------
-  .post("/agent-configs/:id/build", adminMiddleware, async (c) => {
+  .post("/blueprints/:id/build", adminMiddleware, async (c) => {
     const configId = c.req.param("id");
 
     const rows = await db
       .select()
-      .from(schema.agentConfigs)
-      .where(eq(schema.agentConfigs.id, configId))
+      .from(schema.agentBlueprints)
+      .where(eq(schema.agentBlueprints.id, configId))
       .limit(1);
 
     if (rows.length === 0) return c.json({ error: "Agent config not found" }, 404);
@@ -241,11 +252,11 @@ const app = new Hono<AuthEnv>()
 
     // Mark as building
     await db
-      .update(schema.agentConfigs)
+      .update(schema.agentBlueprints)
       .set({ imageBuildStatus: "building", imageBuildLog: null, updatedAt: new Date() })
-      .where(eq(schema.agentConfigs.id, configId));
+      .where(eq(schema.agentBlueprints.id, configId));
 
-    const preset = agentConfig.preset;
+    const preset = agentConfig.cli;
     const dockerfileContent = agentConfig.dockerfileContent;
 
     // Start async build (don't await)
@@ -316,24 +327,24 @@ const app = new Hono<AuthEnv>()
         });
 
         await db
-          .update(schema.agentConfigs)
+          .update(schema.agentBlueprints)
           .set({
             imageBuildStatus: "built",
             lastBuiltAt: new Date(),
             imageBuildLog: output,
             updatedAt: new Date(),
           })
-          .where(eq(schema.agentConfigs.id, configId));
+          .where(eq(schema.agentBlueprints.id, configId));
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : String(err);
         await db
-          .update(schema.agentConfigs)
+          .update(schema.agentBlueprints)
           .set({
             imageBuildStatus: "failed",
             imageBuildLog: errorMessage,
             updatedAt: new Date(),
           })
-          .where(eq(schema.agentConfigs.id, configId));
+          .where(eq(schema.agentBlueprints.id, configId));
       }
     })();
 
@@ -343,17 +354,17 @@ const app = new Hono<AuthEnv>()
   // ---------------------------------------------------------------------------
   // Get Agent Build Status
   // ---------------------------------------------------------------------------
-  .get("/agent-configs/:id/build-status", authMiddleware, async (c) => {
+  .get("/blueprints/:id/build-status", authMiddleware, async (c) => {
     const id = c.req.param("id");
 
     const rows = await db
       .select({
-        imageBuildStatus: schema.agentConfigs.imageBuildStatus,
-        imageBuildLog: schema.agentConfigs.imageBuildLog,
-        lastBuiltAt: schema.agentConfigs.lastBuiltAt,
+        imageBuildStatus: schema.agentBlueprints.imageBuildStatus,
+        imageBuildLog: schema.agentBlueprints.imageBuildLog,
+        lastBuiltAt: schema.agentBlueprints.lastBuiltAt,
       })
-      .from(schema.agentConfigs)
-      .where(eq(schema.agentConfigs.id, id))
+      .from(schema.agentBlueprints)
+      .where(eq(schema.agentBlueprints.id, id))
       .limit(1);
 
     if (rows.length === 0) return c.json({ error: "Agent config not found" }, 404);
@@ -513,34 +524,45 @@ const app = new Hono<AuthEnv>()
           filters: { label: ["blackhouse.managed=true"] },
         });
 
-        // Enrich with session info from DB
-        const sessionIds = containers
-          .map((ct) => ct.Labels?.["blackhouse.session_id"])
+        // Enrich with agent info from DB
+        const agentIds = containers
+          .map((ct) => ct.Labels?.["blackhouse.agent_id"])
           .filter(Boolean) as string[];
 
-        const sessionsMap = new Map<string, typeof schema.codingSessions.$inferSelect>();
+        // Explicit column list, not `select()`: the agents row carries
+        // `agentToken`, the bearer credential the container authenticates
+        // with. A `select *` here would publish it in an admin API response.
+        const agentsMap = new Map<string, AgentContainerInfo>();
 
-        if (sessionIds.length > 0) {
-          const sessions = await db
-            .select()
-            .from(schema.codingSessions)
-            .where(inArray(schema.codingSessions.id, sessionIds));
+        if (agentIds.length > 0) {
+          const rows = await db
+            .select({
+              id: schema.agents.id,
+              handle: schema.agents.handle,
+              displayName: schema.agents.displayName,
+              status: schema.agents.status,
+              activity: schema.agents.activity,
+              statusLine: schema.agents.statusLine,
+              runtimeUsed: schema.agents.runtimeUsed,
+            })
+            .from(schema.agents)
+            .where(inArray(schema.agents.id, agentIds));
 
-          for (const s of sessions) {
-            sessionsMap.set(s.id, s);
+          for (const row of rows) {
+            agentsMap.set(row.id, row);
           }
         }
 
         const allItems = containers.map((ct) => {
-          const sessionId = ct.Labels?.["blackhouse.session_id"];
+          const agentId = ct.Labels?.["blackhouse.agent_id"];
           return {
             containerId: ct.Id,
             image: ct.Image,
             state: ct.State,
             status: ct.Status,
             created: ct.Created,
-            sessionId,
-            session: sessionId ? (sessionsMap.get(sessionId) ?? null) : null,
+            agentId,
+            agent: agentId ? (agentsMap.get(agentId) ?? null) : null,
           };
         });
 
@@ -562,7 +584,7 @@ const app = new Hono<AuthEnv>()
   .get("/volumes", adminMiddleware, async (c) => {
     try {
       // Collect volume names referenced by agent configs
-      const configs = await db.select().from(schema.agentConfigs);
+      const configs = await db.select().from(schema.agentBlueprints);
       const managedNames = new Set<string>();
       for (const cfg of configs) {
         if (Array.isArray(cfg.volumeMounts)) {
@@ -572,23 +594,21 @@ const app = new Hono<AuthEnv>()
         }
       }
 
-      // Collect namespaced volume names from templates
-      const allTemplates = await db
+      // Per-agent workspace and state volumes. These are derived from the
+      // agent id rather than stored, so the naming here must stay in step with
+      // `workspaceVolumeName`/`stateVolumeName` in `server/agents/lifecycle.ts`
+      // — otherwise live volumes would show up as unmanaged and be offered for
+      // deletion while an agent is still using them.
+      const agentRows = await db
         .select({
-          volumeMounts: schema.templates.volumeMounts,
-          username: schema.user.username,
-          userId: schema.user.id,
+          workspaceVolume: schema.agents.workspaceVolume,
+          stateVolume: schema.agents.stateVolume,
         })
-        .from(schema.templates)
-        .leftJoin(schema.user, eq(schema.templates.userId, schema.user.id));
+        .from(schema.agents);
 
-      for (const t of allTemplates) {
-        if (Array.isArray(t.volumeMounts)) {
-          const prefix = t.username ?? t.userId ?? "unknown";
-          for (const m of t.volumeMounts as Array<{ name: string; mountPath: string }>) {
-            if (m.name) managedNames.add(`${prefix}-${m.name}`);
-          }
-        }
+      for (const a of agentRows) {
+        if (a.workspaceVolume) managedNames.add(a.workspaceVolume);
+        if (a.stateVolume) managedNames.add(a.stateVolume);
       }
 
       const docker = await getDockerClient();
