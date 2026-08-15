@@ -173,6 +173,86 @@ body {
   color: var(--shiki-dark);
 }
 
+/* ── Settings shell ─────────────────────────────────────────────────────── */
+
+/* Narrow first: the section rail is a horizontally-scrolling strip above the
+ * content, because a 230px sidebar on a phone leaves nothing for the content
+ * it is navigating. It becomes a real rail from `md` up. */
+.bh-settings-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.bh-settings-nav {
+  flex: none;
+  display: flex;
+  flex-direction: row;
+  gap: 2px;
+  overflow-x: auto;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--ny-border);
+  background: var(--ny-surface-sunken);
+}
+
+.bh-settings-nav-eyebrow {
+  display: none;
+}
+
+@media (min-width: 768px) {
+  .bh-settings-body {
+    flex-direction: row;
+  }
+
+  .bh-settings-nav {
+    width: 230px;
+    flex-direction: column;
+    overflow-x: visible;
+    overflow-y: auto;
+    padding: 14px 10px;
+    border-bottom: none;
+    border-right: 1px solid var(--ny-border);
+  }
+
+  .bh-settings-nav-eyebrow {
+    display: block;
+  }
+}
+
+/* Two fields side by side once there is room for both, stacked before that.
+ * `auto-fit` + `minmax` rather than a query of any kind: the pair reflows
+ * against the space it is actually in, which is the whole ask, and it needs no
+ * breakpoint that would have to be re-tuned per host container. */
+.bh-form-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+}
+
+/* ── Login split ────────────────────────────────────────────────────────── */
+
+/* The login pitch pane is a function of the *viewport*, not of a parent box —
+ * it is the second half of a full-screen split — so it is one of the few
+ * genuinely correct media queries in the app. Below `lg` the form takes the
+ * whole width rather than being squeezed to a third of it. */
+.bh-login-aside {
+  display: none;
+}
+
+@media (min-width: 1024px) {
+  .bh-login-aside {
+    display: flex;
+    width: 46%;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 34px;
+    border-left: 1px solid var(--ny-border);
+    background: var(--ny-surface-sunken);
+  }
+}
+
 /* ── Keyframes the design uses ──────────────────────────────────────────── */
 
 @keyframes nyPulse {

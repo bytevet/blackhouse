@@ -1,17 +1,7 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowRight, RefreshCw, ChevronDown, ChevronRight, Globe } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Button, Input, Text } from "@notyet.im/ui";
 import {
   decodeConfig,
   decodeConsoleEvent,
@@ -25,7 +15,6 @@ import {
   type InputMessage,
 } from "@/lib/browser-input-codec";
 import { createWsRpc, type WsRpc } from "@/lib/browser-ws-rpc";
-import { cn } from "@/lib/utils";
 
 // Eval result payload returned by `agent/browser-service/service.mjs`'s
 // runEval (#61). Permissive — only the fields the FE actually reads.
@@ -36,7 +25,7 @@ interface EvalResultPayload {
 }
 
 interface BrowserViewerProps {
-  sessionId: string;
+  agentId: string;
   status: string;
   /**
    * When set, the embedded browser navigates to this URL on the next render
@@ -110,7 +99,7 @@ function bitFromMouseButton(button: number): number {
   }
 }
 
-export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: BrowserViewerProps) {
+export function BrowserViewer({ agentId, status, navigateTo, onNavigated }: BrowserViewerProps) {
   const { t } = useTranslation();
   const [url, setUrl] = useState("");
   const [pendingUrl, setPendingUrl] = useState("");
@@ -132,8 +121,11 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
   // context-menu open via 0x12 state w/ includeSelection. null = menu
   // closed / not yet fetched.
   const [menuSelectionText, setMenuSelectionText] = useState<string | null>(null);
+  // Right-click menu position, relative to the frame wrapper. null = closed.
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const evalInputRef = useRef<HTMLInputElement>(null);
   // ResizeObserver watches the wrapper's bounding box to drive viewport sync.
   const frameWrapperRef = useRef<HTMLDivElement>(null);
   // Live screencast WS — kept in a ref so `sendInput` can write binary
@@ -181,7 +173,7 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
     const tokenMatch = document.cookie.match(/better-auth\.session_token=([^;]+)/);
     const tokenParam = tokenMatch ? `?token=${encodeURIComponent(tokenMatch[1])}` : "";
     const ws = new WebSocket(
-      `${protocol}//${window.location.host}/api/browser-ws/${sessionId}${tokenParam}`,
+      `${protocol}//${window.location.host}/api/browser-ws/${agentId}${tokenParam}`,
     );
     ws.binaryType = "arraybuffer";
 
@@ -391,7 +383,7 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
       isDraggingRef.current = false;
       setHasFrame(false);
     };
-  }, [sessionId, status, decoderError]);
+  }, [agentId, status, decoderError]);
 
   // Console + navigate events are now delivered as 0x85 / 0x86 push frames
   // over the same screencast WS — handled in the opcode demux above. No
@@ -753,7 +745,10 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
     }
   }, [evalInput]);
 
-  const handleEvalKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  // A **native** keydown handler, not a React prop: NotYet's `Input` exposes
+  // no `onKeyDown`, and Enter-to-run plus up-arrow history are the whole point
+  // of a console input.
+  const handleEvalKeyDown = (e: KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       submitEval();
@@ -783,45 +778,97 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
     }
   };
 
+  // Deliberately no dependency array. The handler closes over `evalHistory`
+  // and `evalHistoryIdx`, so rebinding every render is what keeps the arrow
+  // keys walking the current history rather than the one captured at mount.
+  useEffect(() => {
+    const el = evalInputRef.current;
+    if (!el) return;
+    el.addEventListener("keydown", handleEvalKeyDown);
+    return () => el.removeEventListener("keydown", handleEvalKeyDown);
+  });
+
+  // Right-click menu. NotYet ships no context-menu primitive and `Popover`
+  // anchors to a trigger element rather than to a pointer position, so this is
+  // a local absolutely-positioned listbox — the frame is a canvas, and the
+  // menu must open where the click landed inside it.
+  const closeMenu = () => {
+    setMenuPos(null);
+    void onContextMenuOpenChange(false);
+  };
+
+  const menuItemStyle: CSSProperties = {
+    appearance: "none",
+    border: "none",
+    background: "transparent",
+    textAlign: "left",
+    width: "100%",
+    cursor: "pointer",
+    padding: "6px 10px",
+    borderRadius: 6,
+    fontSize: 12.5,
+    fontFamily: "var(--ny-font-sans)",
+    color: "var(--ny-text-muted)",
+  };
+
   // ─── Render ─────────────────────────────────────────────────────────────
   if (status !== "running") {
     return (
-      <div className="flex h-full items-center justify-center bg-muted text-xs text-muted-foreground">
-        {t("browser.notRunning", { status })}
+      <div
+        style={{
+          height: "100%",
+          display: "grid",
+          placeItems: "center",
+          background: "var(--ny-surface-sunken)",
+        }}
+      >
+        <Text size="xs" tone="subtle">
+          {t("browser.notRunning", { status })}
+        </Text>
       </div>
     );
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
       {/* Address bar */}
       <form
-        className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1"
+        style={{
+          flex: "none",
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "6px 8px",
+          borderBottom: "1px solid var(--ny-border)",
+        }}
         onSubmit={(e) => {
           e.preventDefault();
           if (pendingUrl.trim()) navigate(pendingUrl.trim());
         }}
       >
-        <Globe className="size-3 shrink-0 text-muted-foreground" />
-        <Input
-          value={pendingUrl}
-          onChange={(e) => setPendingUrl(e.target.value)}
-          placeholder={t("browser.urlPlaceholder")}
-          className="h-6 flex-1 font-mono text-xs"
-          spellCheck={false}
-          autoComplete="off"
-        />
-        <Button type="submit" variant="outline" size="icon-sm" aria-label={t("browser.go")}>
-          <ArrowRight className="size-3" />
+        <Globe size={14} style={{ flex: "none", color: "var(--ny-text-subtle)" }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <Input
+            value={pendingUrl}
+            onChange={setPendingUrl}
+            placeholder={t("browser.urlPlaceholder")}
+            aria-label={t("browser.urlPlaceholder")}
+            size="sm"
+            autoComplete="off"
+          />
+        </div>
+        <Button iconOnly label={t("browser.go")} type="submit" variant="secondary" size="sm">
+          <ArrowRight size={13} />
         </Button>
         <Button
+          iconOnly
+          label={t("browser.reload")}
           type="button"
-          variant="outline"
-          size="icon-sm"
+          variant="secondary"
+          size="sm"
           onClick={reload}
-          aria-label={t("browser.reload")}
         >
-          <RefreshCw className="size-3" />
+          <RefreshCw size={13} />
         </Button>
       </form>
 
@@ -832,55 +879,149 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
           so the in-container browser viewport matches the panel. */}
       <div
         ref={frameWrapperRef}
-        className="relative flex-1 min-h-0 overflow-hidden bg-black"
+        style={{
+          position: "relative",
+          flex: 1,
+          minHeight: 0,
+          overflow: "hidden",
+          background: "#000",
+        }}
         tabIndex={0}
         onKeyDown={handleKeyDown}
         onKeyUp={handleKeyUp}
       >
-        <ContextMenu onOpenChange={onContextMenuOpenChange}>
-          <ContextMenuTrigger
-            render={
-              <canvas
-                ref={canvasRef}
-                data-browser-frame
-                width={1280}
-                height={720}
-                draggable={false}
-                className="block h-full w-full select-none bg-black object-contain"
-                onMouseMove={handleMouseMove}
-                onMouseDown={handleMouseDown}
-              />
-            }
-          />
-          <ContextMenuContent className="min-w-48">
-            <ContextMenuItem onClick={() => sendControl("back")}>
-              {t("browser.menu.back")}
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => sendControl("forward")}>
-              {t("browser.menu.forward")}
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => sendControl("reload")}>
-              {t("browser.menu.reload")}
-            </ContextMenuItem>
-            {clipboardAvailable && menuSelectionText && menuSelectionText.length > 0 && (
-              <>
-                <ContextMenuSeparator />
-                <ContextMenuItem onClick={onCopySelection}>
-                  {t("browser.menu.copy")}
-                </ContextMenuItem>
-              </>
-            )}
-            <ContextMenuSeparator />
-            <ContextMenuItem onClick={onOpenInRealBrowser}>
-              {t("browser.menu.openInNewTab")}
-            </ContextMenuItem>
-            <ContextMenuItem onClick={onViewSource}>
-              {t("browser.menu.viewPageSource")}
-            </ContextMenuItem>
-          </ContextMenuContent>
-        </ContextMenu>
+        <canvas
+          ref={canvasRef}
+          data-browser-frame
+          width={1280}
+          height={720}
+          draggable={false}
+          style={{
+            display: "block",
+            height: "100%",
+            width: "100%",
+            userSelect: "none",
+            background: "#000",
+            objectFit: "contain",
+          }}
+          onMouseMove={handleMouseMove}
+          onMouseDown={handleMouseDown}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            const box = frameWrapperRef.current?.getBoundingClientRect();
+            setMenuPos({
+              x: e.clientX - (box?.left ?? 0),
+              y: e.clientY - (box?.top ?? 0),
+            });
+            void onContextMenuOpenChange(true);
+          }}
+        />
+
+        {menuPos && (
+          <>
+            {/* Light-dismiss scrim. A full-size sibling rather than a document
+                listener: the canvas swallows pointer events into the remote
+                page, so a bubbled click would never reach `document`. */}
+            <div
+              style={{ position: "absolute", inset: 0 }}
+              onMouseDown={closeMenu}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                closeMenu();
+              }}
+            />
+            <div
+              role="menu"
+              style={{
+                position: "absolute",
+                left: menuPos.x,
+                top: menuPos.y,
+                minWidth: 190,
+                padding: 4,
+                borderRadius: 10,
+                border: "1px solid var(--ny-border-strong)",
+                background: "var(--ny-surface-raised)",
+                boxShadow: "var(--ny-shadow-lg)",
+                display: "flex",
+                flexDirection: "column",
+                gap: 1,
+              }}
+            >
+              {(
+                [
+                  ["back", () => sendControl("back")],
+                  ["forward", () => sendControl("forward")],
+                  ["reload", () => sendControl("reload")],
+                ] as const
+              ).map(([key, run]) => (
+                <button
+                  key={key}
+                  type="button"
+                  role="menuitem"
+                  style={menuItemStyle}
+                  onClick={() => {
+                    run();
+                    closeMenu();
+                  }}
+                >
+                  {t(`browser.menu.${key}`)}
+                </button>
+              ))}
+              {clipboardAvailable && menuSelectionText && menuSelectionText.length > 0 && (
+                <>
+                  <div style={{ height: 1, background: "var(--ny-border)", margin: "3px 0" }} />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    style={menuItemStyle}
+                    onClick={() => {
+                      void onCopySelection();
+                      closeMenu();
+                    }}
+                  >
+                    {t("browser.menu.copy")}
+                  </button>
+                </>
+              )}
+              <div style={{ height: 1, background: "var(--ny-border)", margin: "3px 0" }} />
+              <button
+                type="button"
+                role="menuitem"
+                style={menuItemStyle}
+                onClick={() => {
+                  onOpenInRealBrowser();
+                  closeMenu();
+                }}
+              >
+                {t("browser.menu.openInNewTab")}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                style={menuItemStyle}
+                onClick={() => {
+                  onViewSource();
+                  closeMenu();
+                }}
+              >
+                {t("browser.menu.viewPageSource")}
+              </button>
+            </div>
+          </>
+        )}
+
         {!hasFrame && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              pointerEvents: "none",
+              display: "grid",
+              placeItems: "center",
+              fontSize: 12,
+              color: "var(--ny-ink-6)",
+            }}
+          >
             {decoderError
               ? decoderError
               : connected
@@ -893,86 +1034,143 @@ export function BrowserViewer({ sessionId, status, navigateTo, onNavigated }: Br
       </div>
 
       {/* Console panel */}
-      <Collapsible
-        open={consoleOpen}
-        onOpenChange={setConsoleOpen}
-        className="shrink-0 border-t border-border"
-      >
-        <CollapsibleTrigger
-          render={
-            <button
-              type="button"
-              className="flex w-full items-center gap-1 px-2 py-1 text-left text-xs text-muted-foreground hover:bg-muted/50"
-            />
-          }
+      <div style={{ flex: "none", borderTop: "1px solid var(--ny-border)" }}>
+        <button
+          type="button"
+          aria-expanded={consoleOpen}
+          onClick={() => setConsoleOpen((open) => !open)}
+          style={{
+            appearance: "none",
+            border: "none",
+            background: "transparent",
+            width: "100%",
+            display: "flex",
+            alignItems: "center",
+            gap: 5,
+            padding: "5px 8px",
+            cursor: "pointer",
+            textAlign: "left",
+            fontSize: 11.5,
+            fontFamily: "var(--ny-font-sans)",
+            color: "var(--ny-text-muted)",
+          }}
         >
-          {consoleOpen ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
-          <span className="font-medium">{t("browser.consoleHeading")}</span>
+          {consoleOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          <span style={{ fontWeight: 600 }}>{t("browser.consoleHeading")}</span>
           {panelEntries.length > 0 && (
-            <span className="ml-1 text-muted-foreground/70">({panelEntries.length})</span>
+            <span style={{ color: "var(--ny-text-subtle)" }}>({panelEntries.length})</span>
           )}
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <ScrollArea className="h-32">
-            <div className="px-2 py-1 font-mono text-xs">
+        </button>
+
+        {consoleOpen && (
+          <>
+            <div
+              className="bh-scroll"
+              style={{
+                height: 128,
+                overflowY: "auto",
+                padding: "4px 8px",
+                fontFamily: "var(--ny-font-mono)",
+                fontSize: 11.5,
+                lineHeight: 1.6,
+              }}
+            >
               {panelEntries.length === 0 ? (
-                <div className="py-2 text-muted-foreground">{t("browser.noConsoleOutput")}</div>
+                <div style={{ padding: "6px 0", color: "var(--ny-text-subtle)" }}>
+                  {t("browser.noConsoleOutput")}
+                </div>
               ) : (
-                panelEntries.map((entry, i) =>
-                  entry._t === "console" ? (
+                panelEntries.map((entry, i) => {
+                  const tone =
+                    entry._t === "console"
+                      ? entry.level === "error"
+                        ? "var(--ny-danger-text)"
+                        : entry.level === "warn"
+                          ? "var(--ny-warning-text)"
+                          : entry.level === "debug"
+                            ? "var(--ny-text-subtle)"
+                            : "var(--ny-text)"
+                      : entry.kind === "error"
+                        ? "var(--ny-danger-text)"
+                        : entry.kind === "input"
+                          ? "var(--ny-text-subtle)"
+                          : "var(--ny-text)";
+                  return (
                     <div
                       key={i}
-                      className={cn(
-                        "border-b border-border/40 py-0.5 last:border-b-0",
-                        entry.level === "error" && "text-red-500",
-                        entry.level === "warn" && "text-yellow-500",
-                        entry.level === "debug" && "text-muted-foreground",
-                      )}
+                      style={{
+                        padding: "2px 0",
+                        borderBottom: "1px solid var(--ny-border)",
+                        color: tone,
+                      }}
                     >
-                      <span className="text-muted-foreground/60">[{entry.level}]</span> {entry.text}
-                      {entry.url && (
-                        <span className="ml-2 text-muted-foreground/60">
-                          {entry.url}
-                          {entry.line ? `:${entry.line}` : ""}
-                        </span>
+                      {entry._t === "console" ? (
+                        <>
+                          <span style={{ color: "var(--ny-text-subtle)" }}>[{entry.level}]</span>{" "}
+                          {entry.text}
+                          {entry.url && (
+                            <span style={{ marginLeft: 8, color: "var(--ny-text-subtle)" }}>
+                              {entry.url}
+                              {entry.line ? `:${entry.line}` : ""}
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <span style={{ color: "var(--ny-text-subtle)" }}>
+                            {entry.kind === "input" ? ">" : entry.kind === "error" ? "✗" : "←"}
+                          </span>{" "}
+                          <span
+                            style={{
+                              whiteSpace: entry.kind === "input" ? "normal" : "pre-wrap",
+                            }}
+                          >
+                            {entry.text}
+                          </span>
+                        </>
                       )}
                     </div>
-                  ) : (
-                    <div
-                      key={i}
-                      className={cn(
-                        "border-b border-border/40 py-0.5 last:border-b-0",
-                        entry.kind === "input" && "text-muted-foreground",
-                        entry.kind === "error" && "text-red-500",
-                      )}
-                    >
-                      <span className="text-muted-foreground/60">
-                        {entry.kind === "input" ? ">" : entry.kind === "error" ? "✗" : "←"}
-                      </span>{" "}
-                      <span className={entry.kind === "input" ? "" : "whitespace-pre-wrap"}>
-                        {entry.text}
-                      </span>
-                    </div>
-                  ),
-                )
+                  );
+                })
               )}
             </div>
-          </ScrollArea>
-          <div className="flex items-center gap-1 border-t border-border px-2 py-1">
-            <span className="text-muted-foreground/60 font-mono text-xs">{">"}</span>
-            <Input
-              value={evalInput}
-              onChange={(e) => setEvalInput(e.target.value)}
-              onKeyDown={handleEvalKeyDown}
-              placeholder={connected ? t("browser.evalPlaceholder") : t("browser.evalDisconnected")}
-              disabled={!connected}
-              spellCheck={false}
-              autoComplete="off"
-              className="h-6 flex-1 font-mono text-xs"
-            />
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
+
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "5px 8px",
+                borderTop: "1px solid var(--ny-border)",
+              }}
+            >
+              <span
+                style={{
+                  fontFamily: "var(--ny-font-mono)",
+                  fontSize: 12,
+                  color: "var(--ny-text-subtle)",
+                }}
+              >
+                {">"}
+              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <Input
+                  value={evalInput}
+                  onChange={setEvalInput}
+                  placeholder={
+                    connected ? t("browser.evalPlaceholder") : t("browser.evalDisconnected")
+                  }
+                  aria-label={t("browser.consoleHeading")}
+                  disabled={!connected}
+                  size="sm"
+                  autoComplete="off"
+                  ref={evalInputRef}
+                />
+              </div>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

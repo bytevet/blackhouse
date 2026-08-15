@@ -1,4 +1,4 @@
-import i18n from "i18next";
+import i18n, { type TFunction } from "i18next";
 import { initReactI18next } from "react-i18next";
 import LanguageDetector from "i18next-browser-languagedetector";
 
@@ -38,5 +38,17 @@ function syncHtmlLang(lng: string) {
 }
 syncHtmlLang(i18n.language);
 i18n.on("languageChanged", syncHtmlLang);
+
+/**
+ * The key union `t()` accepts, generated from `en.json` by the module
+ * augmentation in `i18next.d.ts`.
+ *
+ * Needed only where a key is chosen at runtime — `agentStatusConfig` and
+ * friends store `labelKey` as a plain `string`, because the mapping lives in
+ * `lib/` and must not depend on the locale files. Those call sites assert
+ * through this type rather than through `any`, so a typo still fails at
+ * runtime in the obvious way but the rest of the call keeps its checking.
+ */
+export type TranslationKey = Parameters<TFunction>[0];
 
 export default i18n;
