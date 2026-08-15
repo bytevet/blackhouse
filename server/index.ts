@@ -13,6 +13,8 @@ import authRoutes from "./api/auth.js";
 import agentsRoutes from "./api/agents.js";
 import channelsRoutes from "./api/channels.js";
 import streamRoutes from "./api/stream.js";
+import agentRuntimeRoutes from "./api/agent-runtime.js";
+import dispatchRoutes from "./api/dispatches.js";
 import settingsRoutes from "./api/settings.js";
 import skillsRoutes from "./api/skills.js";
 import { createTerminalRoute } from "./ws/terminal.js";
@@ -56,6 +58,8 @@ const routes = app
   .route("/api/agents", agentsRoutes)
   .route("/api/channels", channelsRoutes)
   .route("/api/stream", streamRoutes)
+  .route("/api/agent-runtime", agentRuntimeRoutes)
+  .route("/api/dispatches", dispatchRoutes)
   .route("/api/settings", settingsRoutes)
   .route("/.well-known/agent-skills", skillsRoutes);
 

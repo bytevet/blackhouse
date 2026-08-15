@@ -306,12 +306,24 @@ type AgentRow = typeof schema.agents.$inferSelect;
 async function routeMention(input: {
   agent: AgentRow;
   channelId: string;
-  triggerMessageId: string;
+  /** The message that caused this run — a human post, or an approved dispatch card. */
+  triggerMessageId?: string | null;
   prompt: string;
   mode: "queue" | "interrupt";
-  requestedByUserId: string;
+  /** Set when a human mentioned the agent, or approved a dispatch to it. */
+  requestedByUserId?: string | null;
+  /** Set when another agent originated the request. */
+  requestedByAgentId?: string | null;
 }): Promise<{ agentId: string; runId: string; queued: boolean; reason?: string }> {
-  const { agent, channelId, triggerMessageId, prompt, mode, requestedByUserId } = input;
+  const {
+    agent,
+    channelId,
+    triggerMessageId,
+    prompt,
+    mode,
+    requestedByUserId,
+    requestedByAgentId,
+  } = input;
 
   const notDeliverable =
     agent.status !== "running" || !agent.containerId
@@ -328,8 +340,9 @@ async function routeMention(input: {
     .values({
       agentId: agent.id,
       channelId,
-      triggerMessageId,
-      requesterUserId: requestedByUserId,
+      triggerMessageId: triggerMessageId ?? null,
+      requesterUserId: requestedByUserId ?? null,
+      requesterAgentId: requestedByAgentId ?? null,
       prompt,
       injectionMode: mode,
       status: shouldQueue ? "queued" : "injecting",
