@@ -74,6 +74,17 @@ export function toCreateOptions(
     Binds: binds.length > 0 ? binds : undefined,
     ExtraHosts: hostGateway ? ["host.docker.internal:host-gateway"] : undefined,
 
+    // Make the named network the container's PRIMARY network, not merely an
+    // attachment. `NetworkingConfig.EndpointsConfig` alone connects the
+    // container but leaves `NetworkMode` at `bridge`, and Docker only points
+    // `/etc/resolv.conf` at its embedded resolver (127.0.0.11) for containers
+    // whose primary network is user-defined. The container then sits on the
+    // right network with the right IP and still cannot resolve `app` — which
+    // silently breaks the sidecar, since it reaches the harness by service
+    // name. Verified against a live daemon; a container attached this way
+    // fails DNS while an otherwise identical one with NetworkMode set does not.
+    NetworkMode: networkName || undefined,
+
     // Container-network mode reaches services by container IP, so publishing
     // to the host would be pointless surface area.
     PortBindings: networkName || Object.keys(portBindings).length === 0 ? undefined : portBindings,
