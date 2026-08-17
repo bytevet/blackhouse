@@ -36,7 +36,13 @@ interface BlueprintRow {
   agentCommand: string | null;
   image: string | null;
   dockerfileContent: string | null;
-  imageBuildStatus: string;
+  /**
+   * Null for a blueprint that names a prebuilt image and has never been built
+   * here — which is every seeded blueprint, so it is the common case, not an
+   * edge one. The column is nullable server-side; typing it `string` let
+   * `blueprints.build.null` render as a raw i18n key in the card footer.
+   */
+  imageBuildStatus: string | null;
   sandboxRuntime: string;
   egressPolicy: string;
 }
@@ -70,12 +76,28 @@ function cliIcon(cli: string) {
   }
 }
 
-const buildTone: Record<string, "neutral" | "info" | "success" | "danger"> = {
+const buildTone = {
   none: "neutral",
   building: "info",
   success: "success",
   error: "danger",
-};
+} as const;
+
+type BuildState = keyof typeof buildTone;
+
+/**
+ * Narrow the nullable, free-text build status to one of the four states we
+ * have a label and a tone for.
+ *
+ * Null is the ordinary case, not an edge one: a blueprint that names a
+ * prebuilt image has never been built here. Interpolating the raw value into
+ * the translation key rendered `blueprints.build.null` verbatim in the card
+ * footer — which is also why this returns a `BuildState` rather than a string,
+ * so `t()` keeps checking the key against `en.json`.
+ */
+function buildState(status: string | null): BuildState {
+  return status && status in buildTone ? (status as BuildState) : "none";
+}
 
 const metaChip = {
   fontFamily: "var(--ny-font-mono)",
@@ -287,14 +309,8 @@ export function BlueprintsPage() {
                   background: "var(--ny-surface-sunken)",
                 }}
               >
-                <Badge
-                  tone={buildTone[bp.imageBuildStatus] ?? "neutral"}
-                  variant="subtle"
-                  size="sm"
-                >
-                  {t(`blueprints.build.${bp.imageBuildStatus}`, {
-                    defaultValue: bp.imageBuildStatus,
-                  })}
+                <Badge tone={buildTone[buildState(bp.imageBuildStatus)]} variant="subtle" size="sm">
+                  {t(`blueprints.build.${buildState(bp.imageBuildStatus)}` as const)}
                 </Badge>
                 {isAdmin && (
                   <span style={{ marginLeft: "auto", display: "flex", gap: 4 }}>

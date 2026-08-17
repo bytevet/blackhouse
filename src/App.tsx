@@ -24,8 +24,13 @@ export function App() {
       <Route element={<AuthLayout />}>
         <Route path="/channels" element={<Navigate to="/channels/general" replace />} />
         <Route path="/channels/:slug" element={<ChannelPage />} />
-        <Route path="/agents" element={<AgentsPage />} />
-        <Route path="/agents/new" element={<CreateAgentPage />} />
+        {/* `new` is nested so it renders as a dialog *over* the roster rather
+            than replacing it. The URL stays `/agents/new` and remains
+            shareable; dismissing the dialog just returns to the list that was
+            behind it all along. */}
+        <Route path="/agents" element={<AgentsPage />}>
+          <Route path="new" element={<CreateAgentPage />} />
+        </Route>
         <Route path="/agents/:agentId" element={<AgentPage />} />
         <Route path="/settings" element={<SettingsLayout />}>
           <Route index element={<Navigate to="/settings/blueprints" replace />} />

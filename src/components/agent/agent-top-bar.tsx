@@ -1,10 +1,14 @@
-import { Link } from "react-router";
-import { ChevronLeft, Moon, Sun } from "lucide-react";
-import { useAppTheme } from "@/components/theme-provider";
+import { AppHeader } from "@/components/app-header";
 
 /**
- * The thin breadcrumb strip above the agent header: where you came from, where
- * you are, and the theme toggle every screen in the design carries.
+ * The breadcrumb strip above the agent header: where you came from, where you
+ * are, and the global controls every screen carries.
+ *
+ * A thin wrapper over `AppHeader` rather than its own bar. It used to be a
+ * separate implementation — a couple of pixels shorter than the equivalent
+ * strips on `/agents` and `/settings`, with a hand-rolled theme button in place
+ * of `ThemeToggle` and no language switcher at all — so both the bar's height
+ * and its controls changed as you moved between screens.
  */
 export interface AgentTopBarProps {
   /** Channel slug to return to, when we know it. */
@@ -13,84 +17,15 @@ export interface AgentTopBarProps {
 }
 
 export function AgentTopBar({ backChannel, handle }: AgentTopBarProps) {
-  const { theme, toggle } = useAppTheme();
-
-  return (
-    <header
-      style={{
-        flex: "none",
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-        padding: "10px 18px",
-        borderBottom: "1px solid var(--ny-border)",
-        background: "var(--ny-surface-sunken)",
-      }}
-    >
-      <Link
-        to={backChannel ? `/channels/${backChannel}` : "/agents"}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 7,
-          textDecoration: "none",
-          color: "var(--ny-text-subtle)",
-          fontSize: 12.5,
-          fontFamily: "var(--ny-font-mono)",
-        }}
-      >
-        <ChevronLeft size={15} strokeWidth={2} aria-hidden="true" />
-        {backChannel ? `#${backChannel}` : "agents"}
-      </Link>
-      <span style={{ color: "var(--ny-text-subtle)" }}>/</span>
-      <Link
-        to="/agents"
-        style={{
-          fontFamily: "var(--ny-font-mono)",
-          fontSize: 12.5,
-          color: "var(--ny-text)",
-          textDecoration: "none",
-        }}
-      >
-        agents
-      </Link>
-      <span style={{ color: "var(--ny-text-subtle)" }}>/</span>
-      <span
-        style={{
-          fontFamily: "var(--ny-font-mono)",
-          fontSize: 12.5,
-          fontWeight: 600,
-          color: "var(--ny-text)",
-        }}
-      >
-        @{handle}
-      </span>
-
-      <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
-        <button
-          type="button"
-          onClick={toggle}
-          aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-          title="Toggle theme"
-          style={{
-            width: 30,
-            height: 30,
-            borderRadius: 7,
-            display: "grid",
-            placeItems: "center",
-            cursor: "pointer",
-            color: "var(--ny-text-subtle)",
-            border: "1px solid var(--ny-border)",
-            background: "transparent",
-          }}
-        >
-          {theme === "dark" ? (
-            <Sun size={15} strokeWidth={2} aria-hidden="true" />
-          ) : (
-            <Moon size={15} strokeWidth={2} aria-hidden="true" />
-          )}
-        </button>
-      </div>
-    </header>
+  // Arriving from a channel, "back" is that channel and the roster is a step in
+  // the trail. Arriving from the roster, "back" is the roster — and repeating it
+  // as a crumb would render "agents / agents / @scout".
+  return backChannel ? (
+    <AppHeader
+      back={{ label: `#${backChannel}`, to: `/channels/${backChannel}` }}
+      crumbs={[{ label: "agents", to: "/agents" }, { label: `@${handle}` }]}
+    />
+  ) : (
+    <AppHeader back={{ label: "agents", to: "/agents" }} crumbs={[{ label: `@${handle}` }]} />
   );
 }

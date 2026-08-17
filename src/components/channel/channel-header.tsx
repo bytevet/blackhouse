@@ -39,10 +39,15 @@ export function ChannelHeader({
     <header
       style={{
         flex: "none",
+        // Two rows deep — title, then topic/repo — so this is taller than the
+        // one-line breadcrumb bars and takes its own token. It is shared with
+        // the sidebar's workspace block next to it, so the rule across the top
+        // of the screen is continuous even when a channel has no topic.
+        height: "var(--bh-topstrip-h)",
         display: "flex",
         alignItems: "center",
         gap: 12,
-        padding: "12px clamp(12px, 2vw, 18px)",
+        padding: "0 clamp(12px, 2vw, 20px)",
         borderBottom: "1px solid var(--ny-border)",
       }}
     >

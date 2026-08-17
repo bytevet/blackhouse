@@ -1,12 +1,11 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, Outlet, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
-import { ChevronLeft, Play, Plus, Square, Trash2 } from "lucide-react";
-import { Alert, Badge, Button, Dialog, Heading, Spinner, Text, ThemeToggle } from "@notyet.im/ui";
+import { Play, Plus, Square, Trash2 } from "lucide-react";
+import { Alert, Badge, Button, Dialog, Heading, Spinner, Text } from "@notyet.im/ui";
 import { client, unwrap } from "@/lib/api";
 import { useResource } from "@/hooks/use-resource";
-import { useAppTheme } from "@/components/theme-provider";
-import { LanguageSwitcher } from "@/components/language-switcher";
+import { AppHeader } from "@/components/app-header";
 import {
   agentActivityConfig,
   agentStatusConfig,
@@ -75,7 +74,6 @@ const metaChip = {
 export function AgentsPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { theme, setTheme } = useAppTheme();
   const [pending, setPending] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   /** Which destructive action is awaiting confirmation, if any. */
@@ -128,41 +126,10 @@ export function AgentsPage() {
         overflow: "hidden",
       }}
     >
-      <header
-        style={{
-          flex: "none",
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          padding: "11px 20px",
-          borderBottom: "1px solid var(--ny-border)",
-          background: "var(--ny-surface-sunken)",
-        }}
-      >
-        <Link
-          to="/channels"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 7,
-            textDecoration: "none",
-            color: "var(--ny-text-subtle)",
-            fontFamily: "var(--ny-font-mono)",
-            fontSize: 12.5,
-          }}
-        >
-          <ChevronLeft size={15} />
-          {t("settings.backToWorkspace")}
-        </Link>
-        <span style={{ color: "var(--ny-text-subtle)" }}>/</span>
-        <span style={{ fontFamily: "var(--ny-font-mono)", fontSize: 12.5, fontWeight: 600 }}>
-          {t("agents.breadcrumb")}
-        </span>
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
-          <LanguageSwitcher />
-          <ThemeToggle theme={theme} onChange={setTheme} label={t("nav.toggleTheme")} />
-        </div>
-      </header>
+      <AppHeader
+        back={{ label: t("settings.backToWorkspace"), to: "/channels" }}
+        crumbs={[{ label: t("agents.breadcrumb") }]}
+      />
 
       <main
         className="bh-scroll"
@@ -423,6 +390,9 @@ export function AgentsPage() {
           )}
         </div>
       </main>
+
+      {/* `/agents/new` — a dialog over this list, not a screen instead of it. */}
+      <Outlet />
 
       <Dialog
         open={confirm !== null}

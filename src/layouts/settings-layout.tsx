@@ -1,10 +1,9 @@
 import type { ReactNode } from "react";
-import { Link, NavLink, Outlet } from "react-router";
+import { NavLink, Outlet } from "react-router";
 import { useTranslation } from "react-i18next";
-import { Box, ChevronLeft, LayoutGrid, ShieldCheck, UserRound, Users } from "lucide-react";
-import { Heading, Text, ThemeToggle } from "@notyet.im/ui";
-import { useAppTheme } from "@/components/theme-provider";
-import { LanguageSwitcher } from "@/components/language-switcher";
+import { Box, LayoutGrid, ShieldCheck, UserRound, Users } from "lucide-react";
+import { Heading, Text } from "@notyet.im/ui";
+import { AppHeader } from "@/components/app-header";
 
 interface NavEntry {
   to: string;
@@ -35,7 +34,6 @@ const NAV: NavEntry[] = [
  */
 export function SettingsLayout() {
   const { t } = useTranslation();
-  const { theme, setTheme } = useAppTheme();
 
   return (
     <div
@@ -50,41 +48,10 @@ export function SettingsLayout() {
         overflow: "hidden",
       }}
     >
-      <header
-        style={{
-          flex: "none",
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          padding: "11px 20px",
-          borderBottom: "1px solid var(--ny-border)",
-          background: "var(--ny-surface-sunken)",
-        }}
-      >
-        <Link
-          to="/channels"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 7,
-            textDecoration: "none",
-            color: "var(--ny-text-subtle)",
-            fontFamily: "var(--ny-font-mono)",
-            fontSize: 12.5,
-          }}
-        >
-          <ChevronLeft size={15} />
-          {t("settings.backToWorkspace")}
-        </Link>
-        <span style={{ color: "var(--ny-text-subtle)" }}>/</span>
-        <span style={{ fontFamily: "var(--ny-font-mono)", fontSize: 12.5, fontWeight: 600 }}>
-          {t("settings.title")}
-        </span>
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
-          <LanguageSwitcher />
-          <ThemeToggle theme={theme} onChange={setTheme} label={t("nav.toggleTheme")} />
-        </div>
-      </header>
+      <AppHeader
+        back={{ label: t("settings.backToWorkspace"), to: "/channels" }}
+        crumbs={[{ label: t("settings.title") }]}
+      />
 
       <div className="bh-settings-body">
         <nav className="bh-settings-nav bh-scroll" aria-label={t("settings.title")}>
@@ -129,7 +96,10 @@ export function SettingsLayout() {
           className="bh-scroll"
           style={{ flex: 1, minWidth: 0, overflowY: "auto", padding: "26px 24px 60px" }}
         >
-          <div style={{ maxWidth: 900 }}>
+          {/* Centred like the roster's column. Forms are narrower than a card
+              grid, but both panes should hang their content the same way —
+              left-hugging here and centred there read as a layout bug. */}
+          <div style={{ maxWidth: 900, margin: "0 auto" }}>
             <Outlet />
           </div>
         </main>

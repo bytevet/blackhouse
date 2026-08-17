@@ -49,7 +49,7 @@ export function ChannelSidebar({
   return (
     <aside
       style={{
-        width: 288,
+        width: "var(--bh-rail-w)",
         maxWidth: "86vw",
         flex: "none",
         display: "flex",
@@ -65,7 +65,11 @@ export function ChannelSidebar({
           display: "flex",
           alignItems: "center",
           gap: 10,
-          padding: "12px 14px",
+          // Shares the channel header's height so the two bottom borders meet
+          // as one rule instead of stepping by a few pixels at the seam.
+          height: "var(--bh-topstrip-h)",
+          flex: "none",
+          padding: "0 14px",
           borderBottom: "1px solid var(--ny-border)",
         }}
       >

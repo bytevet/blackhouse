@@ -37,6 +37,29 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  /* ── Shell geometry ───────────────────────────────────────────────────────
+   * The two measurements every full-page screen shares. They are tokens rather
+   * than literals because each was previously written out per screen and the
+   * copies drifted: three top bars at three heights, and a left rail that was
+   * 288px on the channels screen but 230px in settings, so the content edge
+   * jumped as you navigated between them.
+   *
+   * Anything that spans the top of a screen sets `height: var(--bh-header-h)`
+   * and lets its own padding be whatever centres its contents. That keeps the
+   * first row of page content on one line across every route regardless of
+   * what each bar holds. */
+  --bh-header-h: 45px;
+  --bh-rail-w: 288px;
+
+  /* The channel screen's top strip is its own measurement, because it is two
+   * rows deep — a title line and a topic/repo line — where the breadcrumb bars
+   * are one. It spans two separate elements that sit side by side, the
+   * sidebar's workspace block and the channel header, and each was sized by its
+   * own padding: 59px and 66px. The result was a 7px step in the rule across
+   * the top of the screen, right where the eye lands. Both take this instead,
+   * so the rule is continuous whether or not the channel has a topic. */
+  --bh-topstrip-h: 66px;
 }
 
 html,
@@ -173,6 +196,48 @@ body {
   color: var(--shiki-dark);
 }
 
+/* ── Dialogs ────────────────────────────────────────────────────────────────
+ * A native modal `<dialog>` is centred by the UA stylesheet's `margin: auto`,
+ * and Tailwind's preflight resets `margin: 0` on `*` — which includes `dialog`
+ * and wins on specificity. Every modal in the app was therefore pinned to the
+ * top-left corner of the viewport: the confirm dialogs, the create-channel
+ * dialog, and the create-agent wizard alike.
+ *
+ * `:modal` rather than `dialog[open]`, so a non-modal `show()` dialog (which is
+ * positioned in normal flow, and should stay there) is left alone. */
+dialog:modal {
+  margin: auto;
+}
+
+/* ── App header ─────────────────────────────────────────────────────────────
+ * One bar for `/agents`, `/settings/*` and `/agents/:id`. Fixed height, so the
+ * page content below it starts at the same y on every route; the vertical
+ * padding is 0 and alignment does the centring, which means a taller control
+ * dropped into the bar cannot silently grow it. */
+.bh-app-header {
+  flex: none;
+  height: var(--bh-header-h);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--ny-border);
+  background: var(--ny-surface-sunken);
+}
+
+/* Breadcrumb trails are the first thing to overflow on a phone. Let the bar
+ * scroll rather than wrap, since wrapping would defeat the fixed height. */
+@media (max-width: 640px) {
+  .bh-app-header {
+    padding: 0 12px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .bh-app-header::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 /* ── Settings shell ─────────────────────────────────────────────────────── */
 
 /* Narrow first: the section rail is a horizontally-scrolling strip above the
@@ -206,7 +271,10 @@ body {
   }
 
   .bh-settings-nav {
-    width: 230px;
+    /* Same rail width as the channels sidebar. These are the two left rails in
+     * the app and they sit in the same place, so a different width reads as
+     * the layout shifting under you rather than as a deliberate distinction. */
+    width: var(--bh-rail-w);
     flex-direction: column;
     overflow-x: visible;
     overflow-y: auto;

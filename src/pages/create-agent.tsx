@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import {
-  Bot,
   Check,
   Database,
   FileSearch,
@@ -13,12 +12,10 @@ import {
   ShieldOff,
   SquareDashed,
 } from "lucide-react";
-import { Alert, Button, Field, Input, Spinner, Text, ThemeToggle } from "@notyet.im/ui";
+import { Alert, Button, Dialog, Field, Input, Spinner, Text } from "@notyet.im/ui";
 import { z } from "zod";
 import { client, unwrap } from "@/lib/api";
 import { useResource } from "@/hooks/use-resource";
-import { useAppTheme } from "@/components/theme-provider";
-import { LogoMark } from "@/components/logo";
 import { useRuntimes } from "@/hooks/use-runtimes";
 
 interface BlueprintRow {
@@ -74,7 +71,15 @@ const metaChip = {
 export function CreateAgentPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { theme, setTheme } = useAppTheme();
+  /**
+   * Creating an agent is a step inside the roster, not a place of its own, so
+   * it renders as a modal over `/agents` rather than replacing the screen. The
+   * URL is still `/agents/new` — the route is nested under the roster and this
+   * is its outlet — so the link stays shareable and Back still works. Closing
+   * means returning to the list underneath, which is exactly what dismissing a
+   * dialog should do.
+   */
+  const close = () => navigate("/agents");
 
   const [step, setStep] = useState<1 | 2>(1);
   const [blueprintId, setBlueprintId] = useState<string | null>(null);
@@ -159,76 +164,42 @@ export function CreateAgentPage() {
     </span>
   );
 
+  const footer = (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, width: "100%" }}>
+      {step === 2 && (
+        <Button variant="ghost" onClick={() => setStep(1)}>
+          {t("common.back")}
+        </Button>
+      )}
+      <span style={{ marginLeft: "auto" }} />
+      <Button variant="ghost" onClick={close}>
+        {t("common.cancel")}
+      </Button>
+      {step === 1 ? (
+        <Button variant="primary" disabled={!blueprintId} onClick={() => setStep(2)}>
+          {t("createAgent.continue")}
+        </Button>
+      ) : (
+        <Button variant="primary" loading={submitting} onClick={() => void submit()}>
+          {t("createAgent.create")}
+        </Button>
+      )}
+    </div>
+  );
+
   return (
-    <div
-      style={{
-        minHeight: "100%",
-        width: "100%",
-        background: "var(--ny-bg)",
-        color: "var(--ny-text)",
-        fontFamily: "var(--ny-font-sans)",
-        display: "flex",
-        alignItems: "flex-start",
-        justifyContent: "center",
-        padding: "40px 16px",
-        overflowY: "auto",
-      }}
+    <Dialog
+      open
+      onClose={close}
+      size="lg"
+      title={t("createAgent.title")}
+      description={selected ? selected.name : t("createAgent.pickBlueprintHint")}
+      closeLabel={t("common.cancel")}
+      footer={footer}
     >
-      <div style={{ position: "fixed", top: 16, right: 16, zIndex: 100 }}>
-        <ThemeToggle theme={theme} onChange={setTheme} label={t("nav.toggleTheme")} />
-      </div>
-
-      <div
-        style={{
-          width: 680,
-          maxWidth: "100%",
-          background: "var(--ny-surface)",
-          border: "1px solid var(--ny-border-strong)",
-          borderRadius: 16,
-          boxShadow: "var(--ny-shadow-lg)",
-          overflow: "hidden",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        {/* Header + step rail */}
-        <div
-          style={{
-            flex: "none",
-            padding: "18px 22px 14px",
-            borderBottom: "1px solid var(--ny-border)",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span
-              style={{
-                width: 30,
-                height: 30,
-                borderRadius: 8,
-                background: "var(--ny-accent)",
-                color: "var(--ny-text-on-accent)",
-                display: "grid",
-                placeItems: "center",
-              }}
-            >
-              <Bot size={17} />
-            </span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 16, fontWeight: 700 }}>{t("createAgent.title")}</div>
-              <div
-                style={{
-                  fontSize: 12,
-                  color: "var(--ny-text-subtle)",
-                  fontFamily: "var(--ny-font-mono)",
-                }}
-              >
-                {selected ? selected.name : t("createAgent.pickBlueprintHint")}
-              </div>
-            </div>
-            <LogoMark size={26} />
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 15 }}>
+      <div>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
             <div
               style={{
                 display: "flex",
@@ -255,7 +226,7 @@ export function CreateAgentPage() {
           </div>
         </div>
 
-        <div className="bh-scroll" style={{ flex: 1, minHeight: 0, padding: "20px 22px" }}>
+        <div>
           {submitError && (
             <div style={{ marginBottom: 16 }}>
               <Alert
@@ -650,38 +621,7 @@ export function CreateAgentPage() {
             </div>
           )}
         </div>
-
-        <div
-          style={{
-            flex: "none",
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            padding: "14px 22px",
-            borderTop: "1px solid var(--ny-border)",
-            background: "var(--ny-surface-sunken)",
-          }}
-        >
-          {step === 2 && (
-            <Button variant="ghost" onClick={() => setStep(1)}>
-              {t("common.back")}
-            </Button>
-          )}
-          <span style={{ marginLeft: "auto" }} />
-          <Button variant="ghost" onClick={() => navigate("/agents")}>
-            {t("common.cancel")}
-          </Button>
-          {step === 1 ? (
-            <Button variant="primary" disabled={!blueprintId} onClick={() => setStep(2)}>
-              {t("createAgent.continue")}
-            </Button>
-          ) : (
-            <Button variant="primary" loading={submitting} onClick={() => void submit()}>
-              {t("createAgent.create")}
-            </Button>
-          )}
-        </div>
       </div>
-    </div>
+    </Dialog>
   );
 }
