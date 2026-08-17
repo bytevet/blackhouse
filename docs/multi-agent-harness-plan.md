@@ -599,10 +599,41 @@ Run against a live daemon over mutual TLS. These were previously assumptions.
 | Docker's embedded DNS does not forward from an internal network | **Confirmed.** `SERVFAIL` for external names. This was flagged as a possible residual exfiltration channel; it is closed.                                                                |
 | Egress cannot be bypassed with a literal IP                     | **Confirmed.** Both hostname and raw-IP fetches blocked.                                                                                                                                 |
 
-Still unverified: gVisor × Chromium (the browser pane), the full inject→transcript path against a real
-agent CLI, and Kata (needs nested virtualisation, which ordinary cloud VMs do not expose).
+### Verification steps 2–7: all pass
 
-### Three bugs the live run found, none of them visible to a unit test
+Run end to end against the live daemon, from an empty database each time, with the mock agent under
+`runsc`. Four rounds were needed — each of the first three ended in a real bug, listed below.
+
+| Step                             | Result                                                                                                                                                                                                                              |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2 · migrate + seed from empty    | **Pass.** 17 tables created, admin login 200, `#general` and three blueprints seeded.                                                                                                                                               |
+| 3 · agent starts, runtime honest | **Pass.** `requested=auto, runtimeUsed=runsc`, and `uname -r` inside the container is `4.19.0-gvisor` — the badge reflects what actually ran.                                                                                       |
+| 4 · mention → TUI → transcript   | **Pass.** The whole slice. Prompt reaches the PTY, sidecar posts 8 events, transcript shows prose plus tool calls in the designed shape: `◇ Read /workspace/README.md · 120 ln`.                                                    |
+| 5 · queue vs interrupt           | **Pass.** Busy agent → `queued: "@scout is busy — delivers when idle"`, released to `running` once idle. Interrupt never queues.                                                                                                    |
+| 6 · human-gated dispatch         | **Pass.** Agent mention creates a pending card, does not dispatch; deny records `denied`; edit-and-approve keeps the original beside the edit, and only the **edited** text reaches `@reviewer`'s TUI (`EDITED` ×2, `ORIGINAL` ×0). |
+| 7 · per-agent egress allowlist   | **Pass, with enforcement explicitly enabled** — see below.                                                                                                                                                                          |
+
+Step 7 needs its caveat stated plainly. `docker_configs.egress_enforce` **ships false**, so on default
+settings there is no enforcement to test and the step is vacuous. Turning it on for the run gives the
+result the step actually asks for, under `policy=allowlist` with `["api.anthropic.com"]`:
+
+```
+api.anthropic.com → 401     (reached Anthropic and was rejected for credentials — connectivity proven)
+example.com       → blocked
+raw IP 1.1.1.1    → blocked
+HTTPS_PROXY       = http://<agent-id>:<token>@egress-proxy:3128
+```
+
+That last line is the one worth keeping. The allowlisted host resolved and connected **while the agent
+itself had no working DNS at all** — the CONNECT proxy resolved on its behalf. It is direct evidence
+for the claim in the DNS section below: the enforced path is unaffected by the gVisor resolver gap, and
+`open` is the policy left exposed by it.
+
+Still unverified: gVisor × Chromium (the browser pane), the inject→transcript path against a real agent
+CLI rather than the mock TUI, and Kata (needs nested virtualisation, which ordinary cloud VMs do not
+expose).
+
+### Four bugs the live run found, none of them visible to a unit test
 
 Each broke a core path, each was invisible to mocked dockerode, and each now has a regression test.
 
@@ -641,6 +672,26 @@ Each broke a core path, each was invisible to mocked dockerode, and each now has
    The general lesson: **gVisor's isolation extends to the network stack**, so anything Docker
    implements by way of the host network namespace — embedded DNS here — is unavailable to a sandboxed
    container. Any future feature that reaches a container by service name needs the same treatment.
+
+4. **Queue mode never drained** (`4abee4c`). Half the feature shipped: posting to a busy agent parked
+   the run at `queued` and answered _"@scout is busy — delivers when idle"_. Nothing kept that promise —
+   the agent returned to idle and the run stayed queued. The prompt is accepted, renders in the
+   transcript as pending, and never runs.
+
+   Worth noting how this one hid. The plan specifies the drainer in as many words ("a drainer releases
+   it when the sidecar next reports idle"), the parking side was implemented and correct, and the
+   symptom only appears if you check the run's status _after_ the agent goes idle — which the first
+   version of step 5 did not do. It asserted that queue mode "reports a decision", and a race let it
+   pass by measuring the immediate-delivery path instead. Tightening the check to drive the agent busy
+   first, assert `queued: true`, and then wait for release is what exposed it.
+
+   No unit test could have caught it either: the missing piece was a caller, not a behaviour. So the
+   regression test asserts on the call sites, and the readiness rule was pulled out as a pure function
+   — including that a run parked for _busy_ must still not fire if the agent has since been stopped or
+   hit its budget cap, and that `unknown` activity is not permission.
+
+   **Both lessons generalise: a test that accepts either outcome tests nothing, and a feature whose two
+   halves live in different files can ship with one half missing and every test green.**
 
 ### Open, and a design decision rather than a bug: general DNS inside gVisor
 
