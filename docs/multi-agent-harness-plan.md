@@ -20,8 +20,11 @@ future, and plain `runc` remains the graceful fallback for local macOS/Podman de
 **Outcome:** a runnable vertical slice — create agent → container starts through the sandbox abstraction →
 channel UI → `@mention` injects into the live TUI → sidecar streams the transcript back → attach and watch.
 
-> **Status: one open decision blocks the client work** — see "Design system conflict" below. The server
-> phases (0–2) are unaffected and ready to build.
+> **Status: implemented, and verified on a real gVisor host.** Verification steps 2–7 all pass against a
+> live Docker daemon — see "Verified on a real host" near the end, including the four bugs that only a
+> live run could surface and the one DNS limitation that remains open by design rather than by oversight.
+> The design-system question referenced further down was settled in favour of NotYet UI and is no longer
+> open.
 
 ## Decisions (settled in the interview)
 
