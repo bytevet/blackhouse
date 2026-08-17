@@ -586,6 +586,31 @@ and Kata paths need manual verification on a real Linux host — call this out i
    `curl https://api.anthropic.com` succeeds; check the proxy audit log.
 8. `npx playwright test`.
 
+## Verified on a real host (Ubuntu 24.04 + Docker 29.7.2 + gVisor)
+
+Run against a live daemon over mutual TLS. These were previously assumptions.
+
+| Claim                                                           | Result                                                                                                                                                                                   |
+| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| gVisor produces a real syscall boundary                         | **Confirmed.** Kernel inside a `runsc` container is `4.19.0-gvisor` with `dmesg` showing "Starting gVisor…"; under `runc` it is the host's `6.8.0-63-generic`.                           |
+| Hardening is compatible with gVisor (open risk #2)              | **Confirmed.** `CapDrop:[ALL]` + minimal add-back, `no-new-privileges`, `PidsLimit 512`, 2GB memory all applied under `runsc`; container started and ran normally. No `ENOSYS` failures. |
+| `auto` selects gVisor where present                             | **Confirmed.** `resolveDriver(auto) -> runsc`; `resolveDriver(kata) -> runsc` with `fellBackFrom=kata` and a stated reason.                                                              |
+| An `internal: true` network has no route out (open risk #4)     | **Confirmed.** No default route — only the link-local subnet.                                                                                                                            |
+| Docker's embedded DNS does not forward from an internal network | **Confirmed.** `SERVFAIL` for external names. This was flagged as a possible residual exfiltration channel; it is closed.                                                                |
+| Egress cannot be bypassed with a literal IP                     | **Confirmed.** Both hostname and raw-IP fetches blocked.                                                                                                                                 |
+
+Still unverified: gVisor × Chromium (the browser pane), the full inject→transcript path against a real
+agent CLI, and Kata (needs nested virtualisation, which ordinary cloud VMs do not expose).
+
+### Note on the transport used to reach the host
+
+The sandbox environment relays **only port 443** through its HTTP CONNECT proxy. It answers
+`200 Connection Established` for any port and then silently drops non-443 traffic, so a `200` is not
+evidence of reachability — confirmed by `imap.gmail.com:993` failing identically to a closed port while
+`api.github.com:443` succeeded. The daemon therefore listens on 443, and `scripts/proxy-tunnel.mjs`
+bridges a local port to it. The Docker CLI also honours `HTTPS_PROXY`, so `NO_PROXY` must include the
+daemon's hostname or the CLI bypasses the tunnel and fails.
+
 ## Open risks
 
 Ordered by how much they'll hurt.
