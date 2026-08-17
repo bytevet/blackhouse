@@ -8,6 +8,7 @@ import { createNodeWebSocket } from "@hono/node-ws";
 import { runMigrations } from "./db/migrate.js";
 import { runSeed } from "./db/seed.js";
 import { startBackgroundJobs } from "./lib/scheduler.js";
+import { ensurePtyHubConfigured } from "./agents/pty-config.js";
 import { detectRuntimes } from "./sandbox/registry.js";
 
 // API route modules
@@ -104,6 +105,10 @@ async function start() {
   } else {
     console.warn("[blackhouse] could not probe container runtimes — is the Docker socket mounted?");
   }
+
+  // Before any request can arrive: a mention routed to an agent injects onto
+  // its PTY, and that path must not depend on a terminal having been opened.
+  ensurePtyHubConfigured();
 
   startBackgroundJobs();
 

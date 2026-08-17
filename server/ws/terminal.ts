@@ -1,12 +1,9 @@
 import { Hono } from "hono";
 import type { createNodeWebSocket } from "@hono/node-ws";
-import { getDockerClient } from "../lib/docker.js";
-import { db } from "../db/index.js";
-import { agents } from "../db/schema.js";
-import { eq } from "drizzle-orm";
 import { validateAgentForContainer } from "../lib/agent-ws-auth.js";
 import { dataToBuffer } from "../lib/ws-binary.js";
-import { configurePtyHub, type PtyDocker, type PtyHub, type PtyPeer } from "../agents/pty-hub.js";
+import type { PtyHub, PtyPeer } from "../agents/pty-hub.js";
+import { ensurePtyHubConfigured } from "../agents/pty-config.js";
 
 /**
  * Terminal WebSocket route — a thin subscriber over `PtyHub`.
@@ -20,27 +17,14 @@ import { configurePtyHub, type PtyDocker, type PtyHub, type PtyPeer } from "../a
  *   0x02  system notice, JSON payload (server → client, e.g. injecting…)
  */
 
-let hub: PtyHub | null = null;
-
 /**
- * Wire the process-wide hub against the `agents` table.
- * `resolveContainer` is the only coupling point: the hub itself knows nothing
- * about agents, sessions, or Docker lookups.
+ * The hub is configured at server startup (`ensurePtyHubConfigured`), because
+ * the injector needs it whether or not anyone has opened a terminal. This call
+ * is idempotent and only guards against the route being mounted standalone in
+ * a test.
  */
 function terminalHub(): PtyHub {
-  if (hub) return hub;
-  hub = configurePtyHub({
-    resolveContainer: (agentId) => validateAgentForContainer(agentId),
-    getDocker: async () => (await getDockerClient()) as unknown as PtyDocker,
-    onDetached: async (agentId) => {
-      // Attach stream ended → the container's main process exited.
-      await db
-        .update(agents)
-        .set({ status: "stopped", updatedAt: new Date() })
-        .where(eq(agents.id, agentId));
-    },
-  });
-  return hub;
+  return ensurePtyHubConfigured();
 }
 
 /**
