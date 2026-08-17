@@ -6,9 +6,7 @@ import * as schema from "../db/schema.js";
 import { authMiddleware, type AuthEnv } from "../middleware/auth.js";
 import { parseMentions } from "../lib/mentions.js";
 import { streamBus } from "../lib/stream-bus.js";
-import { getPtyHub } from "../agents/pty-hub.js";
-import { planInjection } from "../agents/injector.js";
-import { getProfile } from "../agents/adapters/profiles.js";
+import { deliverRun } from "../agents/queue.js";
 
 const slugSchema = z
   .string()
@@ -366,34 +364,9 @@ async function routeMention(input: {
   }
 
   try {
-    const [blueprint] = await db
-      .select({ cli: schema.agentBlueprints.cli })
-      .from(schema.agentBlueprints)
-      .where(eq(schema.agentBlueprints.id, agent.blueprintId))
-      .limit(1);
-
-    const hub = getPtyHub();
-    await hub.ensureAttached(agent.id);
-
-    for (const step of planInjection(prompt, getProfile(blueprint?.cli), { mode })) {
-      await hub.write(agent.id, step.bytes, { source: "inject" });
-      if (step.delayAfterMs > 0) {
-        await new Promise((resolve) => setTimeout(resolve, step.delayAfterMs));
-      }
-    }
-
-    await db
-      .update(schema.runs)
-      .set({ status: "running", startedAt: new Date() })
-      .where(eq(schema.runs.id, run.id));
-
-    // Optimistic: the sidecar will correct this on its next heartbeat, but
-    // marking busy immediately stops a second mention racing in behind this one.
-    await db
-      .update(schema.agents)
-      .set({ activity: "busy", activityUpdatedAt: new Date() })
-      .where(eq(schema.agents.id, agent.id));
-
+    // Same path a queued run takes when the drainer releases it, so the two
+    // cannot drift — notably the per-CLI injection timing.
+    await deliverRun(agent, run);
     return { agentId: agent.id, runId: run.id, queued: false };
   } catch (err) {
     await db

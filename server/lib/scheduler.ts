@@ -2,6 +2,7 @@ import { and, eq, lte } from "drizzle-orm";
 import { db } from "../db/index.js";
 import * as schema from "../db/schema.js";
 import { routeMention } from "../api/channels.js";
+import { drainQueuedRuns } from "../agents/queue.js";
 import { expireStaleDispatches } from "../agents/dispatch.js";
 import { pruneEgressProxies } from "../egress/proxy-manager.js";
 import { resolveAgentEgress } from "../egress/rules.js";
@@ -174,6 +175,12 @@ export function startBackgroundJobs(): void {
       console.error("[blackhouse] dispatch sweep failed:", err),
     );
     void runDueSchedules().catch((err) => console.error("[blackhouse] schedule run failed:", err));
+
+    // Safety net for queue mode. The sidecar's idle report is the fast path,
+    // but PTY-scrape adapters have no in-container reporter and a dropped
+    // request would otherwise strand a run at `queued` forever — which reads
+    // to the poster as a prompt that was accepted and silently never ran.
+    void drainQueuedRuns().catch((err) => console.error("[blackhouse] queue drain failed:", err));
 
     // Proxy reaping needs a Docker round trip per policy, so it runs every
     // tenth tick (~5 min) rather than every 30 seconds.

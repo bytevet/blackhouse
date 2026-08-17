@@ -5,6 +5,7 @@ import { db } from "../db/index.js";
 import * as schema from "../db/schema.js";
 import { authAgentToken, bearerToken } from "../lib/agent-token-auth.js";
 import { streamBus } from "../lib/stream-bus.js";
+import { drainAgentQueue } from "../agents/queue.js";
 import {
   ingestSchema,
   stateSchema,
@@ -181,6 +182,18 @@ const routes = app
       status: agent.status,
       activity: parsed.data.activity,
     });
+
+    // The moment the queue promise comes due. A mention posted while this agent
+    // was busy told the poster "delivers when idle" and parked the run; this is
+    // where that is honoured, and it is the low-latency half of the drain — the
+    // background sweep exists only to cover adapters with no state reporter.
+    // Not awaited: draining injects a prompt and sleeps between chunks, and the
+    // sidecar's heartbeat must not block on it.
+    if (parsed.data.activity === "idle") {
+      void drainAgentQueue(agent.id).catch((err) =>
+        console.error(`[blackhouse] drain for agent ${agent.id} failed:`, err),
+      );
+    }
 
     return c.json({ ok: true });
   })
