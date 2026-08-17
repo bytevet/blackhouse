@@ -70,9 +70,16 @@ export function toCreateOptions(
   // direct route to the host and defeats any egress policy (plan landmine 6).
   const hostGateway = spec.network?.hostGateway ?? true;
 
+  // `/etc/hosts` entries first, then the host-gateway alias. Both land in the
+  // same Docker field; see `SandboxNetwork.hostAliases` for why the aliases
+  // exist at all (gVisor cannot reach Docker's embedded resolver).
+  const extraHosts = (spec.network?.hostAliases ?? []).map((a) => `${a.host}:${a.ip}`);
+  if (hostGateway) extraHosts.push("host.docker.internal:host-gateway");
+
   const hostConfig: Docker.HostConfig = {
     Binds: binds.length > 0 ? binds : undefined,
-    ExtraHosts: hostGateway ? ["host.docker.internal:host-gateway"] : undefined,
+    ExtraHosts: extraHosts.length > 0 ? extraHosts : undefined,
+    Dns: spec.network?.dns?.length ? spec.network.dns : undefined,
 
     // Make the named network the container's PRIMARY network, not merely an
     // attachment. `NetworkingConfig.EndpointsConfig` alone connects the

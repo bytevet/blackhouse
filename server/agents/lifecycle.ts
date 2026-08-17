@@ -6,6 +6,12 @@ import { getDriver, selectDriver } from "../sandbox/registry.js";
 import type { SandboxHandle, SandboxSpec } from "../sandbox/types.js";
 import { invalidateContainerEndpointCache } from "../lib/docker.js";
 import { prepareAgentEgress, type EgressAttachment } from "../egress/attach.js";
+import {
+  agentDnsServers,
+  hasEmbeddedDns,
+  mergeHostAliases,
+  resolveHostAlias,
+} from "./container-dns.js";
 
 type AgentRow = typeof schema.agents.$inferSelect;
 type BlueprintRow = typeof schema.agentBlueprints.$inferSelect;
@@ -56,6 +62,15 @@ export function buildAgentSpec(
      * host-gateway decision below.
      */
     egress?: EgressAttachment;
+    /**
+     * `/etc/hosts` entries for the names the agent must reach — the harness,
+     * and the egress proxy when one is in play. Resolved by the caller because
+     * it needs a DNS lookup and this function is pure.
+     * See `server/agents/container-dns.ts` for why they are needed at all.
+     */
+    hostAliases?: Array<{ host: string; ip: string }>;
+    /** Explicit nameservers; only set where the embedded resolver is unreachable. */
+    dns?: string[];
   } = { blackhouseUrl: "" },
 ): SandboxSpec {
   const stateMountPath = blueprint.stateMountPath || DEFAULT_STATE_MOUNT_PATH;
@@ -116,6 +131,8 @@ export function buildAgentSpec(
       // A host-gateway alias is a direct route to the host and would defeat
       // egress control entirely, so it is only granted under `open`.
       hostGateway: opts.egress?.hostGateway ?? egressPolicy === "open",
+      hostAliases: opts.hostAliases,
+      dns: opts.dns,
     },
     tty: true,
     openStdin: true,
@@ -167,7 +184,26 @@ export async function startAgent(agentId: string): Promise<AgentRow> {
   // sandboxed when it is not is worse than an agent that failed to start.
   const egress = await prepareAgentEgress(agent, blueprint, { blackhouseUrl, networkName });
 
-  const spec = buildAgentSpec(agent, blueprint, { blackhouseUrl, networkName, egress });
+  // Name resolution, decided per effective runtime. Under gVisor the embedded
+  // resolver is unreachable, so the names the agent depends on are pinned into
+  // /etc/hosts and an upstream nameserver is supplied for everything else.
+  const hostAliases = mergeHostAliases(egress.hostAliases, [await resolveHostAlias(blackhouseUrl)]);
+  const dns = hasEmbeddedDns(resolution.effective) ? undefined : agentDnsServers();
+  if (!hasEmbeddedDns(resolution.effective) && hostAliases.length === 0) {
+    console.warn(
+      `[blackhouse] agent ${agent.handle}: running under ${resolution.effective}, where Docker's ` +
+        `embedded DNS is unreachable, and the harness URL (${blackhouseUrl}) could not be pinned ` +
+        `to an /etc/hosts entry — the sidecar may not be able to report back.`,
+    );
+  }
+
+  const spec = buildAgentSpec(agent, blueprint, {
+    blackhouseUrl,
+    networkName,
+    egress,
+    hostAliases,
+    dns,
+  });
 
   const handle = await driver.create(spec);
   await driver.start(handle);

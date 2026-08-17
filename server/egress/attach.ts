@@ -53,6 +53,14 @@ export interface EgressAttachment {
   hostGateway: boolean;
   /** Proxy environment (`HTTPS_PROXY` and friends). Empty unless enforced. */
   env: string[];
+  /**
+   * `/etc/hosts` entries the agent needs to reach the proxy named in `env`.
+   *
+   * That name is a Docker network alias, resolved by the embedded DNS server —
+   * which gVisor sandboxes cannot reach. Without the pin, an enforced agent
+   * under runsc cannot resolve its own proxy and every request fails.
+   */
+  hostAliases: Array<{ host: string; ip: string }>;
 }
 
 export type EnforcementReason =
@@ -166,6 +174,7 @@ export async function prepareAgentEgress(
     // defeats egress control. Granted only under `open`, enforced or not.
     hostGateway: policy.mode === "open",
     env: [],
+    hostAliases: [],
   };
 
   if (!enforce) {
@@ -196,7 +205,7 @@ export async function prepareAgentEgress(
   if (policy.mode === "none") {
     // No proxy, no credentials, no route: an internal network with nothing on
     // it but the agent and the harness.
-    return { ...base, enforced: true, reason: null, networkName, env: [] };
+    return { ...base, enforced: true, reason: null, networkName, env: [], hostAliases: [] };
   }
 
   const proxy = await ensureProxyContainer({
@@ -215,5 +224,12 @@ export async function prepareAgentEgress(
     noProxyHosts: [harnessHost, "blackhouse-app"],
   });
 
-  return { ...base, enforced: true, reason: null, networkName, env };
+  return {
+    ...base,
+    enforced: true,
+    reason: null,
+    networkName,
+    env,
+    hostAliases: proxy.ip ? [{ host: proxy.host, ip: proxy.ip }] : [],
+  };
 }

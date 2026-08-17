@@ -74,6 +74,35 @@ export interface SandboxNetwork {
    * egress phase sets it `false` whenever the agent's egress mode isn't `open`.
    */
   hostGateway?: boolean;
+  /**
+   * Extra `/etc/hosts` entries, as `host -> ip`.
+   *
+   * These exist because **Docker's embedded DNS does not work under gVisor**.
+   * The resolver at 127.0.0.11 is a loopback listener in the container's
+   * host-side network namespace; runsc gives the sandbox its own netstack
+   * (`--network=sandbox`), which never reaches it. Measured on a live host:
+   * two containers on the same user-defined network, identical but for the
+   * runtime — under `runc` both `app` and `example.com` resolve, under `runsc`
+   * neither does and a UDP probe to 127.0.0.11 gets no reply at all.
+   *
+   * `/etc/hosts` needs no resolver, so pinning the few names an agent must
+   * reach — the harness, and the egress proxy — makes service discovery work
+   * identically under both runtimes.
+   *
+   * The trade-off is staleness: an entry is written at container-create time,
+   * so if the harness or proxy container is recreated with a different IP,
+   * running agents keep the old one until they restart.
+   */
+  hostAliases?: Array<{ host: string; ip: string }>;
+  /**
+   * Explicit nameservers for the container (Docker's `HostConfig.Dns`).
+   *
+   * Setting this replaces the embedded resolver, which costs container-name
+   * resolution — so it is only supplied for runtimes where that resolver is
+   * already unreachable. There it is a pure gain: without it a gVisor agent
+   * cannot resolve *any* name, so `git clone` and `npm install` fail.
+   */
+  dns?: string[];
 }
 
 /**

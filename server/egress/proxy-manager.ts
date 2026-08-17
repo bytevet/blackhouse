@@ -308,7 +308,14 @@ export interface EnsureProxyOptions {
 }
 
 /**
- * Create/start the proxy for a policy and return the host:port agents use.
+ * Create/start the proxy for a policy and return the host:port agents use,
+ * plus its IP on the internal network.
+ *
+ * The IP is returned because agents reach the proxy by its network alias, and
+ * that alias is served by Docker's embedded DNS — which is unreachable under
+ * gVisor (see `server/agents/container-dns.ts`). The caller pins the alias to
+ * this IP in the agent's `/etc/hosts` so `HTTPS_PROXY` resolves under every
+ * runtime.
  *
  * The proxy is created on the internal network and *then* connected to the
  * bridge, because Docker's container-create API accepts only one endpoint.
@@ -317,7 +324,7 @@ export interface EnsureProxyOptions {
  */
 export async function ensureProxyContainer(
   opts: EnsureProxyOptions,
-): Promise<{ host: string; port: number; containerId: string }> {
+): Promise<{ host: string; port: number; containerId: string; ip: string | null }> {
   const docker = await getDockerClient();
   const name = proxyContainerName(opts.policyKey);
 
@@ -380,7 +387,12 @@ export async function ensureProxyContainer(
       });
 
     await container.start();
-    return { host: PROXY_ALIAS, port: PROXY_PORT, containerId: container.id };
+    return {
+      host: PROXY_ALIAS,
+      port: PROXY_PORT,
+      containerId: container.id,
+      ip: await proxyIpOnNetwork(container.id, opts.internalNetwork),
+    };
   }
 
   // Already running: make sure both legs are still attached. A proxy that lost
@@ -399,7 +411,27 @@ export async function ensureProxyContainer(
       .catch(() => {});
   }
 
-  return { host: PROXY_ALIAS, port: PROXY_PORT, containerId: existing.Id };
+  return {
+    host: PROXY_ALIAS,
+    port: PROXY_PORT,
+    containerId: existing.Id,
+    ip: await proxyIpOnNetwork(existing.Id, opts.internalNetwork),
+  };
+}
+
+/**
+ * The proxy's address on the agents' network. Read after start rather than
+ * assigned, because Docker allocates it; null if it cannot be read, in which
+ * case the caller simply pins nothing and falls back to the embedded resolver.
+ */
+async function proxyIpOnNetwork(containerId: string, network: string): Promise<string | null> {
+  try {
+    const docker = await getDockerClient();
+    const info = await docker.getContainer(containerId).inspect();
+    return info.NetworkSettings?.Networks?.[network]?.IPAddress || null;
+  } catch {
+    return null;
+  }
 }
 
 /**
