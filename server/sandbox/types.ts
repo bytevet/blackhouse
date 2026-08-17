@@ -97,10 +97,15 @@ export interface SandboxNetwork {
   /**
    * Explicit nameservers for the container (Docker's `HostConfig.Dns`).
    *
-   * Setting this replaces the embedded resolver, which costs container-name
-   * resolution — so it is only supplied for runtimes where that resolver is
-   * already unreachable. There it is a pure gain: without it a gVisor agent
-   * cannot resolve *any* name, so `git clone` and `npm install` fail.
+   * Only supplied for runtimes where the embedded resolver is already
+   * unreachable, since on other paths it would replace a working resolver and
+   * cost container-name lookups.
+   *
+   * Note what this does *not* buy on a user-defined network: Docker keeps
+   * 127.0.0.11 in resolv.conf and uses these merely as its own upstreams, so a
+   * gVisor agent still cannot resolve ordinary hostnames. See
+   * `server/agents/container-dns.ts` for the measurements and the open design
+   * question.
    */
   dns?: string[];
 }

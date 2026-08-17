@@ -17,17 +17,32 @@ import { isIP } from "node:net";
  *
  * So an agent under the runtime we *default to on Linux* had no DNS at all:
  * the sidecar could not POST to `http://app:3000`, and `git clone` and
- * `npm install` would fail the same way. Two fixes, both applied here:
+ * `npm install` fail the same way.
  *
- * 1. Pin the handful of names an agent must reach into `/etc/hosts`, which
- *    needs no resolver. That is service discovery solved for the harness and
- *    the egress proxy under both runtimes.
- * 2. Give the container explicit upstream nameservers, reachable over the
- *    network rather than on loopback, so ordinary hostnames still resolve.
+ * **What this module fixes:** the names an agent must reach — the harness, and
+ * the egress proxy — are pinned into `/etc/hosts`, which needs no resolver.
+ * That restores service discovery under both runtimes, and it is what makes
+ * the mention -> TUI -> sidecar -> transcript path work under gVisor.
  *
- * Doing (2) unconditionally would be a regression: it replaces the embedded
- * resolver, so containers that *can* use it would lose container-name lookups.
- * It is therefore applied only where the resolver is already dead.
+ * **What it does not fix, measured:** general hostname resolution. Setting
+ * `HostConfig.Dns` does *not* write those servers into resolv.conf when the
+ * container is on a user-defined network — Docker keeps 127.0.0.11 as the stub
+ * and uses them only as its own upstreams, which is visible in the generated
+ * file as `ExtServers: [1.1.1.1 8.8.8.8]`. Since the stub is exactly what the
+ * sandbox cannot reach, the setting is inert there. It is kept because it is
+ * still the correct field for the host-network path, and because losing it
+ * would make the eventual fix harder to find — not because it currently helps
+ * a gVisor agent.
+ *
+ * The sandbox itself is not the obstacle: from inside runsc, a UDP query
+ * straight to `1.1.1.1:53` gets a reply and `https://1.1.1.1` returns 301. The
+ * obstacle is purely that resolv.conf points at a loopback stub. Getting a
+ * real nameserver into that file on a user-defined network means either
+ * writing it from the entrypoint (which runs unprivileged) or leaving the
+ * network as the container's secondary — and that second option reintroduces
+ * the default bridge, which is the route out that egress enforcement exists to
+ * remove. That trade-off is a design decision, not a bug fix, so it is
+ * documented in the plan rather than made here.
  */
 
 /** Runtimes whose sandbox can reach Docker's embedded resolver at 127.0.0.11. */
@@ -38,14 +53,17 @@ export function hasEmbeddedDns(runtime: string | null | undefined): boolean {
 const DEFAULT_AGENT_DNS = ["1.1.1.1", "8.8.8.8"];
 
 /**
- * Upstream nameservers to hand a container that cannot use the embedded one.
+ * Nameservers handed to a container that cannot use the embedded one.
  *
  * Public resolvers by default because there is no reliable alternative to
  * inherit: the host's own `/etc/resolv.conf` commonly points at a
  * systemd-resolved stub on 127.0.0.53, which is loopback from the container's
  * point of view and no more reachable than 127.0.0.11. Operators who want
- * their own resolver set `BLACKHOUSE_AGENT_DNS`; setting it to an empty string
- * opts out entirely and leaves the container with no DNS.
+ * their own resolver set `BLACKHOUSE_AGENT_DNS`; an empty string opts out.
+ *
+ * See the module comment for the measured caveat: on a user-defined network
+ * Docker treats these as upstreams for its own stub rather than writing them
+ * into resolv.conf, so today they do not restore resolution inside gVisor.
  */
 export function agentDnsServers(): string[] {
   const raw = process.env.BLACKHOUSE_AGENT_DNS;

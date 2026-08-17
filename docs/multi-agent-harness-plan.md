@@ -602,6 +602,80 @@ Run against a live daemon over mutual TLS. These were previously assumptions.
 Still unverified: gVisor × Chromium (the browser pane), the full inject→transcript path against a real
 agent CLI, and Kata (needs nested virtualisation, which ordinary cloud VMs do not expose).
 
+### Three bugs the live run found, none of them visible to a unit test
+
+Each broke a core path, each was invisible to mocked dockerode, and each now has a regression test.
+
+1. **`PtyHub not configured`** (`98a60ce`). The hub was wired lazily from the terminal WebSocket route,
+   so injection only worked if somebody had already opened that agent's Terminal tab in this server
+   process. Mentioning an agent without visiting its terminal first — the ordinary case — failed the run.
+   Now configured at startup. The test asserts call ordering in `server/index.ts`, because the failure
+   was ordering, not logic.
+
+2. **`NetworkMode` left at `bridge`** (`7eb9cc1`). `NetworkingConfig.EndpointsConfig` attaches a
+   container to a network but does not make it _primary_, and Docker only points `/etc/resolv.conf` at
+   its embedded resolver for containers whose primary network is user-defined. The agent held a correct
+   IP on the correct network and still could not resolve `app`.
+
+3. **gVisor has no working DNS at all** (`c677ce9`) — the deepest of the three, and the one that most
+   nearly shipped. Docker's embedded resolver at 127.0.0.11 is a loopback listener in the container's
+   _host-side_ network namespace; `runsc` runs the sandbox on its own netstack
+   (`dev.gvisor.flag.network: sandbox`) and never reaches it. A/B on one network, identical but for the
+   runtime:
+
+   ```
+   [runc ] getent app → 172.18.0.4   ; getent example.com → 2606:4700:10::…
+   [runsc] getent app → NO-RESOLVE   ; getent example.com → NO-RESOLVE
+   [runsc] UDP to 127.0.0.11:53      → no reply
+   ```
+
+   So under the runtime this design _defaults to on Linux_, the sidecar could never POST to
+   `http://app:3000`. Note what fixing bug 2 alone bought: resolv.conf then pointed at a resolver the
+   sandbox still could not reach — the configuration became correct and the behaviour did not change.
+
+   The fix that works is to pin the names an agent must reach into `/etc/hosts`, which needs no
+   resolver: the harness, and the egress proxy (whose address agents know only as a Docker network
+   alias, so an _enforced_ agent under runsc could not resolve its own proxy either). With that, step 4
+   passes end to end under gVisor.
+
+   The general lesson: **gVisor's isolation extends to the network stack**, so anything Docker
+   implements by way of the host network namespace — embedded DNS here — is unavailable to a sandboxed
+   container. Any future feature that reaches a container by service name needs the same treatment.
+
+### Open, and a design decision rather than a bug: general DNS inside gVisor
+
+Pinning fixes the names Blackhouse controls. It does not give a gVisor agent ordinary hostname
+resolution, so `git clone https://github.com/…` and `npm install` do not work there today.
+
+`HostConfig.Dns` looks like the fix and is not. On a user-defined network Docker keeps 127.0.0.11 in
+resolv.conf and uses those servers only as its own upstreams — visible in the generated file as
+`ExtServers: [1.1.1.1 8.8.8.8]` — and the stub is exactly what the sandbox cannot reach. The setting is
+retained (correct field, correct on the host-network path, `BLACKHOUSE_AGENT_DNS` overrides it) but it
+is inert for gVisor, and the code says so rather than implying a fix.
+
+The sandbox is not the obstacle. Measured from inside runsc:
+
+```
+UDP query to 1.1.1.1:53   → reply, 61 bytes
+https://1.1.1.1           → 301
+UDP query to 127.0.0.11:53 → no reply
+```
+
+A real nameserver simply needs to reach resolv.conf. Three ways, none free:
+
+1. **Write resolv.conf from the entrypoint.** Blocked as shipped: the agent images drop to a non-root
+   user, and the file is root-owned. Would mean starting as root and dropping privileges after.
+2. **Leave the user-defined network secondary** so Docker writes `Dns` verbatim. This reintroduces the
+   default bridge — the route out that egress enforcement exists to remove — and it is the exact
+   inverse of bug 2's fix.
+3. **Resolve names at the proxy.** Under `allowlist`/`none` this is already how it works: a CONNECT
+   proxy resolves on its own side, so the agent never needs DNS. It is only the `open` policy, where
+   there is no proxy, that is left without resolution.
+
+(3) means the enforced path is fine and the permissive path is the broken one, which is at least the
+right way round. Picking between (1) and (2) for `open` agents is a security trade-off, so it is
+recorded here rather than decided mid-verification.
+
 ### Note on the transport used to reach the host
 
 The sandbox environment relays **only port 443** through its HTTP CONNECT proxy. It answers
