@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { and, desc, eq, ne } from "drizzle-orm";
 import { db } from "../db/index.js";
+import { streamBus } from "../lib/stream-bus.js";
 import * as schema from "../db/schema.js";
 import { authMiddleware, adminMiddleware, type AuthEnv } from "../middleware/auth.js";
 import {
@@ -49,6 +50,23 @@ const injectSchema = z.object({
   text: z.string().min(1),
   mode: z.enum(["queue", "interrupt"]).default("queue"),
 });
+
+/**
+ * Tell the workspace an agent's container state changed.
+ *
+ * Start and stop are the two writes a human makes to a container, and neither
+ * used to be broadcast — the sidecar's heartbeat was the only source of
+ * `agent.status`, so a stopped agent kept its green dot until something else
+ * happened to it.
+ */
+function announce(row: typeof schema.agents.$inferSelect) {
+  streamBus.emit("workspace", {
+    type: "agent.status",
+    agentId: row.id,
+    status: row.status,
+    activity: row.activity ?? "unknown",
+  });
+}
 
 /** Never leak `agentToken` — it authenticates the container to the server. */
 function toAgentSummary(row: typeof schema.agents.$inferSelect) {
@@ -116,6 +134,7 @@ const app = new Hono<AuthEnv>()
       })
       .returning();
 
+    streamBus.emit("workspace", { type: "agent.created", agentId: created.id });
     return c.json(toAgentSummary(created), 201);
   })
 
@@ -175,12 +194,23 @@ const app = new Hono<AuthEnv>()
     const agent = await requireAgentAccess(c.req.param("id")!, c.get("session").user);
     if (agent.status === "running") return c.json(toAgentSummary(agent));
     try {
-      return c.json(toAgentSummary(await startAgent(agent.id)));
+      const started = await startAgent(agent.id);
+      // Lifecycle writes were invisible to the rail: only the sidecar's own
+      // `/state` heartbeat used to broadcast, so a container coming up or going
+      // down never reached a roster that no longer remounts.
+      announce(started);
+      return c.json(toAgentSummary(started));
     } catch (err) {
       await db
         .update(schema.agents)
         .set({ status: "error", updatedAt: new Date() })
         .where(eq(schema.agents.id, agent.id));
+      streamBus.emit("workspace", {
+        type: "agent.status",
+        agentId: agent.id,
+        status: "error",
+        activity: agent.activity ?? "unknown",
+      });
       return c.json(
         { error: `Failed to start agent: ${err instanceof Error ? err.message : String(err)}` },
         500,
@@ -190,12 +220,15 @@ const app = new Hono<AuthEnv>()
 
   .post("/:id/stop", authMiddleware, async (c) => {
     const agent = await requireAgentAccess(c.req.param("id")!, c.get("session").user);
-    return c.json(toAgentSummary(await stopAgent(agent.id)));
+    const stopped = await stopAgent(agent.id);
+    announce(stopped);
+    return c.json(toAgentSummary(stopped));
   })
 
   .delete("/:id", authMiddleware, adminMiddleware, async (c) => {
     const agent = await requireAgentAccess(c.req.param("id")!, c.get("session").user);
     await destroyAgent(agent.id);
+    streamBus.emit("workspace", { type: "agent.removed", agentId: agent.id });
     return c.json({ ok: true });
   })
 

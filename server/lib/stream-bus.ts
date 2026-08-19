@@ -21,6 +21,11 @@ export type StreamEvent =
   | { type: "message.created"; channelId: string; messageId: string }
   | { type: "message.updated"; channelId: string; messageId: string }
   | { type: "agent.status"; agentId: string; status: string; activity: string }
+  // The roster is a live list, not a snapshot: the rail renders on every route
+  // and never remounts, so an agent that appears or disappears has to say so.
+  // Without these it stays whatever it was when the tab was opened.
+  | { type: "agent.created"; agentId: string }
+  | { type: "agent.removed"; agentId: string }
   | { type: "agent.status_line"; agentId: string; statusLine: string | null }
   | { type: "run.updated"; agentId: string; runId: string; status: string }
   | { type: "dispatch.updated"; channelId: string; dispatchId: string; status: string };

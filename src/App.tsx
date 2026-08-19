@@ -41,14 +41,20 @@ export function App() {
    * so the route renders against a *background location* — the standard React
    * Router idiom — and the room you came from stays mounted and visible.
    *
-   * The `?? "/channels"` is the direct-load case: paste the URL into a fresh
-   * tab and there is no history to fall back on, so it opens over the default
-   * channel rather than over a blank content area.
+   * The fallback is the direct-load case: paste the URL into a fresh tab and
+   * there is no history to fall back on, so it opens over the default channel
+   * rather than over a blank content area.
+   *
+   * It names `/channels/general` and not `/channels`, which redirects. A
+   * `<Navigate>` in the background tree is a real navigation — it rewrites the
+   * URL out from under the modal, `creatingAgent` goes false, and the dialog
+   * never renders. Found by direct-loading `/agents/new` against a deployed
+   * build, where the room appeared and the dialog silently did not.
    */
   const background = creatingAgent
     ? ((location.state as ModalRouteState | null)?.backgroundLocation ?? {
         ...location,
-        pathname: "/channels",
+        pathname: "/channels/general",
         state: null,
       })
     : null;

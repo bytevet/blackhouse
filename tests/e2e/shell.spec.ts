@@ -1,5 +1,16 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { createAgent, deleteAgent, signInAsAdmin, uniqueHandle } from "./helpers";
+
+/**
+ * Rail rows are whole-row links, so their accessible name is everything inside
+ * them: a channel is `"general"` (the `#` is aria-hidden) and an agent is
+ * `"SC@scoutidlerunning"` — avatar initials, handle, activity and status run
+ * together. Neither is worth pinning, so channels anchor on the start of the
+ * name and agents go by href.
+ */
+function channelLink(page: Page, slug: string) {
+  return page.getByRole("link", { name: new RegExp(`^${slug}\\b`) });
+}
 
 /**
  * The app shell — the rail, and the rooms that render inside it.
@@ -36,7 +47,7 @@ test.describe("Shell", () => {
     await expect(rail).toBeVisible();
     await expect(rail).toContainText("Channels");
     await expect(rail).toContainText("Agents");
-    await expect(rail.getByRole("link", { name: "#general" })).toBeVisible();
+    await expect(channelLink(page, "general")).toBeVisible();
   });
 
   test("opening an agent keeps the rail and swaps only the content area", async ({ page }) => {
@@ -46,7 +57,7 @@ test.describe("Shell", () => {
     try {
       await page.goto("/channels/general", { waitUntil: "domcontentloaded" });
       const rail = page.locator("aside");
-      await expect(rail.getByRole("link", { name: `@${agent.handle}`, exact: true })).toBeVisible();
+      await expect(rail.locator(`a[href="/agents/${agent.id}"]`)).toBeVisible();
 
       // The composer is the channel's; its absence is how we know the room
       // changed rather than merely gained something.
@@ -57,7 +68,7 @@ test.describe("Shell", () => {
 
       // This is the whole point of the change: the rail survives the move.
       await expect(rail).toBeVisible();
-      await expect(rail.getByRole("link", { name: `@${agent.handle}`, exact: true })).toBeVisible();
+      await expect(rail.locator(`a[href="/agents/${agent.id}"]`)).toBeVisible();
       await expect(page.locator('textarea[placeholder^="Message #"]')).toHaveCount(0);
 
       // And back returns you to the transcript you left.
@@ -80,13 +91,14 @@ test.describe("Shell", () => {
       const row = page.locator(`aside a[href="/agents/${agent.id}"]`);
       await expect(row).toBeVisible();
 
-      // `status` is the container, drawn as a dot on the avatar whose `title`
-      // is the localized label — a fresh row is `creating`.
-      await expect(row.locator('[title="Creating"]')).toBeVisible();
-      // `activity` is the process inside it, a separate pill. A fresh row is
-      // `idle`: a creating container with an idle process is a legal
-      // combination, which is exactly why these are two fields.
-      await expect(row).toContainText("idle");
+      // `status` is the container, drawn as a dot on the avatar. Its tooltip
+      // carries both signals in one string — `"creating container · unknown"` —
+      // so match the prefix rather than pinning the whole sentence.
+      await expect(row.locator('[title^="creating container"]')).toBeVisible();
+      // `activity` is the process inside it, rendered as its own pill. A fresh
+      // row is `unknown`: nothing has reported on the process yet, which is a
+      // different claim from `idle` and must not be asserted as one.
+      await expect(row).toContainText("unknown");
     } finally {
       await deleteAgent(page, agent.id);
     }
@@ -141,6 +153,16 @@ test.describe("Create-agent dialog", () => {
 
     await page.keyboard.press("Escape");
     await expect(page).toHaveURL(/\/channels\/general/);
+  });
+
+  test("opens on a direct load, over the default channel", async ({ page }) => {
+    // Regression: the fallback background pointed at `/channels`, which
+    // redirects — and a `<Navigate>` behind the modal rewrote the URL, so the
+    // dialog silently never rendered for anyone pasting the link.
+    await signInAsAdmin(page);
+    await page.goto("/agents/new", { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expect(page).toHaveURL(/\/agents\/new$/);
   });
 
   test("step 1 lists the seeded blueprints and gates Continue", async ({ page }) => {

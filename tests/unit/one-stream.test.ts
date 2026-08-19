@@ -69,3 +69,27 @@ describe("the SSE connection stays singular", () => {
     expect(provider).toMatch(/\["workspace", \.\.\.extraTopics\]/);
   });
 });
+
+describe("the roster is a live list", () => {
+  it("broadcasts creation, removal and lifecycle status", () => {
+    // The rail renders on every route and never remounts, so an agent added or
+    // destroyed elsewhere used to stay invisible until a reload — and start/stop
+    // never reached it at all, because the sidecar's heartbeat was the only
+    // source of `agent.status`. Found by creating an agent against a live
+    // deployment and watching the rail not change.
+    const bus = readFileSync(join("server", "lib", "stream-bus.ts"), "utf8");
+    expect(bus).toContain('type: "agent.created"');
+    expect(bus).toContain('type: "agent.removed"');
+
+    const api = readFileSync(join("server", "api", "agents.ts"), "utf8");
+    expect(api).toContain('{ type: "agent.created", agentId: created.id }');
+    expect(api).toContain('{ type: "agent.removed", agentId: agent.id }');
+    // start and stop both go through `announce`.
+    expect(api.match(/announce\(/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+
+    // And the client has to be listening for them.
+    const stream = readFileSync(join("src", "hooks", "use-channel-stream.ts"), "utf8");
+    expect(stream).toContain('"agent.created"');
+    expect(stream).toContain('"agent.removed"');
+  });
+});

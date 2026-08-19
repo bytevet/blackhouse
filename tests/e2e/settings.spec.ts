@@ -11,9 +11,12 @@ import { createAgent, deleteAgent, signInAsAdmin } from "./helpers";
  * daemon, and it is written to stay honest when the daemon is missing, which is
  * why its assertion accepts either answer.
  *
- * Every `getByLabel` here passes `exact: true`: the default is a
- * case-insensitive substring, and "Name" is a substring of "Username" (and
- * "New password" of "Confirm new password").
+ * `getByLabel` needs anchoring here, because the default is a case-insensitive
+ * substring and "Name" is a substring of "Username" (as "New password" is of
+ * "Confirm new password"). Optional fields use `exact: true`; required ones
+ * carry a `*` in their label text, so they anchor with `/^Field\*?$/` instead —
+ * `exact: true` silently matches nothing against "Name*", which is how these
+ * two tests came to hang on a `fill` rather than fail on an assertion.
  */
 
 /**
@@ -78,7 +81,7 @@ test.describe("Blueprints", () => {
     await page.getByRole("button", { name: "New blueprint" }).first().click();
     let dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
-    await dialog.getByLabel("Name", { exact: true }).fill(name);
+    await dialog.getByLabel(/^Name\*?$/).fill(name);
     await dialog.getByRole("button", { name: "Create" }).click();
 
     await expect(page.getByText(name, { exact: true })).toBeVisible({ timeout: 10000 });
@@ -88,7 +91,7 @@ test.describe("Blueprints", () => {
 
     await card(page, name, "Edit").getByRole("button", { name: "Edit" }).click();
     dialog = page.getByRole("dialog");
-    await dialog.getByLabel("Name", { exact: true }).fill(renamed);
+    await dialog.getByLabel(/^Name\*?$/).fill(renamed);
     await dialog.getByRole("button", { name: "Save" }).click();
     await expect(page.getByText(renamed, { exact: true })).toBeVisible({ timeout: 10000 });
 
@@ -160,10 +163,10 @@ test.describe("Members", () => {
 
     await page.getByRole("button", { name: "Add member" }).click();
     let dialog = page.getByRole("dialog");
-    await dialog.getByLabel("Name", { exact: true }).fill("E2E Member");
-    await dialog.getByLabel("Username", { exact: true }).fill(`e2e${stamp}`);
-    await dialog.getByLabel("Email", { exact: true }).fill(email);
-    await dialog.getByLabel("Starting password", { exact: true }).fill("e2e-password-1234");
+    await dialog.getByLabel(/^Name\*?$/).fill("E2E Member");
+    await dialog.getByLabel(/^Username\*?$/).fill(`e2e${stamp}`);
+    await dialog.getByLabel(/^Email\*?$/).fill(email);
+    await dialog.getByLabel(/^Starting password\*?$/).fill("e2e-password-1234");
     await dialog.getByRole("button", { name: "Create member" }).click();
 
     await expect(page.getByText(email)).toBeVisible({ timeout: 10000 });

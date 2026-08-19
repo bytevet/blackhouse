@@ -53,13 +53,23 @@ test.describe("Agent pane", () => {
       // The rail replaced the breadcrumb: it is always on screen and already
       // says which agent you are in.
       await expect(page.locator("aside")).toBeVisible();
-      await expect(page.getByText(`@${agent.handle}`).first()).toBeVisible();
+      await expect(page.locator("main").getByText(`@${agent.handle}`).first()).toBeVisible();
 
-      // Container status and process activity are separate pills. `creating`
-      // and `idle` co-occurring is legal, and is the whole reason for two
-      // fields — never assert one as a proxy for the other.
-      await expect(page.getByText("Creating", { exact: true })).toBeVisible();
-      await expect(page.getByText("idle", { exact: true }).first()).toBeVisible();
+      // Container status and process activity are separate pills, and a fresh
+      // row pairs `creating` with `unknown` — a legal combination, and the
+      // whole reason for two fields. Never assert one as a proxy for the other.
+      //
+      // Lowercase on purpose: `agent-header.tsx` renders the last segment of
+      // the `agentStatus.*` key rather than the translated label, which is what
+      // gives the design its `● running` / `busy · …` monospace styling. This
+      // assertion previously read "Creating" and had been failing against the
+      // real app.
+      // Scoped to the pane. The rail is on screen now and lists every agent in
+      // the workspace with its own status, so an unscoped `getByText` matches
+      // one row per agent rather than this one's header.
+      const pane = page.locator("main");
+      await expect(pane.getByText("creating", { exact: true }).first()).toBeVisible();
+      await expect(pane.getByText("unknown", { exact: true }).first()).toBeVisible();
 
       // Not running → Start only. Restart/Stop belong to a live container.
       await expect(page.getByRole("button", { name: "Start" })).toBeVisible();

@@ -132,6 +132,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // `reload` is defined below; the handler reaches it through a ref so that
+  // adding a subscriber never rebuilds the connection.
+  const reloadRef = useRef<() => void>(() => {});
+
   const onEvent = useCallback((event: ChannelStreamEvent) => {
     // The roster is this module's state, so it is updated here rather than
     // pushed at subscribers who would each have to know how to apply it.
@@ -156,6 +160,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             agent.id === event.agentId ? { ...agent, statusLine: event.statusLine } : agent,
           ),
         );
+        break;
+
+      case "agent.created":
+        // The frame carries only an id, and the roster needs a whole row, so
+        // this refetches. It is a refetch on an actual change rather than a
+        // timer — the rail used to go stale the moment anyone added an agent,
+        // because the shell mounts once and nothing else ever refreshed it.
+        reloadRef.current();
+        break;
+
+      case "agent.removed":
+        setAgents((prev) => prev.filter((agent) => agent.id !== event.agentId));
         break;
     }
 
@@ -198,6 +214,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     reloadChannels();
     reloadAgents();
   }, [reloadChannels, reloadAgents]);
+  reloadRef.current = reloadAgents;
 
   const channels = useMemo(() => channelRows.map((row) => mapChannel(row)), [channelRows]);
 
