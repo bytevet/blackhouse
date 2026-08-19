@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router";
+import { useNavigate, useParams } from "react-router";
 import { Spinner } from "@notyet.im/ui";
 import { TriangleAlert } from "lucide-react";
 import { ApiError } from "@/lib/api";
@@ -14,7 +14,6 @@ import {
 } from "@/components/agent/agent-data";
 import { AgentHeader } from "@/components/agent/agent-header";
 import { AgentPageStyles } from "@/components/agent/agent-styles";
-import { AgentTopBar } from "@/components/agent/agent-top-bar";
 import { AgentViewBar, type AgentTab, type SecondaryTab } from "@/components/agent/agent-view-bar";
 import { ConfirmDialog } from "@/components/agent/confirm-dialog";
 import { MOCK_EGRESS_ALLOWLIST, mockBlueprint } from "@/components/agent/mock-data";
@@ -24,12 +23,18 @@ import { TerminalPane } from "@/components/agent/terminal-pane";
 import { usePersistedLeftPct, useSplitAvailable } from "@/components/agent/use-split-layout";
 
 /**
- * Agent Detail — inspect and drive one agent.
+ * One agent — inspect and drive it.
  *
- * Shape follows `design/Agent Detail.dc.html`: breadcrumb bar, identity and
- * posture header, a five-way tab strip with a split toggle, and the view
- * itself. The terminal is the point of the page, so it gets the whole content
- * area in single-pane mode and the left half in split.
+ * Shape follows `Agent Pane.dc.html`: identity and posture header, a five-way
+ * tab strip with a split toggle, and the view itself. The terminal is the point
+ * of the pane, so it gets the whole content area in single-pane mode and the
+ * left half in split.
+ *
+ * A *pane*, not a page: it renders into `AppShell`'s content area beside the
+ * rail, which is why there is no breadcrumb here any more — the sidebar is
+ * always on screen and already says where you are. The shell keys this by
+ * agent id, so opening a second agent remounts rather than carrying the first
+ * one's terminal, poll and split position across.
  *
  * State mirrors the prototype's — `{tab, split, rightTab, leftPct}` — with
  * `leftPct` lifted into localStorage per agent.
@@ -40,10 +45,23 @@ type PendingAction = "stop" | "restart" | "destroy" | null;
 
 const POLL_INTERVAL_MS = 5000;
 
-export function AgentPage() {
+/**
+ * Remount on every agent.
+ *
+ * A route param change re-renders the element, it does not replace it, so
+ * without this key clicking a second agent in the rail would keep the first
+ * one's terminal socket, poll timer and split position — state that is only
+ * correct for the agent it was created against. As separate pages this was
+ * impossible; inside a persistent shell it is the default.
+ */
+export function AgentPane() {
+  const { agentId } = useParams<{ agentId: string }>();
+  return <AgentPaneView key={agentId} />;
+}
+
+function AgentPaneView() {
   const { agentId } = useParams<{ agentId: string }>();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
 
   const [agent, setAgent] = useState<AgentDetail | null>(null);
   const [runtimes, setRuntimes] = useState<RuntimeAvailability | null>(null);
@@ -150,7 +168,9 @@ export function AgentPage() {
     });
     if (ok) {
       setPending(null);
-      navigate("/agents", { replace: true });
+      // The roster screen is gone — the rail is the roster now — so a destroyed
+      // agent drops you back into the workspace rather than a list of one fewer.
+      navigate("/channels", { replace: true });
     }
   }, [agentId, pending, runAction, navigate]);
 
@@ -192,19 +212,19 @@ export function AgentPage() {
 
   if (loadError) {
     return (
-      <PageShell>
+      <PaneShell>
         <ErrorState message={loadError} />
-      </PageShell>
+      </PaneShell>
     );
   }
 
   if (!agent || !agentId) {
     return (
-      <PageShell>
+      <PaneShell>
         <div style={{ flex: 1, display: "grid", placeItems: "center" }}>
           <Spinner size="lg" label="Loading agent" />
         </div>
-      </PageShell>
+      </PaneShell>
     );
   }
 
@@ -234,9 +254,7 @@ export function AgentPage() {
   );
 
   return (
-    <PageShell>
-      <AgentTopBar backChannel={searchParams.get("from")} handle={agent.handle} />
-
+    <PaneShell>
       <AgentHeader
         agent={agent}
         blueprint={blueprint}
@@ -351,17 +369,26 @@ export function AgentPage() {
         }
         confirmLabel="Destroy agent"
       />
-    </PageShell>
+    </PaneShell>
   );
 }
 
 /** Full-viewport column. This page owns its chrome; there is no app shell. */
-function PageShell({ children }: { children: React.ReactNode }) {
+/**
+ * Fills the shell's content area rather than the viewport.
+ *
+ * `height: 100%` and not `100dvh`: the shell already owns the viewport, and a
+ * second element claiming the full dynamic height inside it would overflow by
+ * exactly the rail's header on mobile browsers.
+ */
+function PaneShell({ children }: { children: React.ReactNode }) {
   return (
     <div
       style={{
-        height: "100dvh",
+        height: "100%",
         width: "100%",
+        flex: 1,
+        minHeight: 0,
         display: "flex",
         flexDirection: "column",
         background: "var(--ny-bg)",

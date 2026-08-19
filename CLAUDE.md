@@ -53,8 +53,10 @@ server/
 ├── lib/                # mentions, stream-bus, scheduler, auth helpers, docker client
 └── db/                 # schema re-export, migrate, seed
 src/
-├── pages/              # channel, agent, agents, create-agent, settings/*, login
+├── layouts/app-shell.tsx  # The rail + the one SSE connection. Channels and agents render inside it
+├── pages/              # channel, agent-pane, create-agent, settings/*, login
 ├── components/
+│   ├── workspace/      # Channel list, roster, and the shared stream (`useStreamTopic`)
 │   ├── channel/        # Transcript, the five message kinds, composer, mention autocomplete
 │   ├── agent/          # Split pane, header, panes
 │   └── terminal.tsx, browser-viewer.tsx, ide-viewer.tsx, result-viewer.tsx
@@ -139,6 +141,20 @@ them would drown the channel.
 
 Sidecar ingest is idempotent on `(agentId, sourceRef)`, and duplicates skip their **side effects** too,
 or a retried batch double-counts tokens and re-posts messages.
+
+### One shell, and exactly one EventSource
+
+Channels and agents are rooms inside `layouts/app-shell.tsx`, not separate screens. The rail stays put
+and only the content area changes, so an agent no longer costs you the channel list and the roster.
+`AgentPane` is keyed by agent id, because a route param change re-renders rather than remounts — without
+that key a second agent inherits the first one's terminal socket and poll timer.
+
+**The tab opens one `EventSource`, and only `workspace-context.tsx` may construct it.** `/api/stream` is
+multiplexed by topic for this reason, and browsers cap connections per origin at about six. A room that
+needs its own frames calls `useStreamTopic("channel:<id>", handler)`, which adds a topic to the existing
+connection; calling `useChannelStream` anywhere else silently opens a second one that works fine locally
+and costs every user a connection for the life of the tab. `tests/unit/one-stream.test.ts` fails if a
+second caller appears.
 
 ### Auto-approve is a safety surface
 

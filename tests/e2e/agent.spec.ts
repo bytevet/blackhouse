@@ -15,14 +15,18 @@ import {
 } from "./helpers";
 
 /**
- * Agent Detail (`/agents/:agentId`).
+ * The agent pane (`/agents/:agentId`).
  *
- * The page is wired to the real API (`components/agent/agent-data.ts`), so
- * everything that does not need a live container is exercised against an agent
- * created through `POST /api/agents` — which stops at `status: "creating"` and
- * never touches Docker.
+ * A pane inside `AppShell` rather than a page of its own, so the rail is on
+ * screen throughout — which is why there is no breadcrumb to assert on any
+ * more. The URL is unchanged and still deep-linkable.
+ *
+ * Wired to the real API (`components/agent/agent-data.ts`), so everything that
+ * does not need a live container is exercised against an agent created through
+ * `POST /api/agents` — which stops at `status: "creating"` and never touches
+ * Docker.
  */
-test.describe("Agent detail", () => {
+test.describe("Agent pane", () => {
   test("an unknown agent id renders the error state, not a spinner", async ({ page }) => {
     await signInAsAdmin(page);
     await page.goto("/agents/00000000-0000-4000-8000-000000000000", {
@@ -46,8 +50,9 @@ test.describe("Agent detail", () => {
     });
 
     test("header shows identity plus both state signals", async ({ page }) => {
-      // Breadcrumb: `agents / @handle` (`components/agent/agent-top-bar.tsx`).
-      await expect(page.getByRole("link", { name: "agents", exact: true }).first()).toBeVisible();
+      // The rail replaced the breadcrumb: it is always on screen and already
+      // says which agent you are in.
+      await expect(page.locator("aside")).toBeVisible();
       await expect(page.getByText(`@${agent.handle}`).first()).toBeVisible();
 
       // Container status and process activity are separate pills. `creating`
@@ -190,5 +195,40 @@ test.describe.serial("Agent lifecycle (docker)", () => {
         { timeout: 20000 },
       )
       .toContain(marker);
+  });
+});
+
+/**
+ * Destroying an agent, which moved here when the roster screen was folded into
+ * the rail. It is confirmation-gated because it deletes the workspace and state
+ * volumes — the one action in this pane that loses data on disk.
+ */
+test.describe("Destroy", () => {
+  test("is confirmation-gated, and cancelling leaves the agent alone", async ({ page }) => {
+    await signInAsAdmin(page);
+    const agent = await createAgent(page, { displayName: "Destroy Probe" });
+
+    try {
+      await page.goto(`/agents/${agent.id}`, { waitUntil: "domcontentloaded" });
+      await expect(page.getByText("Destroy Probe")).toBeVisible({ timeout: 15000 });
+
+      await page.getByRole("tab", { name: "Settings" }).click();
+      await page
+        .getByRole("button", { name: /Destroy/ })
+        .first()
+        .click();
+
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toBeVisible();
+      // The title names the agent, so a mis-scoped click is visible rather than
+      // silently destroying the wrong one.
+      await expect(dialog).toContainText(`@${agent.handle}`);
+
+      await dialog.getByRole("button", { name: "Cancel" }).click();
+      await expect(dialog).toBeHidden();
+      expect(await getAgent(page, agent.id)).not.toBeNull();
+    } finally {
+      await deleteAgent(page, agent.id);
+    }
   });
 });

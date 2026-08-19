@@ -29,17 +29,13 @@ describe("shared shell tokens", () => {
 });
 
 describe("one top bar, one height", () => {
-  it("routes the three breadcrumb bars through AppHeader", () => {
-    // `/agents`, `/settings/*` and `/agents/:id`. If any of them grows its own
-    // `<header>` again, the heights are free to drift again with it.
-    for (const file of [
-      "src/pages/agents.tsx",
-      "src/layouts/settings-layout.tsx",
-      "src/components/agent/agent-top-bar.tsx",
-    ]) {
-      expect(read(file), `${file} should render AppHeader`).toContain("<AppHeader");
-      expect(read(file), `${file} should not hand-roll a header`).not.toMatch(/<header\b/);
-    }
+  it("routes the remaining breadcrumb bar through AppHeader", () => {
+    // Only settings still has one. The `/agents` roster and the agent
+    // breadcrumb both went when channels and agents moved into one shell —
+    // the rail is always on screen now and already says where you are.
+    const file = "src/layouts/settings-layout.tsx";
+    expect(read(file), `${file} should render AppHeader`).toContain("<AppHeader");
+    expect(read(file), `${file} should not hand-roll a header`).not.toMatch(/<header\b/);
   });
 
   it("takes the bar's height from the token rather than from padding", () => {
@@ -92,12 +88,14 @@ describe("creating an agent is a dialog over the roster", () => {
     expect(src).not.toContain('minHeight: "100%"');
   });
 
-  it("is nested under /agents so the roster stays mounted behind it", () => {
-    // Nesting is what makes it a modal *over* the list rather than instead of
-    // it, and it is what keeps `/agents/new` a shareable URL.
+  it("renders against a background location so a room stays behind it", () => {
+    // It used to nest under the roster screen. With the roster folded into the
+    // rail there is nothing to nest under, so the modal keeps the room you came
+    // from on screen via React Router's background-location idiom. Losing that
+    // would leave the dialog floating over an empty content area.
     const app = read("src/App.tsx");
-    expect(app).toMatch(/<Route path="\/agents" element=\{<AgentsPage \/>\}>/);
-    expect(app).toMatch(/<Route path="new" element=\{<CreateAgentPage \/>\} \/>/);
-    expect(read("src/pages/agents.tsx")).toContain("<Outlet />");
+    expect(app).toContain("backgroundLocation");
+    expect(app).toMatch(/<Routes location=\{background \?\? location\}>/);
+    expect(app).toMatch(/<Route path="\/agents\/new" element=\{<CreateAgentPage \/>\} \/>/);
   });
 });

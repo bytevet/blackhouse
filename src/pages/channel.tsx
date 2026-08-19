@@ -1,37 +1,31 @@
 import { useCallback, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useOutletContext, useParams } from "react-router";
 import { CircleAlert } from "lucide-react";
 import { Button } from "@notyet.im/ui";
 import { ChannelHeader } from "@/components/channel/channel-header";
-import { ChannelSidebar } from "@/components/channel/channel-sidebar";
-import { ChannelStyles } from "@/components/channel/channel-styles";
-import { normaliseRepoUrl } from "@/components/channel/channel-api";
 import { Composer } from "@/components/channel/composer";
-import { CreateChannelDialog } from "@/components/channel/create-channel-dialog";
 import { Transcript } from "@/components/channel/transcript";
 import type { DeliveryMode, UserView } from "@/components/channel/types";
 import { useChannelData } from "@/components/channel/use-channel-data";
-import { useMediaQuery } from "@/components/channel/use-media-query";
+import { useWorkspace } from "@/components/workspace/workspace-context";
+import type { ShellContext } from "@/layouts/app-shell";
 import { useSession } from "@/lib/auth-client";
 
 /**
- * The Channel View — the primary screen.
+ * One channel: header, transcript, composer.
  *
- * Three regions: the rail (channels + agent roster), the transcript, and the
- * composer. This file is a layout and nothing else: it owns the draft, the
- * delivery mode and two dialogs. Every byte of server data — the roster, the
- * transcript, the live stream, the writes — comes from `useChannelData`, and
- * the components below it stay pure and presentational.
+ * The rail, the workspace data and the create-channel dialog moved to
+ * `AppShell` — this renders inside it now, so that an agent opening in the same
+ * content area does not take the channel list and roster down with it. What is
+ * left is a layout over `useChannelData`: the draft and the delivery mode, and
+ * nothing else.
  */
-
-/** Header of the rail. The instance has no workspace record to read from yet. */
-const WORKSPACE = { name: "Blackhouse", tagline: "blackhouse · self-hosted" };
 
 export function ChannelPage() {
   const { slug = "general" } = useParams();
-  const navigate = useNavigate();
-  const narrow = useMediaQuery("(max-width: 900px)");
+  const { onOpenSidebar } = useOutletContext<ShellContext>() ?? {};
   const { data: session } = useSession();
+  const workspace = useWorkspace();
 
   const currentUser = useMemo<UserView | null>(
     () =>
@@ -46,10 +40,8 @@ export function ChannelPage() {
 
   const [draft, setDraft] = useState("");
   const [mode, setMode] = useState<DeliveryMode>("queue");
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [createOpen, setCreateOpen] = useState(false);
 
-  const knownHandles = useMemo(() => data.agents.map((a) => a.handle), [data.agents]);
+  const knownHandles = useMemo(() => workspace.agents.map((a) => a.handle), [workspace.agents]);
 
   /**
    * Posting is optimistic, and the *outcome* is the server's.
@@ -66,131 +58,56 @@ export function ChannelPage() {
     if (await data.send(body, mode)) setDraft("");
   }, [data, draft, mode]);
 
-  const sidebar = (
-    <ChannelSidebar
-      workspace={WORKSPACE}
-      channels={data.channels}
-      activeSlug={slug}
-      agents={data.agents}
-      currentUser={currentUser ?? { id: "unknown", name: "Signed out" }}
-      channelsLoading={data.channelsLoading}
-      channelsError={data.channelsError}
-      agentsLoading={data.agentsLoading}
-      agentsError={data.agentsError}
-      onCreateChannel={() => {
-        setDrawerOpen(false);
-        setCreateOpen(true);
-      }}
-      onClose={narrow ? () => setDrawerOpen(false) : undefined}
-    />
-  );
-
   return (
-    <div
-      style={{
-        height: "100dvh",
-        width: "100%",
-        display: "flex",
-        background: "var(--ny-bg)",
-        color: "var(--ny-text)",
-        fontFamily: "var(--ny-font-sans)",
-        fontSize: 14,
-        overflow: "hidden",
-      }}
-    >
-      <ChannelStyles />
-
-      {/* Wide: a permanent rail. Narrow: a drawer over the transcript, because
-          the transcript is the part that has to survive a phone. */}
-      {!narrow && sidebar}
-      {narrow && drawerOpen && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex" }}>
-          <div style={{ height: "100%" }}>{sidebar}</div>
-          <button
-            type="button"
-            aria-label="Close channels"
-            onClick={() => setDrawerOpen(false)}
-            className="bh-reset"
-            style={{ flex: 1, background: "var(--ny-overlay, rgba(0,0,0,.5))", cursor: "pointer" }}
+    <>
+      {channel ? (
+        <>
+          <ChannelHeader
+            channel={channel}
+            live={workspace.live}
+            onToggleAutoApprove={(next) => void data.setAutoApprove(next)}
+            onOpenSidebar={onOpenSidebar}
           />
-        </div>
+
+          <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+            <Transcript
+              entries={data.entries}
+              knownHandles={knownHandles}
+              loading={data.transcriptLoading}
+              error={data.transcriptError}
+              onRetry={data.reloadTranscript}
+              hasMore={data.hasMore}
+              loadingMore={data.loadingMore}
+              onLoadOlder={data.loadOlder}
+              onApproveDispatch={(id, prompt) => void data.approveDispatch(id, prompt)}
+              onDenyDispatch={(id) => void data.denyDispatch(id)}
+            />
+          </div>
+
+          {data.actionError && (
+            <ActionError message={data.actionError} onDismiss={data.clearActionError} />
+          )}
+
+          <Composer
+            channelSlug={channel.slug}
+            agents={workspace.agents}
+            value={draft}
+            onChange={setDraft}
+            mode={mode}
+            onModeChange={setMode}
+            onSend={() => void send()}
+          />
+        </>
+      ) : (
+        <MissingChannel
+          slug={slug}
+          loading={data.channelLoading}
+          error={data.channelError}
+          onRetry={data.reload}
+          onOpenSidebar={onOpenSidebar}
+        />
       )}
-
-      <main
-        style={{
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          minWidth: 0,
-          minHeight: 0,
-          background: "var(--ny-bg)",
-        }}
-      >
-        {channel ? (
-          <>
-            <ChannelHeader
-              channel={channel}
-              live={data.live}
-              onToggleAutoApprove={(next) => void data.setAutoApprove(next)}
-              onOpenSidebar={narrow ? () => setDrawerOpen(true) : undefined}
-            />
-
-            <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-              <Transcript
-                entries={data.entries}
-                knownHandles={knownHandles}
-                loading={data.transcriptLoading}
-                error={data.transcriptError}
-                onRetry={data.reloadTranscript}
-                hasMore={data.hasMore}
-                loadingMore={data.loadingMore}
-                onLoadOlder={data.loadOlder}
-                onApproveDispatch={(id, prompt) => void data.approveDispatch(id, prompt)}
-                onDenyDispatch={(id) => void data.denyDispatch(id)}
-              />
-            </div>
-
-            {data.actionError && (
-              <ActionError message={data.actionError} onDismiss={data.clearActionError} />
-            )}
-
-            <Composer
-              channelSlug={channel.slug}
-              agents={data.agents}
-              value={draft}
-              onChange={setDraft}
-              mode={mode}
-              onModeChange={setMode}
-              onSend={() => void send()}
-            />
-          </>
-        ) : (
-          <MissingChannel
-            slug={slug}
-            loading={data.channelLoading}
-            error={data.channelError}
-            onRetry={data.reload}
-            onOpenSidebar={narrow ? () => setDrawerOpen(true) : undefined}
-          />
-        )}
-      </main>
-
-      <CreateChannelDialog
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        onCreate={async ({ slug: newSlug, repo, branch, isPrivate }) => {
-          const gitRepoUrl = normaliseRepoUrl(repo);
-          const created = await data.createChannel({
-            slug: newSlug,
-            gitRepoUrl,
-            gitBranch: gitRepoUrl ? branch || "main" : null,
-            isPrivate,
-          });
-          setCreateOpen(false);
-          if (created) navigate(`/channels/${created.slug}`);
-        }}
-      />
-    </div>
+    </>
   );
 }
 

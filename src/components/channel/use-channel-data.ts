@@ -1,29 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { InjectionMode } from "@/db/schema";
-import { useChannelStream, type ChannelStreamEvent } from "@/hooks/use-channel-stream";
+import { type ChannelStreamEvent } from "@/hooks/use-channel-stream";
+import { useStreamTopic, useWorkspace } from "@/components/workspace/workspace-context";
 import { useResource } from "@/hooks/use-resource";
 import {
   approveDispatch as approveDispatchRequest,
-  createChannel as createChannelRequest,
   denyDispatch as denyDispatchRequest,
   fetchAgentArtifacts,
-  fetchAgents,
   fetchChannel,
-  fetchChannels,
   fetchDispatches,
   fetchMessages,
   postMessage,
   setAutoApprove as setAutoApproveRequest,
-  type CreateChannelInput,
 } from "./channel-api";
 import {
-  mapAgent,
   mapChannel,
   mapTranscript,
   memberCounts,
-  type AgentRow,
   type ArtifactRow,
-  type ChannelRow,
   type DispatchRow,
   type MessageRow,
   type RunSummary,
@@ -31,12 +25,17 @@ import {
 import type { AgentView, ChannelView, QueuedView, TranscriptEntry, UserView } from "./types";
 
 /**
- * Everything the Channel View reads and writes, in one hook.
+ * Everything one channel reads and writes.
+ *
+ * Scoped to the *room*, not the workspace: the channel list and the agent
+ * roster moved to `WorkspaceProvider` when the sidebar outlived this page, and
+ * the SSE connection went with them. This hook attaches its `channel:<id>`
+ * topic to that shared stream through `useStreamTopic` rather than opening one
+ * — see the provider for why the tab must only ever hold a single EventSource.
  *
  * The page above it stays a layout: it holds the draft, the delivery mode and
- * two dialogs, and nothing else. Fetching, the single SSE subscription, keyset
- * pagination and optimistic posting all live here, and the mapping they feed is
- * the pure function in `channel-mapping.ts`.
+ * the dialogs, and nothing else. Keyset pagination and optimistic posting live
+ * here, and the mapping they feed is the pure function in `channel-mapping.ts`.
  */
 
 /** How many messages a page asks for — the server's own default. */
@@ -74,18 +73,10 @@ interface PendingMessage {
 }
 
 export interface ChannelData {
-  channels: ChannelView[];
-  channelsLoading: boolean;
-  channelsError: string | null;
-
   /** The channel named by the route, or `null` while loading / when missing. */
   channel: ChannelView | null;
   channelLoading: boolean;
   channelError: string | null;
-
-  agents: AgentView[];
-  agentsLoading: boolean;
-  agentsError: string | null;
 
   entries: TranscriptEntry[];
   transcriptLoading: boolean;
@@ -98,15 +89,11 @@ export interface ChannelData {
   loadingMore: boolean;
   loadOlder: () => void;
 
-  /** True while the one multiplexed SSE connection is up. */
-  live: boolean;
-
   /** Resolves false when the post failed; `actionError` carries why. */
   send: (body: string, mode: InjectionMode) => Promise<boolean>;
   approveDispatch: (dispatchId: string, prompt?: string) => Promise<void>;
   denyDispatch: (dispatchId: string) => Promise<void>;
   setAutoApprove: (enabled: boolean) => Promise<void>;
-  createChannel: (input: CreateChannelInput) => Promise<ChannelRow | null>;
 
   /** Last write failure, for the banner above the composer. */
   actionError: string | null;
@@ -114,22 +101,18 @@ export interface ChannelData {
 }
 
 export function useChannelData(slug: string, currentUser: UserView | null): ChannelData {
-  // --- Roster and channel list -------------------------------------------
+  // --- This channel --------------------------------------------------------
 
-  const channelsResource = useResource<ChannelRow[]>((signal) => fetchChannels(signal), []);
-  const agentsResource = useResource<AgentRow[]>((signal) => fetchAgents(signal), []);
+  // The rail's copy of the channel list. Read rather than fetched: the
+  // provider already has it, and a second fetch would be a second source of
+  // truth for the same rows.
+  const workspace = useWorkspace();
+  const channelRows = workspace.channels;
+  // The roster, for the queued chip's handle and the transcript's authorship.
+  const agents = workspace.agents;
+  const applyChannel = workspace.applyChannel;
+
   const detailResource = useResource((signal) => fetchChannel(slug, signal), [slug]);
-
-  const [channelRows, setChannelRows] = useState<ChannelRow[]>([]);
-  const [agents, setAgents] = useState<AgentView[]>([]);
-
-  useEffect(() => {
-    if (channelsResource.data) setChannelRows(channelsResource.data);
-  }, [channelsResource.data]);
-
-  useEffect(() => {
-    if (agentsResource.data) setAgents(agentsResource.data.map(mapAgent));
-  }, [agentsResource.data]);
 
   const detail = detailResource.data;
   const counts = useMemo(() => memberCounts(detail?.members), [detail]);
@@ -138,8 +121,7 @@ export function useChannelData(slug: string, currentUser: UserView | null): Chan
     // The detail response is authoritative (it carries the member list); the
     // list response is what makes the header render before it lands.
     if (detail && detail.slug === slug) return mapChannel(detail, counts);
-    const row = channelRows.find((c) => c.slug === slug);
-    return row ? mapChannel(row) : null;
+    return channelRows.find((c) => c.slug === slug) ?? null;
   }, [detail, slug, counts, channelRows]);
 
   const channelId = channel?.id ?? null;
@@ -369,28 +351,6 @@ export function useChannelData(slug: string, currentUser: UserView | null): Chan
           if (!channelId || event.channelId === channelId) refreshNewest();
           break;
 
-        case "agent.status":
-          setAgents((prev) =>
-            prev.map((agent) =>
-              agent.id === event.agentId
-                ? {
-                    ...agent,
-                    status: event.status as AgentView["status"],
-                    activity: event.activity as AgentView["activity"],
-                  }
-                : agent,
-            ),
-          );
-          break;
-
-        case "agent.status_line":
-          setAgents((prev) =>
-            prev.map((agent) =>
-              agent.id === event.agentId ? { ...agent, statusLine: event.statusLine } : agent,
-            ),
-          );
-          break;
-
         case "run.updated": {
           const status = event.status as RunSummary["status"];
           setRuns((prev) => ({
@@ -422,11 +382,8 @@ export function useChannelData(slug: string, currentUser: UserView | null): Chan
     [channelId, refreshNewest, reloadDispatches],
   );
 
-  const topics = useMemo(
-    () => (channelId ? ["workspace", `channel:${channelId}`] : ["workspace"]),
-    [channelId],
-  );
-  const { connected } = useChannelStream(topics, onStreamEvent);
+  // One topic, one handler, on the connection the provider already holds.
+  useStreamTopic(channelId ? `channel:${channelId}` : null, onStreamEvent);
 
   // --- Writes -------------------------------------------------------------
 
@@ -518,7 +475,7 @@ export function useChannelData(slug: string, currentUser: UserView | null): Chan
       setActionError(null);
       try {
         const updated = await setAutoApproveRequest(slug, enabled);
-        setChannelRows((prev) => prev.map((row) => (row.id === updated.id ? updated : row)));
+        applyChannel(updated);
         detailResource.set(detail ? { ...detail, ...updated } : { ...updated, members: [] });
         // The server writes a system message recording the flip; it arrives on
         // the stream, but pull it in immediately so the record is visible even
@@ -528,22 +485,7 @@ export function useChannelData(slug: string, currentUser: UserView | null): Chan
         setActionError(errorText(err));
       }
     },
-    [slug, detail, detailResource, refreshNewest],
-  );
-
-  const createChannel = useCallback(
-    async (input: CreateChannelInput): Promise<ChannelRow | null> => {
-      setActionError(null);
-      try {
-        const created = await createChannelRequest(input);
-        setChannelRows((prev) => [...prev, created].sort((a, b) => a.slug.localeCompare(b.slug)));
-        return created;
-      } catch (err) {
-        setActionError(errorText(err));
-        return null;
-      }
-    },
-    [],
+    [slug, detail, detailResource, refreshNewest, applyChannel],
   );
 
   // --- Projection ---------------------------------------------------------
@@ -573,17 +515,9 @@ export function useChannelData(slug: string, currentUser: UserView | null): Chan
   }, [rows, pending, currentUser, agents, dispatches, runs, artifacts, queued]);
 
   return {
-    channels,
-    channelsLoading: channelsResource.loading,
-    channelsError: channelsResource.error,
-
     channel,
     channelLoading: detailResource.loading && !channel,
     channelError: detailResource.error,
-
-    agents,
-    agentsLoading: agentsResource.loading,
-    agentsError: agentsResource.error,
 
     entries,
     transcriptLoading,
@@ -592,29 +526,19 @@ export function useChannelData(slug: string, currentUser: UserView | null): Chan
     // `reload` on each resource is a stable `useCallback`, so this identity
     // only changes when a resource is genuinely replaced.
     reload: useCallback(() => {
-      channelsResource.reload();
-      agentsResource.reload();
       detailResource.reload();
       dispatchesResource.reload();
       setReloadNonce((n) => n + 1);
-    }, [
-      channelsResource.reload,
-      agentsResource.reload,
-      detailResource.reload,
-      dispatchesResource.reload,
-    ]),
+    }, [detailResource.reload, dispatchesResource.reload]),
 
     hasMore,
     loadingMore,
     loadOlder,
 
-    live: connected,
-
     send,
     approveDispatch,
     denyDispatch,
     setAutoApprove,
-    createChannel,
 
     actionError,
     clearActionError: useCallback(() => setActionError(null), []),

@@ -79,7 +79,17 @@ export function CreateAgentPage() {
    * means returning to the list underneath, which is exactly what dismissing a
    * dialog should do.
    */
-  const close = () => navigate("/agents");
+  /**
+   * Dismissing goes *back*, not to a fixed URL.
+   *
+   * The dialog opens over whichever room you were in, so returning to that room
+   * is the whole contract — sending everyone to a hard-coded page would undo it.
+   * The fallback covers a direct load, where there is no history entry to pop.
+   */
+  const close = () => {
+    if (window.history.state?.idx > 0) navigate(-1);
+    else navigate("/channels", { replace: true });
+  };
 
   const [step, setStep] = useState<1 | 2>(1);
   const [blueprintId, setBlueprintId] = useState<string | null>(null);
