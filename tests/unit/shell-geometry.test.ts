@@ -99,3 +99,29 @@ describe("creating an agent is a dialog over the roster", () => {
     expect(app).toMatch(/<Route path="\/agents\/new" element=\{<CreateAgentPage \/>\} \/>/);
   });
 });
+
+describe("the rail follows the design's ordering", () => {
+  const sidebar = () => read("src/components/channel/channel-sidebar.tsx");
+
+  it("puts the theme toggle at the foot, not in the workspace header", () => {
+    // The header is identity — logo, workspace name, collapse. The theme
+    // toggle is a preference and belongs beside the settings link at the
+    // bottom, which is where the design has it. It had drifted to the header.
+    const src = sidebar();
+    const header = src.indexOf("workspace.tagline");
+    const footer = src.indexOf("currentUser.role");
+    expect(header).toBeGreaterThan(-1);
+    expect(footer).toBeGreaterThan(header);
+
+    const toggles = [...src.matchAll(/<ThemeToggle/g)].map((m) => m.index ?? -1);
+    // One in the expanded footer, one in the collapsed rail — and neither
+    // before the workspace header's tagline, which is where it used to sit.
+    expect(toggles).toHaveLength(2);
+    for (const at of toggles) expect(at).toBeGreaterThan(header);
+  });
+
+  it("keeps the settings link beside it", () => {
+    const src = sidebar();
+    expect(src.indexOf("currentUser.role")).toBeLessThan(src.indexOf('to="/settings"'));
+  });
+});

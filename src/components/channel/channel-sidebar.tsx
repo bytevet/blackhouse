@@ -174,18 +174,13 @@ export function ChannelSidebar({
             </button>
           </Tooltip>
         )}
-        <ThemeToggle
-          theme={theme}
-          onChange={(next) => setTheme(next === "light" ? "light" : "dark")}
-          label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-        />
       </div>
 
       <div
         className="bh-scroll"
         style={{ flex: 1, overflowY: "auto", minHeight: 0, padding: "10px 8px" }}
       >
-        <SectionHeading label="Channels" onAdd={onCreateChannel} addLabel="Create channel" />
+        <SectionHeading label="Channels" onAdd={onCreateChannel} addLabel="Create channel" first />
         <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
           {channels.map((channel) => (
             <ChannelRow
@@ -232,13 +227,17 @@ export function ChannelSidebar({
         </div>
       </div>
 
+      {/* Who you are, then the two workspace-level controls. The theme toggle
+          sits here rather than in the header because it is not part of the
+          workspace's identity — it is a preference, and it belongs with the
+          settings link at the foot of the rail. */}
       <div
         style={{
           borderTop: "1px solid var(--ny-border)",
-          padding: "10px 12px",
+          padding: "8px 12px",
           display: "flex",
           alignItems: "center",
-          gap: 9,
+          gap: 8,
         }}
       >
         <UserAvatar name={currentUser.name} size={28} />
@@ -264,6 +263,11 @@ export function ChannelSidebar({
             {currentUser.role ?? "member"}
           </div>
         </div>
+        <ThemeToggle
+          theme={theme}
+          onChange={(next) => setTheme(next === "light" ? "light" : "dark")}
+          label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+        />
         <Link
           to="/settings"
           onClick={onClose}
@@ -318,6 +322,7 @@ function SectionHeading({
   to,
   toState,
   addLabel,
+  first = false,
 }: {
   label: string;
   count?: number;
@@ -326,6 +331,8 @@ function SectionHeading({
   /** Router state for `to` — carries the background location for modal routes. */
   toState?: unknown;
   addLabel: string;
+  /** First heading in the rail: no lead-in space above it. */
+  first?: boolean;
 }) {
   const addStyle = {
     width: 26,
@@ -345,7 +352,7 @@ function SectionHeading({
         display: "flex",
         alignItems: "center",
         gap: 6,
-        padding: "16px 6px 4px 8px",
+        padding: first ? "4px 6px 4px 8px" : "16px 6px 4px 8px",
       }}
     >
       <span
@@ -415,7 +422,7 @@ function ChannelRow({
         display: "flex",
         alignItems: "center",
         gap: 8,
-        padding: "6px 10px",
+        padding: "4px 8px",
         borderRadius: 7,
         textDecoration: "none",
         background: active ? "var(--ny-surface-selected)" : "transparent",
@@ -488,7 +495,7 @@ function AgentRow({
       className="bh-hover bh-focusable"
       style={{
         display: "flex",
-        gap: 10,
+        gap: 8,
         alignItems: "flex-start",
         padding: 8,
         borderRadius: 9,
@@ -630,10 +637,19 @@ function CollapsedRail({
                   fontFamily: "var(--ny-font-mono)",
                   fontSize: 13,
                   fontWeight: 600,
-                  border: "1px solid var(--ny-border)",
-                  background:
-                    channel.slug === activeSlug ? "var(--ny-surface-selected)" : "transparent",
-                  color: channel.slug === activeSlug ? "var(--ny-text)" : "var(--ny-text-muted)",
+                  ...(channel.slug === activeSlug
+                    ? {
+                        background: "var(--ny-surface-selected)",
+                        color: "var(--ny-text)",
+                        // Inset rather than a border, so selecting a square
+                        // does not change its size and shift the column.
+                        boxShadow: "inset 0 0 0 1px var(--ny-accent-border)",
+                      }
+                    : {
+                        background: "var(--ny-surface)",
+                        border: "1px solid var(--ny-border)",
+                        color: "var(--ny-text-muted)",
+                      }),
                 }}
               >
                 {channel.slug.slice(0, 1).toUpperCase()}
