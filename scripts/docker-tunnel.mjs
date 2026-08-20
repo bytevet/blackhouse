@@ -11,6 +11,14 @@
  * sidecar, splicing the two together. No new exposure, and the browser runs
  * here instead of on the VM.
  *
+ * **Prefer `ssh -L 3100:127.0.0.1:3000 <host>` when you have shell access.**
+ * Measured against this daemon the two are the same for one request — ~30ms
+ * each, since the pool below removed the spawn cost — but SSH multiplexes
+ * channels over a single session where this needs a pooled exec per TCP
+ * connection. Under load that gap is not subtle: the same Playwright run took
+ * 84s and flaked here, and 18.5s clean over SSH. This exists for environments
+ * that have the Docker API and no shell, which is how it came to be written.
+ *
  * `Tty` must stay false. A TTY would translate line endings and corrupt every
  * HTTP body; the cost is Docker's 8-byte stream framing, which `demuxStream`
  * unpacks for us.
