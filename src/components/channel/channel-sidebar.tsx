@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router";
-import { PanelLeftClose, Plus, Settings } from "lucide-react";
+import { Lock, PanelLeftClose, Plus, Settings } from "lucide-react";
 import { ThemeToggle, Tooltip } from "@notyet.im/ui";
 import { useAppTheme } from "@/components/theme-provider";
 import { ActivityPill } from "./activity-pill";
@@ -430,14 +430,25 @@ function ChannelRow({
         fontWeight: active ? 600 : 400,
       }}
     >
+      {/*
+        `#` or a lock, the convention people already know from every other
+        channel app. It replaces the sigil rather than sitting beside it: the
+        two are the same fact about a room, and a `#` next to a lock reads as a
+        public channel wearing a padlock. Not `aria-hidden` when private —
+        "private" is information, where `#` is decoration.
+      */}
       <span
-        aria-hidden
+        aria-hidden={!channel.isPrivate}
+        title={channel.isPrivate ? "Private — members only" : undefined}
         style={{
+          display: "inline-flex",
+          alignItems: "center",
+          flex: "none",
           fontFamily: "var(--ny-font-mono)",
           color: active ? "var(--ny-accent-text)" : "var(--ny-text-subtle)",
         }}
       >
-        #
+        {channel.isPrivate ? <Lock size={12} strokeWidth={2.2} aria-label="Private" /> : "#"}
       </span>
       <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
         {channel.slug}
@@ -616,7 +627,9 @@ function CollapsedRail({
           {channels.map((channel) => (
             <Tooltip
               key={channel.id}
-              content={`#${channel.slug}${channel.unreadCount ? ` · ${channel.unreadCount} unread` : ""}`}
+              content={`${channel.isPrivate ? "🔒 " : "#"}${channel.slug}${
+                channel.isPrivate ? " · private" : ""
+              }${channel.unreadCount ? ` · ${channel.unreadCount} unread` : ""}`}
               placement="right"
             >
               <Link
@@ -653,6 +666,7 @@ function CollapsedRail({
                 }}
               >
                 {channel.slug.slice(0, 1).toUpperCase()}
+                {channel.isPrivate && <RailLock />}
                 {channel.unreadCount > 0 && <RailBadge count={channel.unreadCount} />}
                 {channel.hasMention && <RailMentionDot />}
               </Link>
@@ -795,6 +809,35 @@ function RailBadge({ count }: { count: number }) {
       }}
     >
       {count > 99 ? "99+" : count}
+    </span>
+  );
+}
+
+/**
+ * The private marker on a collapsed square.
+ *
+ * Bottom-left because the other three corners are taken: unread sits top-right
+ * and a mention bottom-right, and a marker that collides with either would
+ * hide the one that is actually urgent.
+ */
+function RailLock() {
+  return (
+    <span
+      aria-hidden
+      style={{
+        position: "absolute",
+        bottom: -3,
+        left: -3,
+        width: 13,
+        height: 13,
+        borderRadius: "50%",
+        display: "grid",
+        placeItems: "center",
+        background: "var(--ny-surface-sunken)",
+        color: "var(--ny-text-subtle)",
+      }}
+    >
+      <Lock size={8} strokeWidth={2.6} />
     </span>
   );
 }

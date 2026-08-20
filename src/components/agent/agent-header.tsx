@@ -45,6 +45,38 @@ function labelOf(labelKey: string): string {
   return labelKey.split(".").pop() ?? labelKey;
 }
 
+/**
+ * The row exists; nothing was ever launched.
+ *
+ * `POST /api/agents` writes the row at `status: "creating"` and stops there —
+ * starting a container is a separate `POST /api/agents/:id/start`. So an agent
+ * in `creating` with no `containerId` is not a container mid-launch, it is one
+ * waiting to be started, and it will sit there for as long as nobody presses
+ * the button.
+ *
+ * Derived from the container signals only (`status` + `containerId`);
+ * `activity` says what the *process* is doing and is never folded in here —
+ * a never-started agent reports `unknown` for the same reason a crashed one
+ * does, so it cannot distinguish these states.
+ */
+export function isAwaitingStart(agent: AgentDetail): boolean {
+  return agent.status === "creating" && !agent.containerId;
+}
+
+/**
+ * No image is recorded for this agent, so a start is likely to fail.
+ *
+ * `POST /api/agents` copies `blueprint.image` onto the row at creation time,
+ * so a null here means the blueprint had no built image at that moment —
+ * usually a build that failed. It is a *likely* failure and not a certain one:
+ * the server resolves `agent.containerImage || blueprint.image`, so a blueprint
+ * built since would still start. That is why this warns and never disables the
+ * button — refusing the click would strand an agent that is now startable.
+ */
+export function isMissingImage(agent: AgentDetail): boolean {
+  return !agent.containerImage && agent.status !== "running" && agent.status !== "destroyed";
+}
+
 function MetaBlock({
   label,
   children,
@@ -92,6 +124,20 @@ export function AgentHeader({
   const budget = describeBudget(agent);
   const running = agent.status === "running";
   const dotTone: StatusTone = statusEntry.tone;
+  const awaitingStart = isAwaitingStart(agent);
+  const missingImage = isMissingImage(agent);
+  /** Start is the only lifecycle call offered in this state, so `busy` is it. */
+  const starting = busy && awaitingStart;
+  /**
+   * `creating` pulses because it is normally a transient state. An agent that
+   * was never started is not transient, it is parked, and animating it is what
+   * made "not started yet" read as "stuck mid-launch". It pulses again once a
+   * start is genuinely in flight — image pulls are slow enough to need it.
+   *
+   * Only the animation is decided here. The tone still comes from
+   * `agentStatusConfig`, which stays the one status → colour mapping.
+   */
+  const pulsing = starting || (statusEntry.pulse && !awaitingStart);
 
   return (
     <div style={{ flex: "none", borderBottom: "1px solid var(--ny-border)" }}>
@@ -139,7 +185,7 @@ export function AgentHeader({
                 background: toneVar(dotTone),
                 border: "3px solid var(--ny-bg)",
                 "--bh-ring-color": toneVar(dotTone),
-                animation: statusEntry.pulse
+                animation: pulsing
                   ? "bhPulse 1.8s ease-in-out infinite"
                   : activityEntry.ring
                     ? "bhRing 1.8s ease-out infinite"
@@ -173,9 +219,24 @@ export function AgentHeader({
               flexWrap: "wrap",
             }}
           >
-            <StatusPill tone={statusEntry.tone} dot pulse={statusEntry.pulse}>
+            <StatusPill tone={statusEntry.tone} dot pulse={pulsing}>
               {labelOf(statusEntry.labelKey)}
             </StatusPill>
+            {/* `creating` is the honest enum value and stays as it is; this
+                says what it means, because on its own it reads as progress. */}
+            {awaitingStart &&
+              (starting ? (
+                <StatusPill tone="info" dot pulse title="Launching the container.">
+                  starting…
+                </StatusPill>
+              ) : (
+                <StatusPill
+                  tone="warning"
+                  title="Created but never started — no container exists yet."
+                >
+                  not started
+                </StatusPill>
+              ))}
             <StatusPill tone={activityEntry.tone}>
               {labelOf(activityEntry.labelKey)}
               {agent.statusLine ? ` · ${agent.statusLine}` : ""}
@@ -197,19 +258,32 @@ export function AgentHeader({
             flexWrap: "wrap",
           }}
         >
+          {/* The *name* is mock. The badge beside it is not: `containerImage`
+              is a real column, copied from the blueprint at creation. */}
           <MetaBlock label="Blueprint" title={`${MOCK_NOTICE} (GET /api/blueprints/:id)`}>
-            <span
-              style={{
-                fontFamily: "var(--ny-font-mono)",
-                fontSize: 12,
-                color: "var(--ny-text)",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-              }}
-            >
-              <LayoutGrid size={12} strokeWidth={2} aria-hidden="true" />
-              {blueprint.name}
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+              <span
+                style={{
+                  fontFamily: "var(--ny-font-mono)",
+                  fontSize: 12,
+                  color: "var(--ny-text)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <LayoutGrid size={12} strokeWidth={2} aria-hidden="true" />
+                {blueprint.name}
+              </span>
+              {missingImage && (
+                <Tooltip content="No image was recorded for this agent — its blueprint had not been built when the agent was created. Build it in Settings → Blueprints.">
+                  <span style={{ display: "inline-flex" }} tabIndex={0}>
+                    <Badge tone="warning" variant="subtle" size="sm">
+                      no image
+                    </Badge>
+                  </span>
+                </Tooltip>
+              )}
             </span>
           </MetaBlock>
 

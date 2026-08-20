@@ -154,6 +154,11 @@
     "dockerfileHelp": "Leave empty to use a prebuilt image. Editing this resets the build status.",
     "loadDefault": "Load the shipped Dockerfile",
     "buildImage": "Build image",
+    "viewLog": "查看日志",
+    "buildLog": "构建日志",
+    "buildLogDescription": "“{{name}}” 最近一次镜像构建的输出。",
+    "buildLogEmpty": "本次构建没有记录任何输出。",
+    "builtWhen": "构建于 {{when}}",
     "build": {
       "none": "not built",
       "building": "building…",

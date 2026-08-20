@@ -6,6 +6,7 @@ import {
   GitPullRequest,
   Hammer,
   Plus,
+  ScrollText,
   SquarePen,
   SquareDashed,
   Trash2,
@@ -26,6 +27,7 @@ import { client, unwrap } from "@/lib/api";
 import { useResource } from "@/hooks/use-resource";
 import { useSession } from "@/lib/auth-client";
 import { SettingsHeader } from "@/layouts/settings-layout";
+import { timeAgo } from "@/lib/time";
 import { AGENT_PRESETS, PRESET_OPTIONS, type PresetId } from "@/lib/agent-presets";
 
 interface BlueprintRow {
@@ -43,6 +45,16 @@ interface BlueprintRow {
    * `blueprints.build.null` render as a raw i18n key in the card footer.
    */
   imageBuildStatus: string | null;
+  /** Whatever the daemon streamed back, or the error that ended the build. */
+  imageBuildLog: string | null;
+  /**
+   * The column is `last_built_at` and the list endpoint returns the whole row,
+   * so this is `lastBuiltAt` — there is no `imageBuild` prefix on it, unlike
+   * its two neighbours. Only set once a build has succeeded here; a failure
+   * leaves the previous success's timestamp standing, which is why it is read
+   * only in the `success` branch below.
+   */
+  lastBuiltAt: string | null;
   sandboxRuntime: string;
   egressPolicy: string;
 }
@@ -94,8 +106,17 @@ type BuildState = keyof typeof buildTone;
  * the translation key rendered `blueprints.build.null` verbatim in the card
  * footer — which is also why this returns a `BuildState` rather than a string,
  * so `t()` keeps checking the key against `en.json`.
+ *
+ * The runner writes `built` and `failed` while this vocabulary (and
+ * `blueprints.build.*`) says `success` and `error`, so both spellings are
+ * folded in here rather than in a second table beside `buildTone`. Without the
+ * fold every finished build — including a failed one — falls through to
+ * `none` and reads as "not built", which is how a build failure managed to
+ * look like a build that never ran.
  */
 function buildState(status: string | null): BuildState {
+  if (status === "built") return "success";
+  if (status === "failed") return "error";
   return status && status in buildTone ? (status as BuildState) : "none";
 }
 
@@ -109,6 +130,37 @@ const metaChip = {
 };
 
 /**
+ * The build outcome, at the density a card footer can afford: the chip, plus
+ * the one detail the state raises a question about. A failure asks "why?", so
+ * it gets the control that opens the log; a success asks "how stale is this?",
+ * so it gets the time. `building` gets a spinner because a static chip alone
+ * reads like a state the build has settled in.
+ */
+function BuildStatus({ row, onShowLog }: { row: BlueprintRow; onShowLog: () => void }) {
+  const { t } = useTranslation();
+  const state = buildState(row.imageBuildStatus);
+
+  return (
+    <>
+      <Badge tone={buildTone[state]} variant="subtle" size="sm">
+        {t(`blueprints.build.${state}` as const)}
+      </Badge>
+      {state === "building" && <Spinner size="sm" label={t("blueprints.build.building")} />}
+      {state === "success" && row.lastBuiltAt && (
+        <Text size="xs" tone="subtle" truncate style={{ minWidth: 0 }}>
+          {t("blueprints.builtWhen", { when: timeAgo(row.lastBuiltAt) })}
+        </Text>
+      )}
+      {state === "error" && (
+        <Button variant="ghost" size="sm" iconStart={<ScrollText size={12} />} onClick={onShowLog}>
+          {t("blueprints.viewLog")}
+        </Button>
+      )}
+    </>
+  );
+}
+
+/**
  * Blueprints — the reusable agent definitions the create-agent wizard starts
  * from. Reads are open to any member; every mutation is admin-only on the
  * server, so the controls are hidden rather than left to fail with a 403.
@@ -120,6 +172,7 @@ export function BlueprintsPage() {
 
   const [draft, setDraft] = useState<DraftState | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<BlueprintRow | null>(null);
+  const [logId, setLogId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -127,6 +180,11 @@ export function BlueprintsPage() {
     async () => unwrap<BlueprintRow[]>(await client.api.settings.blueprints.$get()),
     [],
   );
+
+  // Looked up rather than held: a rebuild reloads the list under an open
+  // dialog, and a snapshot taken on click would keep showing the log of the
+  // build the user just replaced. It also closes itself if the row goes away.
+  const logRow = (blueprints.data ?? []).find((bp) => bp.id === logId) ?? null;
 
   async function save() {
     if (!draft) return;
@@ -303,15 +361,14 @@ export function BlueprintsPage() {
                 style={{
                   display: "flex",
                   alignItems: "center",
+                  flexWrap: "wrap",
                   gap: 6,
                   padding: "9px 15px",
                   borderTop: "1px solid var(--ny-border)",
                   background: "var(--ny-surface-sunken)",
                 }}
               >
-                <Badge tone={buildTone[buildState(bp.imageBuildStatus)]} variant="subtle" size="sm">
-                  {t(`blueprints.build.${buildState(bp.imageBuildStatus)}` as const)}
-                </Badge>
+                <BuildStatus row={bp} onShowLog={() => setLogId(bp.id)} />
                 {isAdmin && (
                   <span style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
                     <Button
@@ -319,7 +376,7 @@ export function BlueprintsPage() {
                       label={t("blueprints.buildImage")}
                       variant="ghost"
                       size="sm"
-                      disabled={busy || bp.imageBuildStatus === "building"}
+                      disabled={busy || buildState(bp.imageBuildStatus) === "building"}
                       onClick={() => void build(bp)}
                     >
                       <Hammer size={13} />
@@ -463,6 +520,60 @@ export function BlueprintsPage() {
             </div>
           </div>
         )}
+      </Dialog>
+
+      {/* Build log */}
+      <Dialog
+        open={logRow !== null}
+        onClose={() => setLogId(null)}
+        size="lg"
+        title={t("blueprints.buildLog")}
+        description={
+          logRow ? t("blueprints.buildLogDescription", { name: logRow.name }) : undefined
+        }
+        footer={
+          <Button variant="ghost" onClick={() => setLogId(null)}>
+            {t("common.close")}
+          </Button>
+        }
+      >
+        {logRow &&
+          (logRow.imageBuildLog?.trim() ? (
+            <pre
+              className="bh-scroll"
+              data-testid="blueprint-build-log"
+              tabIndex={0}
+              aria-label={t("blueprints.buildLog")}
+              style={{
+                margin: 0,
+                maxHeight: "min(52vh, 420px)",
+                overflow: "auto",
+                padding: "12px 14px",
+                background: "var(--ny-surface-sunken)",
+                border: "1px solid var(--ny-border)",
+                borderRadius: 9,
+                fontFamily: "var(--ny-font-mono)",
+                fontSize: 12,
+                lineHeight: 1.55,
+                color: "var(--ny-text)",
+                // Docker writes one long line as readily as a hundred short
+                // ones, and the failure is usually the long one. `pre-wrap`
+                // keeps the newlines that are there; `anywhere` breaks a run
+                // with nothing to break on — an image digest, a path — instead
+                // of letting it push the dialog sideways.
+                whiteSpace: "pre-wrap",
+                overflowWrap: "anywhere",
+              }}
+            >
+              {logRow.imageBuildLog}
+            </pre>
+          ) : (
+            // A build that failed before the daemon said anything still has to
+            // account for itself; an empty box would read as a UI fault.
+            <Text size="sm" tone="subtle">
+              {t("blueprints.buildLogEmpty")}
+            </Text>
+          ))}
       </Dialog>
 
       {/* Delete confirmation */}

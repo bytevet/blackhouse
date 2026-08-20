@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { Spinner } from "@notyet.im/ui";
-import { TriangleAlert } from "lucide-react";
+import { CirclePlay, TriangleAlert } from "lucide-react";
 import { ApiError } from "@/lib/api";
 import {
   destroyAgent as destroyAgentRequest,
@@ -12,15 +12,17 @@ import {
   type AgentDetail,
   type RuntimeAvailability,
 } from "@/components/agent/agent-data";
-import { AgentHeader } from "@/components/agent/agent-header";
+import { AgentHeader, isAwaitingStart, isMissingImage } from "@/components/agent/agent-header";
 import { AgentPageStyles } from "@/components/agent/agent-styles";
 import { AgentViewBar, type AgentTab, type SecondaryTab } from "@/components/agent/agent-view-bar";
 import { ConfirmDialog } from "@/components/agent/confirm-dialog";
 import { MOCK_EGRESS_ALLOWLIST, mockBlueprint } from "@/components/agent/mock-data";
 import { SecondaryPane } from "@/components/agent/secondary-pane";
 import { SplitPane } from "@/components/agent/split-pane";
+import { toneBorderVar, toneSubtleVar } from "@/components/agent/status-pill";
 import { TerminalPane } from "@/components/agent/terminal-pane";
 import { usePersistedLeftPct, useSplitAvailable } from "@/components/agent/use-split-layout";
+import { toneTextVar, type StatusTone } from "@/lib/agent-status";
 
 /**
  * One agent — inspect and drive it.
@@ -228,6 +230,12 @@ function AgentPaneView() {
     );
   }
 
+  // ⚠️ Invented name, CLI and resource caps: the pane fetches no blueprint, so
+  // nothing in here reflects the real row. (`GET /api/settings/blueprints`
+  // lists them, but it is a settings-shaped list route, not the per-id fetch
+  // this page would want.) The one blueprint fact the pane genuinely holds is
+  // `agent.containerImage`, copied from `blueprint.image` by `POST /api/agents`
+  // at creation — which is what the startup notice below reads.
   const blueprint = mockBlueprint(agent.blueprintId);
   const terminal = (
     <TerminalPane
@@ -265,6 +273,8 @@ function AgentPaneView() {
         onRestart={() => setPending("restart")}
         onStop={() => setPending("stop")}
       />
+
+      <StartupNotice agent={agent} />
 
       {actionError && (
         <div
@@ -400,6 +410,79 @@ function PaneShell({ children }: { children: React.ReactNode }) {
     >
       <AgentPageStyles />
       {children}
+    </div>
+  );
+}
+
+/**
+ * Why the pane is empty, when it is empty for a reason the user can fix.
+ *
+ * Two states land here and neither is a container doing anything:
+ *
+ * - **Never started.** `POST /api/agents` writes the row and stops; starting is
+ *   a separate call. Without this band the pane shows a pulsing `creating`
+ *   over a terminal that says "the agent is creating" and nothing else ever
+ *   happens — indistinguishable from a launch that hung.
+ * - **No image.** The agent's blueprint had no built image when the agent was
+ *   created, so Start is likely to come back as a raw Docker error. Saying so
+ *   before the click, and naming the screen that fixes it, is the difference
+ *   between a dead end and a next step.
+ *
+ * Deliberately not a spinner and deliberately not an alert: nothing is in
+ * flight (so `role="status"`), and nothing has gone wrong yet.
+ */
+function StartupNotice({ agent }: { agent: AgentDetail }) {
+  const awaitingStart = isAwaitingStart(agent);
+  const missingImage = isMissingImage(agent);
+  if (!awaitingStart && !missingImage) return null;
+
+  // A blocked start outranks an unstarted one: the second paragraph is the
+  // one with something to do in it.
+  const tone: StatusTone = missingImage ? "warning" : "info";
+  const Icon = missingImage ? TriangleAlert : CirclePlay;
+
+  return (
+    <div
+      role="status"
+      style={{
+        flex: "none",
+        display: "flex",
+        gap: 10,
+        alignItems: "flex-start",
+        margin: "0 20px 12px",
+        padding: "10px 12px",
+        borderRadius: 9,
+        border: `1px solid ${toneBorderVar(tone)}`,
+        background: toneSubtleVar(tone),
+        color: toneTextVar(tone),
+        fontSize: 12.5,
+        lineHeight: 1.55,
+      }}
+    >
+      <Icon size={15} strokeWidth={2} aria-hidden="true" style={{ flex: "none", marginTop: 2 }} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+        {awaitingStart && (
+          <span>
+            <strong>Not started yet.</strong> Creating an agent registers it; it does not launch a
+            container. This one has no container, no terminal output and no logs, and it will stay
+            that way until you press Start in the header above — it is parked, not booting.
+          </span>
+        )}
+        {missingImage && (
+          <span>
+            <strong>No image for this agent.</strong> Its blueprint had no built image when the
+            agent was created, so Start is likely to fail with a Docker error unless the blueprint
+            has been built since.{" "}
+            <Link
+              to="/settings/blueprints"
+              style={{ color: "inherit", fontWeight: 600, textDecoration: "underline" }}
+            >
+              Build the image in Settings → Blueprints
+            </Link>
+            , then start the agent.
+          </span>
+        )}
+      </div>
     </div>
   );
 }
