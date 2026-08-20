@@ -34,17 +34,68 @@ const docker = new Docker({
   key: readFileSync(`${CERTS}/key.pem`),
 });
 
+/**
+ * Pre-spawned execs, waiting for a connection.
+ *
+ * Creating and starting a `docker exec` is a round trip to the daemon plus a
+ * process spawn — about 90ms against this host, and it used to sit in front of
+ * every single TCP connection. A browser opens several per page, so a page load
+ * paid it several times over: measured at ~890ms for 22 requests when the
+ * server itself answers in under a millisecond.
+ *
+ * So pay it in advance. The pool keeps a few streams already attached to a
+ * waiting `nc`, hands one over the instant a connection arrives, and refills
+ * behind it. The cost does not go away, it just stops being in the way.
+ */
+// Eight covers a browser's per-origin connection limit with room to spare.
+// Raising it to 16 bought only ~40ms on a page load, and the pool is nearly
+// free either way — 17 waiting `nc` processes measured at 4MB in the relay.
+const POOL_SIZE = Number(process.env.TUNNEL_POOL ?? 8);
+const pool = [];
+let filling = 0;
+
+async function spawnExec() {
+  const exec = await docker.getContainer(RELAY).exec({
+    Cmd: ["nc", ...TARGET.split(" ")],
+    AttachStdin: true,
+    AttachStdout: true,
+    AttachStderr: true,
+    Tty: false,
+  });
+  return exec.start({ hijack: true, stdin: true });
+}
+
+function refill() {
+  while (pool.length + filling < POOL_SIZE) {
+    filling += 1;
+    spawnExec()
+      .then((stream) => {
+        // A pooled stream that dies before it is used must not be handed out.
+        stream.once("error", () => {
+          const i = pool.indexOf(stream);
+          if (i >= 0) pool.splice(i, 1);
+        });
+        pool.push(stream);
+      })
+      .catch((err) => console.error("tunnel: prewarm failed —", err.message))
+      .finally(() => {
+        filling -= 1;
+      });
+  }
+}
+
+async function takeStream() {
+  const warm = pool.shift();
+  refill();
+  // An empty pool is a burst, not an error: fall back to spawning inline so a
+  // connection is never refused, just slower.
+  return warm ?? (await spawnExec());
+}
+
 const server = net.createServer(async (socket) => {
   socket.on("error", () => socket.destroy());
   try {
-    const exec = await docker.getContainer(RELAY).exec({
-      Cmd: ["nc", ...TARGET.split(" ")],
-      AttachStdin: true,
-      AttachStdout: true,
-      AttachStderr: true,
-      Tty: false,
-    });
-    const stream = await exec.start({ hijack: true, stdin: true });
+    const stream = await takeStream();
 
     // Container stdout → local socket. stderr is discarded: `nc` writes its
     // diagnostics there and they are not part of the payload.
@@ -64,6 +115,9 @@ const server = net.createServer(async (socket) => {
   }
 });
 
-server.listen(LOCAL_PORT, "127.0.0.1", () =>
-  console.log(`tunnel: 127.0.0.1:${LOCAL_PORT} → ${RELAY}:[${TARGET}] on ${HOST}`),
-);
+server.listen(LOCAL_PORT, "127.0.0.1", () => {
+  refill();
+  console.log(
+    `tunnel: 127.0.0.1:${LOCAL_PORT} → ${RELAY}:[${TARGET}] on ${HOST} (pool ${POOL_SIZE})`,
+  );
+});
