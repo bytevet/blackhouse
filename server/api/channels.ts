@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { and, desc, eq, inArray, lt, or } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, ne, or } from "drizzle-orm";
 import { db } from "../db/index.js";
 import * as schema from "../db/schema.js";
 import { authMiddleware, type AuthEnv } from "../middleware/auth.js";
@@ -41,6 +41,65 @@ async function channelBySlugOrId(key: string) {
   return row ?? null;
 }
 
+type ChannelRow = typeof schema.channels.$inferSelect;
+
+/**
+ * Who may read a channel, and which agents are in it.
+ *
+ * One lookup, because three separate routes need the same two answers and
+ * re-querying per route is how they drift apart.
+ *
+ * **Public channels short-circuit before any membership lookup.** That is not
+ * an optimisation, it is the safety property: every channel that exists today
+ * is public and has no human members at all — `server/db/seed.ts` creates
+ * `#general` and adds nobody — so a gate that consulted membership first would
+ * lock every user out of every room on the first deploy, including whoever
+ * deployed it.
+ *
+ * Membership still matters in a public channel: it decides which agents can be
+ * mentioned, and it is what `read.sh` filters an agent's own channel list by
+ * (`server/api/agent-runtime.ts`).
+ */
+export async function channelAccess(
+  channel: ChannelRow,
+  user: { id: string; role?: string | null },
+): Promise<{ canRead: boolean; agentIds: Set<string>; isMember: boolean }> {
+  const rows = await db
+    .select({
+      agentId: schema.channelMembers.agentId,
+      userId: schema.channelMembers.userId,
+    })
+    .from(schema.channelMembers)
+    .where(eq(schema.channelMembers.channelId, channel.id));
+
+  const agentIds = new Set<string>();
+  let isMember = false;
+  for (const row of rows) {
+    if (row.agentId) agentIds.add(row.agentId);
+    else if (row.userId === user.id) isMember = true;
+  }
+
+  // Admins keep the override they have everywhere else in this codebase; a
+  // private room they cannot see is a room they cannot administer.
+  const canRead = !channel.isPrivate || isMember || user.role === "admin";
+  return { canRead, agentIds, isMember };
+}
+
+/**
+ * Say the roster changed, so an open dialog and the header agree.
+ *
+ * Fire-and-forget on the channel topic: the frame carries no rows, because the
+ * two consumers want different shapes and both already know how to refetch.
+ */
+function announceMembers(channelId: string) {
+  streamBus.emit(`channel:${channelId}`, { type: "channel.members", channelId });
+}
+
+/** 404 rather than 403 — a private channel should not confirm it exists. */
+function notFound(c: { json: (b: unknown, s: 404) => Response }) {
+  return c.json({ error: "Channel not found" }, 404);
+}
+
 const app = new Hono<AuthEnv>()
 
   .get("/", authMiddleware, async (c) => {
@@ -49,7 +108,26 @@ const app = new Hono<AuthEnv>()
       .from(schema.channels)
       .where(eq(schema.channels.isArchived, false))
       .orderBy(schema.channels.slug);
-    return c.json(rows);
+
+    const user = c.get("session").user;
+    if (user.role === "admin") return c.json(rows);
+
+    // Only private rooms cost a lookup. The common case — a workspace of
+    // public channels — is one query, as before.
+    const privateIds = rows.filter((r) => r.isPrivate).map((r) => r.id);
+    if (privateIds.length === 0) return c.json(rows);
+
+    const mine = await db
+      .select({ channelId: schema.channelMembers.channelId })
+      .from(schema.channelMembers)
+      .where(
+        and(
+          inArray(schema.channelMembers.channelId, privateIds),
+          eq(schema.channelMembers.userId, user.id),
+        ),
+      );
+    const joined = new Set(mine.map((m) => m.channelId));
+    return c.json(rows.filter((r) => !r.isPrivate || joined.has(r.id)));
   })
 
   .post("/", authMiddleware, async (c) => {
@@ -85,6 +163,9 @@ const app = new Hono<AuthEnv>()
   .get("/:key", authMiddleware, async (c) => {
     const channel = await channelBySlugOrId(c.req.param("key")!);
     if (!channel) return c.json({ error: "Channel not found" }, 404);
+
+    const access = await channelAccess(channel, c.get("session").user);
+    if (!access.canRead) return notFound(c);
 
     const members = await db
       .select({
@@ -168,7 +249,130 @@ const app = new Hono<AuthEnv>()
       .onConflictDoNothing()
       .returning();
 
-    return c.json(member ?? { ok: true }, 201);
+    // `onConflictDoNothing` returns nothing when the row already existed, and
+    // "already a member" is a thing the dialog should say rather than a silent
+    // success that looks like an add.
+    if (!member) return c.json({ error: "Already a member of this channel" }, 409);
+
+    announceMembers(channel.id);
+    return c.json(member, 201);
+  })
+
+  /**
+   * The members dialog's data.
+   *
+   * Separate from `GET /:key` because that returns bare join-table ids — enough
+   * to count humans and agents in the header, nothing you could render a row
+   * from. Here the rows are joined out to the names, handles and live state the
+   * dialog shows.
+   */
+  .get("/:key/members", authMiddleware, async (c) => {
+    const channel = await channelBySlugOrId(c.req.param("key")!);
+    if (!channel) return c.json({ error: "Channel not found" }, 404);
+    const access = await channelAccess(channel, c.get("session").user);
+    if (!access.canRead) return notFound(c);
+
+    const people = await db
+      .select({
+        memberId: schema.channelMembers.id,
+        id: schema.user.id,
+        name: schema.user.name,
+        email: schema.user.email,
+        role: schema.user.role,
+      })
+      .from(schema.channelMembers)
+      .innerJoin(schema.user, eq(schema.channelMembers.userId, schema.user.id))
+      .where(eq(schema.channelMembers.channelId, channel.id));
+
+    const agents = await db
+      .select({
+        memberId: schema.channelMembers.id,
+        id: schema.agents.id,
+        handle: schema.agents.handle,
+        displayName: schema.agents.displayName,
+        status: schema.agents.status,
+        activity: schema.agents.activity,
+        statusLine: schema.agents.statusLine,
+      })
+      .from(schema.channelMembers)
+      .innerJoin(schema.agents, eq(schema.channelMembers.agentId, schema.agents.id))
+      .where(eq(schema.channelMembers.channelId, channel.id));
+
+    return c.json({ people, agents });
+  })
+
+  /**
+   * Who could be added — everyone in the workspace who is not already here.
+   *
+   * A deliberately narrower view than `GET /api/settings/users`, which is
+   * admin-gated and carries `banned`, `createdAt` and the rest. Picking someone
+   * to add to a channel should not require being an admin, but it also should
+   * not hand every member the full user table.
+   */
+  .get("/:key/members/candidates", authMiddleware, async (c) => {
+    const channel = await channelBySlugOrId(c.req.param("key")!);
+    if (!channel) return c.json({ error: "Channel not found" }, 404);
+    const access = await channelAccess(channel, c.get("session").user);
+    if (!access.canRead) return notFound(c);
+
+    const existing = await db
+      .select({
+        agentId: schema.channelMembers.agentId,
+        userId: schema.channelMembers.userId,
+      })
+      .from(schema.channelMembers)
+      .where(eq(schema.channelMembers.channelId, channel.id));
+    const takenUsers = new Set(existing.map((e) => e.userId).filter(Boolean));
+    const takenAgents = new Set(existing.map((e) => e.agentId).filter(Boolean));
+
+    const people = (
+      await db
+        .select({ id: schema.user.id, name: schema.user.name, email: schema.user.email })
+        .from(schema.user)
+    ).filter((u) => !takenUsers.has(u.id));
+
+    const agents = (
+      await db
+        .select({
+          id: schema.agents.id,
+          handle: schema.agents.handle,
+          displayName: schema.agents.displayName,
+        })
+        .from(schema.agents)
+        .where(ne(schema.agents.status, "destroyed"))
+    ).filter((a) => !takenAgents.has(a.id));
+
+    return c.json({ people, agents });
+  })
+
+  /**
+   * Remove one membership.
+   *
+   * Scoped by channel as well as id so a member row cannot be deleted through
+   * the wrong channel's URL. Removing an agent does nothing to its container —
+   * it stops being mentionable here and keeps running, which is what the design
+   * promises in the dialog's footnote.
+   */
+  .delete("/:key/members/:memberId", authMiddleware, async (c) => {
+    const channel = await channelBySlugOrId(c.req.param("key")!);
+    if (!channel) return c.json({ error: "Channel not found" }, 404);
+    const access = await channelAccess(channel, c.get("session").user);
+    if (!access.canRead) return notFound(c);
+
+    const [removed] = await db
+      .delete(schema.channelMembers)
+      .where(
+        and(
+          eq(schema.channelMembers.id, c.req.param("memberId")!),
+          eq(schema.channelMembers.channelId, channel.id),
+        ),
+      )
+      .returning({ id: schema.channelMembers.id });
+
+    if (!removed) return c.json({ error: "Not a member of this channel" }, 404);
+
+    announceMembers(channel.id);
+    return c.json({ ok: true });
   })
 
   /**
@@ -182,6 +386,9 @@ const app = new Hono<AuthEnv>()
   .get("/:key/messages", authMiddleware, async (c) => {
     const channel = await channelBySlugOrId(c.req.param("key")!);
     if (!channel) return c.json({ error: "Channel not found" }, 404);
+
+    const access = await channelAccess(channel, c.get("session").user);
+    if (!access.canRead) return notFound(c);
 
     const limit = Math.min(Number(c.req.query("limit") ?? DEFAULT_PAGE) || DEFAULT_PAGE, 200);
     const before = c.req.query("before");
@@ -245,12 +452,30 @@ const app = new Hono<AuthEnv>()
     const { body, mode, requestId } = parsed.data;
     const user = c.get("session").user;
 
+    const access = await channelAccess(channel, user);
+    if (!access.canRead) return notFound(c);
+
     const parsedMentions = parseMentions(body);
     const handles = parsedMentions.map((m) => m.handle);
 
-    const mentionedAgents = handles.length
+    const resolved = handles.length
       ? await db.select().from(schema.agents).where(inArray(schema.agents.handle, handles))
       : [];
+
+    /**
+     * Membership decides who can be mentioned.
+     *
+     * This used to resolve against every agent in the workspace, which made the
+     * channel roster decorative: adding or removing an agent changed nothing
+     * about who you could summon. Now a mention of a non-member resolves to
+     * nothing and the poster is told, rather than the message landing and the
+     * agent silently never answering.
+     *
+     * The message still posts. Refusing it would lose what someone typed over a
+     * membership detail they can fix in two clicks.
+     */
+    const mentionedAgents = resolved.filter((a) => access.agentIds.has(a.id));
+    const notMembers = resolved.filter((a) => !access.agentIds.has(a.id)).map((a) => a.handle);
 
     const [message] = await db
       .insert(schema.messages)
@@ -295,7 +520,8 @@ const app = new Hono<AuthEnv>()
       dispatched.push(outcome);
     }
 
-    return c.json({ message, dispatched }, 201);
+    // `notMembers` is how the composer explains a mention that went nowhere.
+    return c.json({ message, dispatched, notMembers }, 201);
   });
 
 type AgentRow = typeof schema.agents.$inferSelect;

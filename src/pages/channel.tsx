@@ -1,10 +1,13 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useOutletContext, useParams } from "react-router";
 import { CircleAlert } from "lucide-react";
 import { Button } from "@notyet.im/ui";
 import { ChannelHeader } from "@/components/channel/channel-header";
 import { Composer } from "@/components/channel/composer";
+import { MembersDialog } from "@/components/channel/members-dialog";
 import { Transcript } from "@/components/channel/transcript";
+import { fetchChannelMembers, type ChannelMembers } from "@/components/channel/channel-api";
+import { useStreamTopic } from "@/components/workspace/workspace-context";
 import type { DeliveryMode, UserView } from "@/components/channel/types";
 import { useChannelData } from "@/components/channel/use-channel-data";
 import { useWorkspace } from "@/components/workspace/workspace-context";
@@ -40,8 +43,36 @@ export function ChannelPage() {
 
   const [draft, setDraft] = useState("");
   const [mode, setMode] = useState<DeliveryMode>("queue");
+  const [membersOpen, setMembersOpen] = useState(false);
+  const [members, setMembers] = useState<ChannelMembers | null>(null);
+  /** Bumped on a `channel.members` frame, to refetch and to re-poke the dialog. */
+  const [membersRev, setMembersRev] = useState(0);
 
-  const knownHandles = useMemo(() => workspace.agents.map((a) => a.handle), [workspace.agents]);
+  useStreamTopic(null, (event) => {
+    if (event.type === "channel.members") setMembersRev((n) => n + 1);
+  });
+
+  // The roster the composer offers, not the whole workspace: only a member can
+  // be mentioned here, so offering the rest is offering a mention that will be
+  // refused.
+  const channelKey = channel?.slug ?? slug;
+  useEffect(() => {
+    let live = true;
+    fetchChannelMembers(channelKey)
+      .then((next) => live && setMembers(next))
+      .catch(() => live && setMembers(null));
+    return () => {
+      live = false;
+    };
+  }, [channelKey, membersRev]);
+
+  const memberAgents = useMemo(() => {
+    if (!members) return workspace.agents;
+    const ids = new Set(members.agents.map((a) => a.id));
+    return workspace.agents.filter((a) => ids.has(a.id));
+  }, [members, workspace.agents]);
+
+  const knownHandles = useMemo(() => memberAgents.map((a) => a.handle), [memberAgents]);
 
   /**
    * Posting is optimistic, and the *outcome* is the server's.
@@ -66,6 +97,7 @@ export function ChannelPage() {
             channel={channel}
             live={workspace.live}
             onToggleAutoApprove={(next) => void data.setAutoApprove(next)}
+            onManageMembers={() => setMembersOpen(true)}
             onOpenSidebar={onOpenSidebar}
           />
 
@@ -88,14 +120,31 @@ export function ChannelPage() {
             <ActionError message={data.actionError} onDismiss={data.clearActionError} />
           )}
 
+          {data.notMembers.length > 0 && (
+            <NotMemberNote
+              handles={data.notMembers}
+              slug={channel.slug}
+              onManage={() => setMembersOpen(true)}
+              onDismiss={data.clearNotMembers}
+            />
+          )}
+
           <Composer
             channelSlug={channel.slug}
-            agents={workspace.agents}
+            agents={memberAgents}
             value={draft}
             onChange={setDraft}
             mode={mode}
             onModeChange={setMode}
             onSend={() => void send()}
+          />
+
+          <MembersDialog
+            open={membersOpen}
+            onClose={() => setMembersOpen(false)}
+            channelKey={channel.slug}
+            channelSlug={channel.slug}
+            revision={membersRev}
           />
         </>
       ) : (
@@ -108,6 +157,57 @@ export function ChannelPage() {
         />
       )}
     </>
+  );
+}
+
+/**
+ * A mention that resolved to a real agent which is not in this channel.
+ *
+ * The message posted and nothing was dispatched, which from the composer looks
+ * exactly like an agent that is simply slow to answer. Borrows the queued
+ * chip's dashed treatment because it is the same kind of statement — something
+ * you said is not going to happen yet, and here is the way to change that.
+ */
+function NotMemberNote({
+  handles,
+  slug,
+  onManage,
+  onDismiss,
+}: {
+  handles: string[];
+  slug: string;
+  onManage: () => void;
+  onDismiss: () => void;
+}) {
+  const names = handles.map((h) => `@${h}`).join(", ");
+  return (
+    <div
+      role="status"
+      style={{
+        flex: "none",
+        display: "flex",
+        alignItems: "center",
+        flexWrap: "wrap",
+        gap: 8,
+        margin: "0 clamp(10px, 3vw, 26px)",
+        border: "1px dashed var(--ny-border-strong)",
+        borderRadius: 8,
+        padding: "5px 10px",
+        fontFamily: "var(--ny-font-mono)",
+        fontSize: 11.5,
+        color: "var(--ny-text-muted)",
+      }}
+    >
+      <span style={{ flex: 1, minWidth: 0 }}>
+        {names} {handles.length > 1 ? "are" : "is"} not in #{slug} — nothing was dispatched.
+      </span>
+      <Button variant="ghost" size="sm" onClick={onManage}>
+        Add to channel
+      </Button>
+      <Button variant="ghost" size="sm" onClick={onDismiss}>
+        Dismiss
+      </Button>
+    </div>
   );
 }
 

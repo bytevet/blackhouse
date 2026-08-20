@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bell, Ellipsis, LogOut, Menu, SquarePen, TriangleAlert, Zap } from "lucide-react";
+import { Bell, Ellipsis, LogOut, Menu, SquarePen, TriangleAlert, Users, Zap } from "lucide-react";
 import { Button, Dialog, Popover, Switch, VisuallyHidden } from "@notyet.im/ui";
 import type { ChannelView } from "./types";
 
@@ -16,6 +16,7 @@ export function ChannelHeader({
   channel,
   live = true,
   onToggleAutoApprove,
+  onManageMembers,
   onEditChannel,
   onLeaveChannel,
   onOpenSidebar,
@@ -26,6 +27,8 @@ export function ChannelHeader({
    *  when it is no longer live. */
   live?: boolean;
   onToggleAutoApprove: (next: boolean) => void;
+  /** Opens the members dialog — from the count, and from the overflow menu. */
+  onManageMembers: () => void;
   onEditChannel?: () => void;
   onLeaveChannel?: () => void;
   /** Present only on narrow viewports, where the sidebar is a drawer. */
@@ -90,9 +93,24 @@ export function ChannelHeader({
             aria-hidden
             style={{ width: 1, height: 14, background: "var(--ny-border-strong)" }}
           />
-          <span style={{ fontSize: 12.5, color: "var(--ny-text-subtle)" }}>
+          {/* The count is the way in to managing the roster, which is what the
+              design makes it. The dashed underline is the affordance — it reads
+              as editable rather than as a statistic. */}
+          <button
+            type="button"
+            onClick={onManageMembers}
+            title="Manage members"
+            className="bh-reset bh-focusable"
+            style={{
+              fontSize: 12.5,
+              color: "var(--ny-text-subtle)",
+              cursor: "pointer",
+              borderBottom: "1px dashed var(--ny-border-strong)",
+              padding: 0,
+            }}
+          >
             {channel.humanCount} humans · {channel.agentCount} agents
-          </span>
+          </button>
         </div>
         <div
           style={{
@@ -181,6 +199,10 @@ export function ChannelHeader({
         content={
           <ChannelMenu
             channel={channel}
+            onManageMembers={() => {
+              setMenuOpen(false);
+              onManageMembers();
+            }}
             onToggleAutoApprove={(next) => {
               // Turning the gate *off* is the dangerous direction, so it is the
               // one that asks. Turning it back on is a return to the safe state
@@ -265,11 +287,14 @@ export function ChannelHeader({
 function ChannelMenu({
   channel,
   onToggleAutoApprove,
+  onManageMembers,
   onEditChannel,
   onLeaveChannel,
 }: {
   channel: ChannelView;
   onToggleAutoApprove: (next: boolean) => void;
+  /** Opens the members dialog — from the count, and from the overflow menu. */
+  onManageMembers: () => void;
   onEditChannel: () => void;
   onLeaveChannel: () => void;
 }) {
@@ -380,6 +405,9 @@ function ChannelMenu({
       <div style={{ height: 1, background: "var(--ny-border)" }} />
 
       <div style={{ padding: 5 }}>
+        <MenuItem icon={<Users size={15} strokeWidth={2} />} onClick={onManageMembers}>
+          Members
+        </MenuItem>
         <MenuItem icon={<SquarePen size={15} strokeWidth={2} />} onClick={onEditChannel}>
           Edit channel &amp; repo
         </MenuItem>

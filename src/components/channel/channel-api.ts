@@ -69,6 +69,69 @@ export function createChannel(input: CreateChannelInput): Promise<ChannelRow> {
   return request<ChannelRow>("/api/channels", { method: "POST", ...json(input) });
 }
 
+// --- Members ---------------------------------------------------------------
+
+/** A human in a channel, as the members dialog renders them. */
+export interface ChannelPerson {
+  memberId: string;
+  id: string;
+  name: string;
+  email: string;
+  /** Workspace role — `admin`, or null for an ordinary member. */
+  role: string | null;
+}
+
+/** An agent in a channel. Carries both state signals, like every other surface. */
+export interface ChannelAgentMember {
+  memberId: string;
+  id: string;
+  handle: string;
+  displayName: string;
+  status: string;
+  activity: string;
+  statusLine: string | null;
+}
+
+export interface ChannelMembers {
+  people: ChannelPerson[];
+  agents: ChannelAgentMember[];
+}
+
+export function fetchChannelMembers(key: string, signal?: AbortSignal): Promise<ChannelMembers> {
+  return request<ChannelMembers>(`/api/channels/${encodeURIComponent(key)}/members`, { signal });
+}
+
+export interface MemberCandidates {
+  people: Array<{ id: string; name: string; email: string }>;
+  agents: Array<{ id: string; handle: string; displayName: string }>;
+}
+
+export function fetchMemberCandidates(
+  key: string,
+  signal?: AbortSignal,
+): Promise<MemberCandidates> {
+  return request<MemberCandidates>(`/api/channels/${encodeURIComponent(key)}/members/candidates`, {
+    signal,
+  });
+}
+
+export function addChannelMember(
+  key: string,
+  input: { userId: string } | { agentId: string },
+): Promise<unknown> {
+  return request(`/api/channels/${encodeURIComponent(key)}/members`, {
+    method: "POST",
+    ...json(input),
+  });
+}
+
+export function removeChannelMember(key: string, memberId: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(
+    `/api/channels/${encodeURIComponent(key)}/members/${encodeURIComponent(memberId)}`,
+    { method: "DELETE" },
+  );
+}
+
 export function setAutoApprove(key: string, enabled: boolean): Promise<ChannelRow> {
   return request<ChannelRow>(`/api/channels/${encodeURIComponent(key)}/auto-approve`, {
     method: "PUT",
@@ -129,6 +192,12 @@ export interface DispatchOutcome {
 export interface PostMessageResult {
   message: MessageRow;
   dispatched: DispatchOutcome[];
+  /**
+   * Handles that were mentioned but are not in this channel, so nothing was
+   * dispatched to them. The message still posted — losing what someone typed
+   * over a membership detail would be worse than telling them about it.
+   */
+  notMembers?: string[];
 }
 
 export function postMessage(

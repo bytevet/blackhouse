@@ -24,6 +24,9 @@ export type StreamEvent =
   // The roster is a live list, not a snapshot: the rail renders on every route
   // and never remounts, so an agent that appears or disappears has to say so.
   // Without these it stays whatever it was when the tab was opened.
+  // Membership changed. Carries no rows: an open dialog refetches, and the
+  // header only needs to know its counts are stale.
+  | { type: "channel.members"; channelId: string }
   | { type: "agent.created"; agentId: string }
   | { type: "agent.removed"; agentId: string }
   | { type: "agent.status_line"; agentId: string; statusLine: string | null }

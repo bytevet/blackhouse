@@ -8,6 +8,13 @@
       "when": 1786704804949,
       "tag": "0000_charming_proudstar",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1786704804950,
+      "tag": "0001_backfill_channel_agents",
+      "breakpoints": true
     }
   ]
 }

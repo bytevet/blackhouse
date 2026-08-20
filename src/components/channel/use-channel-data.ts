@@ -91,6 +91,12 @@ export interface ChannelData {
 
   /** Resolves false when the post failed; `actionError` carries why. */
   send: (body: string, mode: InjectionMode) => Promise<boolean>;
+  /**
+   * Handles mentioned in the last post that are not in this channel, so nothing
+   * was dispatched to them. Cleared on the next send.
+   */
+  notMembers: string[];
+  clearNotMembers: () => void;
   approveDispatch: (dispatchId: string, prompt?: string) => Promise<void>;
   denyDispatch: (dispatchId: string) => Promise<void>;
   setAutoApprove: (enabled: boolean) => Promise<void>;
@@ -387,6 +393,8 @@ export function useChannelData(slug: string, currentUser: UserView | null): Chan
 
   // --- Writes -------------------------------------------------------------
 
+  const [notMembers, setNotMembers] = useState<string[]>([]);
+
   const send = useCallback(
     async (body: string, mode: InjectionMode): Promise<boolean> => {
       const trimmed = body.trim();
@@ -395,6 +403,7 @@ export function useChannelData(slug: string, currentUser: UserView | null): Chan
       const mine = generation.current;
 
       setActionError(null);
+      setNotMembers([]);
       setPending((prev) => [...prev, { requestId, body: trimmed, createdAt: new Date() }]);
 
       try {
@@ -407,6 +416,12 @@ export function useChannelData(slug: string, currentUser: UserView | null): Chan
         // The queue/interrupt verdict is the *server's*, not ours: it is the
         // only side that knows whether the agent is busy, stopped or paused,
         // and those three read very differently. The reason travels verbatim.
+        // A mention that resolved to a real agent which is not in this channel.
+        // The message posted; nothing was dispatched, and saying so is the only
+        // thing standing between the poster and waiting on a reply that is
+        // never coming.
+        setNotMembers(result.notMembers ?? []);
+
         const outcome = result.dispatched.find((item) => item.queued);
         if (outcome) {
           const agent = agents.find((item) => item.id === outcome.agentId);
@@ -536,6 +551,8 @@ export function useChannelData(slug: string, currentUser: UserView | null): Chan
     loadOlder,
 
     send,
+    notMembers,
+    clearNotMembers: useCallback(() => setNotMembers([]), []),
     approveDispatch,
     denyDispatch,
     setAutoApprove,

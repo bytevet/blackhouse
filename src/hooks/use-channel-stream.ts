@@ -25,6 +25,7 @@ export type ChannelStreamEvent =
   | { topic: string; type: "message.updated"; channelId: string; messageId: string }
   | { topic: string; type: "agent.status"; agentId: string; status: string; activity: string }
   | { topic: string; type: "agent.status_line"; agentId: string; statusLine: string | null }
+  | { topic: string; type: "channel.members"; channelId: string }
   | { topic: string; type: "agent.created"; agentId: string }
   | { topic: string; type: "agent.removed"; agentId: string }
   | { topic: string; type: "run.updated"; agentId: string; runId: string; status: string }
@@ -41,6 +42,7 @@ const EVENT_TYPES = [
   "message.updated",
   "agent.status",
   "agent.status_line",
+  "channel.members",
   "agent.created",
   "agent.removed",
   "run.updated",
