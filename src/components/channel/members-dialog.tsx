@@ -155,6 +155,7 @@ export function MembersDialog({
   onClose,
   channelKey,
   channelSlug,
+  isPrivate = false,
   /** Bumped by the shell when a `channel.members` frame arrives. */
   revision = 0,
 }: {
@@ -162,6 +163,8 @@ export function MembersDialog({
   onClose: () => void;
   channelKey: string;
   channelSlug: string;
+  /** Private rooms must keep a person, or nobody can open them again. */
+  isPrivate?: boolean;
   revision?: number;
 }) {
   const [members, setMembers] = useState<ChannelMembers | null>(null);
@@ -318,6 +321,14 @@ export function MembersDialog({
                     last={i === members.people.length - 1}
                     onRemove={() => void remove(p.memberId)}
                     busy={busy}
+                    // Removing the last person from a private channel makes it
+                    // unreachable — the server refuses, and saying so before the
+                    // click is better than a 409 after it.
+                    blocked={
+                      isPrivate && members.people.length <= 1
+                        ? "A private channel needs at least one person. Add someone else first."
+                        : undefined
+                    }
                   />
                 ))
               ) : (
@@ -772,18 +783,20 @@ function RemoveButton({
   onClick,
   label,
   busy,
+  blocked,
 }: {
   onClick: () => void;
   label: string;
   busy: boolean;
+  blocked?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      disabled={busy}
+      disabled={busy || Boolean(blocked)}
       aria-label={label}
-      title={label}
+      title={blocked ?? label}
       className="bh-reset bh-focusable bh-remove"
       style={{
         display: "grid",
@@ -792,8 +805,9 @@ function RemoveButton({
         height: 24,
         flex: "none",
         borderRadius: 8,
-        cursor: busy ? "default" : "pointer",
+        cursor: busy || blocked ? "default" : "pointer",
         color: "var(--ny-text-subtle)",
+        opacity: blocked ? 0.4 : 1,
       }}
     >
       <X size={14} strokeWidth={2} />
@@ -806,11 +820,14 @@ function PersonRow({
   last,
   onRemove,
   busy,
+  blocked,
 }: {
   person: ChannelPerson;
   last: boolean;
   onRemove: () => void;
   busy: boolean;
+  /** Why this one cannot be removed, if it cannot. */
+  blocked?: string;
 }) {
   const initials = person.name
     .split(/\s+/)
@@ -870,7 +887,12 @@ function PersonRow({
       <Chip tone={tone} strong={person.role === "admin"}>
         {person.role ?? "member"}
       </Chip>
-      <RemoveButton onClick={onRemove} label={`Remove ${person.name}`} busy={busy} />
+      <RemoveButton
+        onClick={onRemove}
+        label={`Remove ${person.name}`}
+        busy={busy}
+        blocked={blocked}
+      />
     </div>
   );
 }

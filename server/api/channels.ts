@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { and, desc, eq, inArray, lt, ne, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, lt, ne, or } from "drizzle-orm";
 import { db } from "../db/index.js";
 import * as schema from "../db/schema.js";
 import { authMiddleware, type AuthEnv } from "../middleware/auth.js";
@@ -376,11 +376,58 @@ const app = new Hono<AuthEnv>()
     const access = await channelAccess(channel, c.get("session").user);
     if (!access.canRead) return notFound(c);
 
+    const memberId = c.req.param("memberId")!;
+
+    /**
+     * A private channel must keep at least one person who can open it.
+     *
+     * Nothing here stopped you removing yourself, including as the only member,
+     * and a private channel with no people is a room no one can reach: the read
+     * gate 404s everyone, there is no `DELETE /api/channels` to clean it up, and
+     * re-adding someone requires opening the very channel you can no longer see.
+     * The only way back is an admin, or SQL.
+     *
+     * Reproduced before this guard existed: a user created a private channel,
+     * removed themselves, got `200 {"ok":true}`, and the room became unreachable
+     * and unremovable in one click with no warning.
+     *
+     * The rule applies to everyone, admins included. They can still read a
+     * private room, so emptying one is recoverable for them — but "a private
+     * channel always has someone in it" is a property worth keeping whole rather
+     * than one with an exemption that has to be reasoned about later. Adding
+     * someone else first is the way through.
+     *
+     * Public channels are exempt: anyone can read them, so an empty one is
+     * merely empty, not lost.
+     */
+    if (channel.isPrivate) {
+      const people = await db
+        .select({ id: schema.channelMembers.id })
+        .from(schema.channelMembers)
+        .where(
+          and(
+            eq(schema.channelMembers.channelId, channel.id),
+            isNotNull(schema.channelMembers.userId),
+          ),
+        );
+      const removingAPerson = people.some((p) => p.id === memberId);
+      if (removingAPerson && people.length <= 1) {
+        return c.json(
+          {
+            error:
+              "This is the only person in a private channel. Add someone else first — " +
+              "a private channel with no people cannot be opened by anyone, or deleted.",
+          },
+          409,
+        );
+      }
+    }
+
     const [removed] = await db
       .delete(schema.channelMembers)
       .where(
         and(
-          eq(schema.channelMembers.id, c.req.param("memberId")!),
+          eq(schema.channelMembers.id, memberId),
           eq(schema.channelMembers.channelId, channel.id),
         ),
       )

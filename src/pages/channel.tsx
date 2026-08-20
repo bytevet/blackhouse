@@ -144,6 +144,7 @@ export function ChannelPage() {
             onClose={() => setMembersOpen(false)}
             channelKey={channel.slug}
             channelSlug={channel.slug}
+            isPrivate={channel.isPrivate}
             revision={membersRev}
           />
         </>

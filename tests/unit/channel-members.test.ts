@@ -441,3 +441,34 @@ describe("the creator joins their own channel", () => {
     );
   });
 });
+
+describe("a private channel keeps at least one person", () => {
+  const source = () => readFileSync(join("server", "api", "channels.ts"), "utf8");
+
+  it("refuses to remove the last human from a private channel", () => {
+    // The second lockout of this shape. The first was creation — a channel with
+    // no members nobody could open. This is the same hole through removal: a
+    // user removed themselves as the only member, got `200 {"ok":true}`, and the
+    // room became unreachable and unremovable in one click. There is no
+    // `DELETE /api/channels`, so the only way back is an admin or SQL.
+    const del = source().slice(source().indexOf('.delete("/:key/members/:memberId"'));
+    const body = del.slice(0, del.indexOf(".post(") > 0 ? del.indexOf(".post(") : del.length);
+    expect(body).toContain("channel.isPrivate");
+    expect(body).toContain("isNotNull(schema.channelMembers.userId)");
+    expect(body).toMatch(/people\.length <= 1/);
+    expect(body).toContain("409");
+  });
+
+  it("leaves public channels alone", () => {
+    // An empty public channel is merely empty — anyone can still read it — so
+    // the guard must not fire there, or leaving a room becomes impossible.
+    const del = source().slice(source().indexOf('.delete("/:key/members/:memberId"'));
+    expect(del.slice(0, 2000)).toMatch(/if \(channel\.isPrivate\)/);
+  });
+
+  it("warns in the dialog before the click, not after", () => {
+    const dialog = readFileSync(join("src", "components", "channel", "members-dialog.tsx"), "utf8");
+    expect(dialog).toContain("A private channel needs at least one person");
+    expect(dialog).toMatch(/disabled=\{busy \|\| Boolean\(blocked\)\}/);
+  });
+});
