@@ -20,8 +20,16 @@ import { volumeMountSchema } from "../lib/validation.js";
 // ---------------------------------------------------------------------------
 
 /** Pack a single file (resolved against cwd) into the tar stream. */
-function addFileToTar(pack: tar.Pack, relPath: string, opts?: { mode?: number }): void {
+function addFileToTar(
+  pack: tar.Pack,
+  relPath: string,
+  opts?: { mode?: number; optional?: boolean },
+): void {
   const abs = path.resolve(process.cwd(), relPath);
+  // `optional` is for context files that only some Dockerfiles want, and that
+  // the server image does not necessarily ship. Missing is not an error; the
+  // build fails clearly on the COPY if it turns out one was needed.
+  if (opts?.optional && !fs.existsSync(abs)) return;
   const stat = fs.statSync(abs);
   const buf = fs.readFileSync(abs);
   pack.entry(
@@ -290,17 +298,35 @@ const app = new Hono<AuthEnv>()
         pack.entry({ name: "Dockerfile" }, dockerfile);
         pack.entry({ name: "agent/entrypoint.sh" }, entrypointScript);
 
-        // The shared Dockerfile block added in v-next (#13) references these
-        // additional build-context paths:
-        //   agent/browser-service/        (recursive — package.json + service.mjs)
-        //   agent/skills/blackhouse/browser-shim.sh
-        // Pack them so the Docker daemon can resolve the COPY directives.
-        // Skip node_modules — the Dockerfile re-runs `npm install --omit=dev`
-        // inside the image, and any host-installed modules would bloat the
-        // context and risk shipping host-platform native binaries.
-        addDirToTar(pack, "agent/browser-service", { skip: ["node_modules"] });
-        addFileToTar(pack, "agent/skills/blackhouse/browser-shim.sh", { mode: 0o755 });
-        addDirToTar(pack, "agent/code-server-config");
+        /**
+         * Pack the whole `agent/` tree, not a list of the paths we think the
+         * Dockerfile wants.
+         *
+         * This used to name four paths, and the comment explaining them cited
+         * the change that added them. It then went stale: the harness refactor
+         * introduced `agent/sidecar/` and `agent/egress-proxy/` and rewrote
+         * `agent/skills/blackhouse/`, and none of that reached this list. The
+         * blueprints kept building against a context missing the files their
+         * Dockerfiles copy, and failed with
+         *
+         *     COPY failed: ... stat agent/sidecar: file does not exist
+         *
+         * A hand-maintained mirror of another file's COPY directives has to be
+         * updated by whoever edits those directives, in a file they have no
+         * reason to open. Packing the directory removes the mirror. It costs a
+         * little context size, which is cheap next to a build that fails for a
+         * reason nobody can see from the Dockerfile.
+         *
+         * `node_modules` is still skipped: the Dockerfile re-runs
+         * `npm install --omit=dev` inside the image, and host-installed modules
+         * would bloat the upload and risk shipping host-platform binaries.
+         */
+        addDirToTar(pack, "agent", { skip: ["node_modules"] });
+
+        // The mock image builds the fake TUI from `tests/`, which is outside
+        // `agent/` and excluded from the server image by `.dockerignore`, so it
+        // is only packed when it is actually there.
+        addFileToTar(pack, "tests/fixtures/mock-agent-tui.sh", { mode: 0o755, optional: true });
 
         pack.finalize();
 
@@ -332,6 +358,13 @@ const app = new Hono<AuthEnv>()
             imageBuildStatus: "built",
             lastBuiltAt: new Date(),
             imageBuildLog: output,
+            // Record what was built. The tag was computed above and then
+            // dropped, so a blueprint could report `built` while `image` stayed
+            // null — and `buildAgentSpec` resolves an agent's image as
+            // `agent.containerImage || blueprint.image || ""`, so every agent
+            // spawned from it failed on an empty image. A successful build that
+            // nothing can be launched from is not a successful build.
+            image: tag,
             updatedAt: new Date(),
           })
           .where(eq(schema.agentBlueprints.id, configId));
