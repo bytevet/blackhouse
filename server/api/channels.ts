@@ -157,6 +157,23 @@ const app = new Hono<AuthEnv>()
       })
       .returning();
 
+    /**
+     * The creator joins their own channel.
+     *
+     * `createdBy` records who made it and gates nothing. Once private channels
+     * became members-only, a channel with no members was a channel nobody could
+     * open — and the person who just made it was the first to be shut out:
+     * 404 on their own room, absent from their own channel list, and no delete
+     * endpoint to undo it. Verified against the deployment before this line
+     * existed.
+     *
+     * `owner` rather than `member`, which is what the role enum is for.
+     */
+    await db
+      .insert(schema.channelMembers)
+      .values({ channelId: created.id, userId: c.get("session").user.id, role: "owner" })
+      .onConflictDoNothing();
+
     return c.json(created, 201);
   })
 

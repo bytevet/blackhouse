@@ -409,3 +409,35 @@ describe("0001_backfill_channel_agents", () => {
     expect(sql).not.toMatch(/user_id/i);
   });
 });
+
+describe("the creator joins their own channel", () => {
+  const source = () => readFileSync(join("server", "api", "channels.ts"), "utf8");
+
+  it("writes a membership row on create, not just `createdBy`", () => {
+    // Without this, a private channel is created with no members — and the
+    // first person locked out is whoever just made it. Reproduced against the
+    // deployment: 404 on their own room, absent from their own channel list,
+    // and no delete endpoint to undo it.
+    const create = source().slice(source().indexOf('.post("/", authMiddleware'));
+    const body = create.slice(0, create.indexOf('.get("/:key"'));
+    expect(body).toContain("schema.channelMembers");
+    expect(body).toMatch(/role:\s*"owner"/);
+  });
+
+  it("is repaired for channels that already exist", () => {
+    const sql = readFileSync(join("drizzle", "0002_backfill_channel_creators.sql"), "utf8");
+    expect(sql).toContain("INSERT INTO channel_members");
+    // `created_by` is nullable and `ON DELETE SET NULL`, so a room whose
+    // creator was deleted has no one to add. Inserting NULL would violate the
+    // table's "exactly one of agent/user" check.
+    expect(sql).toContain("created_by IS NOT NULL");
+    expect(sql).toContain("ON CONFLICT DO NOTHING");
+  });
+
+  it("is registered in the journal", () => {
+    const journal = JSON.parse(readFileSync(join("drizzle", "meta", "_journal.json"), "utf8"));
+    expect(journal.entries.map((e: { tag: string }) => e.tag)).toContain(
+      "0002_backfill_channel_creators",
+    );
+  });
+});

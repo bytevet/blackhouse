@@ -15,6 +15,13 @@
       "when": 1786704804950,
       "tag": "0001_backfill_channel_agents",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786704804951,
+      "tag": "0002_backfill_channel_creators",
+      "breakpoints": true
     }
   ]
 }
