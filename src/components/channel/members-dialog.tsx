@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { Bot, Info, Users, X } from "lucide-react";
 import { Alert, Button, Dialog, Spinner } from "@notyet.im/ui";
@@ -133,6 +133,17 @@ function AddTab({
   );
 }
 
+/**
+ * A row of the add picker: the id the API wants, the string a person types, and
+ * the human name beside it. Both halves are searched — someone looking for a
+ * teammate remembers the name as often as the address.
+ */
+interface Candidate {
+  value: string;
+  token: string;
+  label: string;
+}
+
 const CARD: React.CSSProperties = {
   border: "1px solid var(--ny-border)",
   borderRadius: 12,
@@ -196,9 +207,9 @@ export function MembersDialog({
    * What you can type, and what it resolves to.
    *
    * `token` is the thing a person would actually write — an email, or `@handle`
-   * — and it is what the datalist offers. `value` is the id the API wants.
+   * — and it is what the suggestions offer. `value` is the id the API wants.
    */
-  const options = useMemo(() => {
+  const options = useMemo<Candidate[]>(() => {
     if (!candidates) return [];
     return kind === "person"
       ? candidates.people.map((p) => ({ value: p.id, token: p.email, label: p.name }))
@@ -372,14 +383,96 @@ function AddRow({
 }: {
   kind: "person" | "agent";
   onKindChange: (next: "person" | "agent") => void;
-  options: Array<{ value: string; token: string; label: string }>;
+  options: Candidate[];
   value: string;
   onChange: (next: string) => void;
   onAdd: () => void;
   busy: boolean;
 }) {
   const isPerson = kind === "person";
-  const listId = useId();
+  const listboxId = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [open, setOpen] = useState(false);
+  /** `-1` is "nothing highlighted" — the state in which Enter still means Add. */
+  const [activeIndex, setActiveIndex] = useState(-1);
+
+  // Substring on both halves, because people search with whichever half they
+  // remember: the address or the name, the handle or what the agent is called.
+  const query = value.trim().toLowerCase();
+  const matches = useMemo(
+    () =>
+      query
+        ? options.filter(
+            (o) => o.token.toLowerCase().includes(query) || o.label.toLowerCase().includes(query),
+          )
+        : options,
+    [options, query],
+  );
+  const showList = open && matches.length > 0;
+  const activeOption = activeIndex >= 0 ? matches[activeIndex] : undefined;
+
+  // A new query invalidates the highlight — row 3 of the old list is not row 3
+  // of the new one — and drops back to nothing highlighted, so Enter after
+  // typing a whole address adds *that* rather than whatever was under the
+  // cursor two keystrokes ago.
+  useEffect(() => {
+    setActiveIndex(-1);
+  }, [query]);
+
+  // Person/Agent replaces the candidate list wholesale and the parent clears
+  // the box with it; a listbox left open would be offering the old one.
+  useEffect(() => {
+    setOpen(false);
+    setActiveIndex(-1);
+  }, [kind]);
+
+  const pick = (option: Candidate) => {
+    onChange(option.token);
+    setOpen(false);
+    setActiveIndex(-1);
+    inputRef.current?.focus();
+  };
+
+  const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (matches.length === 0) return;
+      event.preventDefault();
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      if (!showList) {
+        setOpen(true);
+        setActiveIndex(step === 1 ? 0 : matches.length - 1);
+        return;
+      }
+      setActiveIndex((i) =>
+        i < 0
+          ? step === 1
+            ? 0
+            : matches.length - 1
+          : (i + step + matches.length) % matches.length,
+      );
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      // Enter takes the highlighted row if there is one, and otherwise submits
+      // what was typed — which is how someone who pasted a whole address gets
+      // through without ever looking at the suggestions.
+      if (activeOption) pick(activeOption);
+      else onAdd();
+      return;
+    }
+    if (event.key === "Escape" && showList) {
+      // `preventDefault` is load-bearing: this lives inside a native
+      // `<dialog>`, where Escape is a close request. Without it, dismissing the
+      // suggestions takes the whole dialog with them. `stopPropagation` keeps
+      // it away from the window-level Escape handlers other overlays install.
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(false);
+      setActiveIndex(-1);
+    }
+  };
+
   return (
     <div
       style={{
@@ -404,6 +497,7 @@ function AddRow({
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <div
           style={{
+            position: "relative",
             flex: 1,
             minWidth: 0,
             display: "flex",
@@ -419,24 +513,40 @@ function AddRow({
             {isPerson ? <Users size={14} strokeWidth={2} /> : <Bot size={14} strokeWidth={2} />}
           </span>
           {/*
-            The design's free-text box, backed by a datalist rather than by a
-            lookup. Membership only ever resolves to someone already in the
-            workspace, so the list is both the suggestion and the validation:
-            what you type is matched against it on Add, and an unmatched value
-            is refused rather than sent.
+            The design's free-text box, with the candidate list under it rather
+            than behind a browser's idea of a datalist — which offers no
+            filtering worth the name, renders differently in every browser, and
+            in this one simply did not show. Membership only ever resolves to
+            someone already in the workspace, so the list is both the suggestion
+            and the validation: what you type is matched against it on Add, and
+            an unmatched value is refused rather than sent.
           */}
           <input
-            list={listId}
+            ref={inputRef}
             value={value}
-            onChange={(e) => onChange(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                onAdd();
-              }
+            onChange={(e) => {
+              onChange(e.target.value);
+              setOpen(true);
             }}
+            onFocus={() => setOpen(true)}
+            // Focus alone opens it, so this only matters for a click that
+            // lands while the box is already focused and was dismissed.
+            onMouseDown={() => setOpen(true)}
+            onBlur={() => {
+              setOpen(false);
+              setActiveIndex(-1);
+            }}
+            onKeyDown={onKeyDown}
             placeholder={isPerson ? "name@example.com" : "@handle — pick an existing agent"}
             aria-label={isPerson ? "Person to add" : "Agent to add"}
+            role="combobox"
+            aria-expanded={showList}
+            aria-controls={showList ? listboxId : undefined}
+            aria-autocomplete="list"
+            aria-activedescendant={
+              activeOption ? `${listboxId}-opt-${activeOption.value}` : undefined
+            }
+            autoComplete="off"
             style={{
               flex: 1,
               minWidth: 0,
@@ -449,11 +559,17 @@ function AddRow({
               outline: "none",
             }}
           />
-          <datalist id={listId}>
-            {options.map((o) => (
-              <option key={o.value} value={o.token} />
-            ))}
-          </datalist>
+          {showList && (
+            <SuggestionList
+              id={listboxId}
+              label={isPerson ? "People not in this channel" : "Agents not in this channel"}
+              kind={kind}
+              options={matches}
+              activeIndex={activeIndex}
+              onPick={pick}
+              onHover={setActiveIndex}
+            />
+          )}
         </div>
         <Button variant="primary" size="md" onClick={onAdd} disabled={!value.trim()} loading={busy}>
           Add
@@ -465,6 +581,154 @@ function AddRow({
           ? "Workspace members only. Not in the workspace yet? Add them in Settings → Members first."
           : "Adding an agent lets anyone here @mention it. It keeps its own sandbox and budget."}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The candidate listbox.
+ *
+ * Deliberately **not** `MentionAutocomplete` itself, which is the same control
+ * for the composer: every row there is an agent and renders as one — avatar
+ * with the process dot, activity pill, status line — and half of this list is
+ * people. What is shared is the pattern, and the pattern is the part that
+ * matters: the input keeps focus and points at this listbox with
+ * `aria-activedescendant`, which is the ARIA combobox shape, so the keyboard
+ * behaviour comes out right rather than being faked. The surface treatment is
+ * copied on purpose — two dropdowns in one product that do not look alike read
+ * as two different mechanisms.
+ *
+ * `mousedown` rather than `click`, for the same reason as there: the input must
+ * not lose focus before the pick is applied, or `onBlur` closes the list out
+ * from under the click.
+ */
+function SuggestionList({
+  id,
+  label,
+  kind,
+  options,
+  activeIndex,
+  onPick,
+  onHover,
+}: {
+  /** Shared with the input's `aria-controls`. */
+  id: string;
+  /** Names the listbox, and captions it — the same sentence does both jobs. */
+  label: string;
+  kind: "person" | "agent";
+  options: Candidate[];
+  activeIndex: number;
+  onPick: (option: Candidate) => void;
+  onHover: (index: number) => void;
+}) {
+  const listRef = useRef<HTMLUListElement>(null);
+
+  // Keep the active row in view when the keyboard is driving.
+  useEffect(() => {
+    if (activeIndex < 0) return;
+    listRef.current?.children[activeIndex]?.scrollIntoView?.({ block: "nearest" });
+  }, [activeIndex]);
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: "calc(100% + 6px)",
+        left: 0,
+        right: 0,
+        background: "var(--ny-surface-raised)",
+        border: "1px solid var(--ny-border-strong)",
+        borderRadius: 12,
+        boxShadow: "var(--ny-shadow-lg)",
+        overflow: "hidden",
+        zIndex: 5,
+      }}
+    >
+      <div
+        style={{
+          padding: "7px 12px",
+          fontSize: 10.5,
+          fontFamily: "var(--ny-font-mono)",
+          textTransform: "uppercase",
+          letterSpacing: ".05em",
+          color: "var(--ny-text-subtle)",
+          borderBottom: "1px solid var(--ny-border)",
+        }}
+      >
+        {label}
+      </div>
+      <ul
+        ref={listRef}
+        id={id}
+        role="listbox"
+        aria-label={label}
+        className="bh-scroll"
+        style={{ margin: 0, padding: 0, listStyle: "none", maxHeight: 220, overflowY: "auto" }}
+      >
+        {options.map((option, index) => {
+          const active = index === activeIndex;
+          return (
+            <li
+              key={option.value}
+              id={`${id}-opt-${option.value}`}
+              role="option"
+              aria-selected={active}
+              onMouseEnter={() => onHover(index)}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                onPick(option);
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "8px 12px",
+                cursor: "pointer",
+                background: active ? "var(--ny-surface-hover)" : "transparent",
+              }}
+            >
+              <span
+                aria-hidden
+                style={{ color: "var(--ny-text-subtle)", display: "inline-flex", flex: "none" }}
+              >
+                {kind === "person" ? (
+                  <Users size={14} strokeWidth={2} />
+                ) : (
+                  <Bot size={14} strokeWidth={2} />
+                )}
+              </span>
+              {/* The token leads, because the token is what lands in the box. */}
+              <span
+                style={{
+                  fontFamily: "var(--ny-font-mono)",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "var(--ny-text)",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {option.token}
+              </span>
+              <span
+                style={{
+                  marginLeft: "auto",
+                  fontSize: 11,
+                  color: "var(--ny-text-subtle)",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  maxWidth: 140,
+                  flex: "none",
+                }}
+              >
+                {option.label}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
