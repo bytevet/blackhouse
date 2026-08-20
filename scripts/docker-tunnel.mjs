@@ -51,6 +51,21 @@ const docker = new Docker({
 // Raising it to 16 bought only ~40ms on a page load, and the pool is nearly
 // free either way — 17 waiting `nc` processes measured at 4MB in the relay.
 const POOL_SIZE = Number(process.env.TUNNEL_POOL ?? 8);
+
+/**
+ * How long a warmed stream may wait before it is thrown away.
+ *
+ * A pooled `nc` holds a real, open TCP connection to the server, and a server
+ * will not hold one open forever with nothing on it — Node's HTTP server closes
+ * an idle socket at `headersTimeout`, 60s by default, and answers 408. Handing
+ * out a stream that has been sitting for longer than that turns the pool from
+ * an optimisation into an intermittent failure, which is exactly what it did:
+ * the first request after a quiet spell came back `408 Request Timeout`.
+ *
+ * Well under the timeout, so a stream is replaced long before the server gives
+ * up on it.
+ */
+const MAX_IDLE_MS = 15_000;
 const pool = [];
 let filling = 0;
 
@@ -71,11 +86,9 @@ function refill() {
     spawnExec()
       .then((stream) => {
         // A pooled stream that dies before it is used must not be handed out.
-        stream.once("error", () => {
-          const i = pool.indexOf(stream);
-          if (i >= 0) pool.splice(i, 1);
-        });
-        pool.push(stream);
+        stream.once("error", () => drop(stream));
+        stream.once("end", () => drop(stream));
+        pool.push({ stream, born: Date.now() });
       })
       .catch((err) => console.error("tunnel: prewarm failed —", err.message))
       .finally(() => {
@@ -84,12 +97,30 @@ function refill() {
   }
 }
 
+function drop(stream) {
+  const i = pool.findIndex((e) => e.stream === stream);
+  if (i >= 0) pool.splice(i, 1);
+  stream.destroy?.();
+}
+
+/** Discard anything that has been waiting long enough to have gone stale. */
+function evictStale() {
+  const cutoff = Date.now() - MAX_IDLE_MS;
+  for (const entry of [...pool]) if (entry.born < cutoff) drop(entry.stream);
+  refill();
+}
+
 async function takeStream() {
-  const warm = pool.shift();
+  let entry;
+  while ((entry = pool.shift())) {
+    if (Date.now() - entry.born < MAX_IDLE_MS) break;
+    entry.stream.destroy?.();
+    entry = undefined;
+  }
   refill();
   // An empty pool is a burst, not an error: fall back to spawning inline so a
   // connection is never refused, just slower.
-  return warm ?? (await spawnExec());
+  return entry ? entry.stream : await spawnExec();
 }
 
 const server = net.createServer(async (socket) => {
@@ -117,6 +148,9 @@ const server = net.createServer(async (socket) => {
 
 server.listen(LOCAL_PORT, "127.0.0.1", () => {
   refill();
+  // Keep the pool fresh rather than only replacing on use: a tab left open
+  // overnight should still find a live stream waiting for its next request.
+  setInterval(evictStale, MAX_IDLE_MS / 2).unref();
   console.log(
     `tunnel: 127.0.0.1:${LOCAL_PORT} → ${RELAY}:[${TARGET}] on ${HOST} (pool ${POOL_SIZE})`,
   );

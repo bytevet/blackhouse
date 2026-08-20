@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { Bot, Info, Users, X } from "lucide-react";
-import { Alert, Badge, Button, Dialog, SegmentedControl, Select, Spinner } from "@notyet.im/ui";
+import { Alert, Button, Dialog, Spinner } from "@notyet.im/ui";
 import {
   addChannelMember,
   fetchChannelMembers,
@@ -12,9 +12,8 @@ import {
   type ChannelPerson,
   type MemberCandidates,
 } from "./channel-api";
-import { ActivityPill } from "./activity-pill";
 import { agentStatusConfig, toneVar } from "@/lib/agent-status";
-import type { AgentActivity, AgentStatus } from "@/db/schema";
+import type { AgentStatus } from "@/db/schema";
 
 /**
  * Who is in this channel — the people who can read it, and the agents that can
@@ -51,6 +50,88 @@ const SECTION_LABEL: React.CSSProperties = {
   letterSpacing: ".05em",
   color: "var(--ny-text-subtle)",
 };
+
+/**
+ * The design's chip: 9.5px uppercase mono in a 4px-radius box.
+ *
+ * Not `Badge`, which is a rounded pill at roughly twice the size — these sit at
+ * the end of a dense row and are meant to read as a marginal note, not as a
+ * status people look at first. `strong` tints the whole thing; the default is
+ * quiet, on the sunken surface.
+ */
+function Chip({
+  tone,
+  strong = false,
+  children,
+}: {
+  tone: "info" | "warning" | "success" | "danger" | "neutral";
+  strong?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <span
+      style={{
+        fontFamily: "var(--ny-font-mono)",
+        fontSize: 9.5,
+        textTransform: "uppercase",
+        letterSpacing: ".04em",
+        borderRadius: 4,
+        padding: "0 4px",
+        flex: "none",
+        ...(strong && tone !== "neutral"
+          ? {
+              border: `1px solid var(--ny-${tone}-border)`,
+              color: `var(--ny-${tone}-text)`,
+              background: `var(--ny-${tone}-subtle)`,
+            }
+          : {
+              border: "1px solid var(--ny-border)",
+              color: "var(--ny-text-subtle)",
+              background: "var(--ny-surface-sunken)",
+            }),
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+/** The design's Person/Agent picker: two pills, not a segmented control. */
+function AddTab({
+  on,
+  onClick,
+  children,
+}: {
+  on: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={on}
+      className="bh-reset bh-focusable"
+      style={{
+        padding: "4px 12px",
+        borderRadius: 20,
+        cursor: "pointer",
+        fontFamily: "var(--ny-font-mono)",
+        fontSize: 11.5,
+        ...(on
+          ? {
+              border: "1px solid var(--ny-accent)",
+              background: "var(--ny-accent-subtle)",
+              color: "var(--ny-accent-text)",
+              fontWeight: 600,
+            }
+          : { border: "1px solid var(--ny-border)", color: "var(--ny-text-muted)" }),
+      }}
+    >
+      {children}
+    </button>
+  );
+}
 
 const CARD: React.CSSProperties = {
   border: "1px solid var(--ny-border)",
@@ -111,21 +192,48 @@ export function MembersDialog({
     }
   }, [open]);
 
+  /**
+   * What you can type, and what it resolves to.
+   *
+   * `token` is the thing a person would actually write — an email, or `@handle`
+   * — and it is what the datalist offers. `value` is the id the API wants.
+   */
   const options = useMemo(() => {
     if (!candidates) return [];
     return kind === "person"
-      ? candidates.people.map((p) => ({ value: p.id, label: `${p.name} · ${p.email}` }))
-      : candidates.agents.map((a) => ({ value: a.id, label: `@${a.handle} · ${a.displayName}` }));
+      ? candidates.people.map((p) => ({ value: p.id, token: p.email, label: p.name }))
+      : candidates.agents.map((a) => ({
+          value: a.id,
+          token: `@${a.handle}`,
+          label: a.displayName,
+        }));
   }, [candidates, kind]);
 
   const add = async () => {
-    if (!choice) return;
+    const typed = choice.trim();
+    if (!typed) return;
+
+    // Resolve what was typed against the candidate list. The list is the only
+    // source of truth for who may be added, so an unmatched value is refused
+    // here rather than posted for the server to reject with a validation error
+    // about ids the person never saw.
+    const needle = typed.toLowerCase().replace(/^@/, "");
+    const match = options.find((o) => o.token.toLowerCase().replace(/^@/, "") === needle);
+    if (!match) {
+      setError(
+        kind === "person"
+          ? `No one in this workspace has the address “${typed}”. Add them in Settings → Members first.`
+          : `No agent is called “${typed}”. Pick one of the suggestions, or create it first.`,
+      );
+      return;
+    }
+
     setBusy(true);
     setError(null);
     try {
       await addChannelMember(
         channelKey,
-        kind === "person" ? { userId: choice } : { agentId: choice },
+        kind === "person" ? { userId: match.value } : { agentId: match.value },
       );
       setChoice("");
       await load();
@@ -264,13 +372,14 @@ function AddRow({
 }: {
   kind: "person" | "agent";
   onKindChange: (next: "person" | "agent") => void;
-  options: Array<{ value: string; label: string }>;
+  options: Array<{ value: string; token: string; label: string }>;
   value: string;
   onChange: (next: string) => void;
   onAdd: () => void;
   busy: boolean;
 }) {
   const isPerson = kind === "person";
+  const listId = useId();
   return (
     <div
       style={{
@@ -283,47 +392,70 @@ function AddRow({
         padding: 12,
       }}
     >
-      <SegmentedControl
-        value={kind}
-        onChange={(next) => onKindChange(next === "agent" ? "agent" : "person")}
-        items={[
-          { value: "person", label: "Person" },
-          { value: "agent", label: "Agent" },
-        ]}
-        label="What to add"
-      />
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <AddTab on={isPerson} onClick={() => onKindChange("person")}>
+          Person
+        </AddTab>
+        <AddTab on={!isPerson} onClick={() => onKindChange("agent")}>
+          Agent
+        </AddTab>
+      </div>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <span style={{ color: "var(--ny-text-subtle)", display: "inline-flex", flex: "none" }}>
-          {isPerson ? <Users size={14} strokeWidth={2} /> : <Bot size={14} strokeWidth={2} />}
-        </span>
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            border: "1px solid var(--ny-border-strong)",
+            borderRadius: 8,
+            background: "var(--ny-surface)",
+            padding: "0 12px",
+          }}
+        >
+          <span style={{ color: "var(--ny-text-subtle)", display: "inline-flex", flex: "none" }}>
+            {isPerson ? <Users size={14} strokeWidth={2} /> : <Bot size={14} strokeWidth={2} />}
+          </span>
           {/*
-            A select rather than the design's free-text email box. Membership
-            only ever resolves to someone already in the workspace, so offering
-            the list is both simpler than a lookup and unable to produce a typo.
+            The design's free-text box, backed by a datalist rather than by a
+            lookup. Membership only ever resolves to someone already in the
+            workspace, so the list is both the suggestion and the validation:
+            what you type is matched against it on Add, and an unmatched value
+            is refused rather than sent.
           */}
-          <Select
-            label={isPerson ? "Person to add" : "Agent to add"}
+          <input
+            list={listId}
             value={value}
-            onChange={onChange}
-            options={[
-              {
-                value: "",
-                label:
-                  options.length === 0
-                    ? isPerson
-                      ? "Everyone is already here"
-                      : "Every agent is already here"
-                    : isPerson
-                      ? "Pick someone in the workspace"
-                      : "Pick an existing agent",
-              },
-              ...options,
-            ]}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                onAdd();
+              }
+            }}
+            placeholder={isPerson ? "name@example.com" : "@handle — pick an existing agent"}
+            aria-label={isPerson ? "Person to add" : "Agent to add"}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              border: "none",
+              background: "transparent",
+              color: "var(--ny-text)",
+              fontFamily: "var(--ny-font-mono)",
+              fontSize: 13,
+              padding: "8px 0",
+              outline: "none",
+            }}
           />
+          <datalist id={listId}>
+            {options.map((o) => (
+              <option key={o.value} value={o.token} />
+            ))}
+          </datalist>
         </div>
-        <Button variant="primary" size="md" onClick={onAdd} disabled={!value} loading={busy}>
+        <Button variant="primary" size="md" onClick={onAdd} disabled={!value.trim()} loading={busy}>
           Add
         </Button>
       </div>
@@ -469,9 +601,11 @@ function PersonRow({
           {person.email}
         </div>
       </div>
-      <Badge tone={tone} variant="subtle" size="sm">
+      {/* `strong` only for a role that carries authority; an ordinary member
+          gets the quiet variant, so the eye lands on the exceptions. */}
+      <Chip tone={tone} strong={person.role === "admin"}>
         {person.role ?? "member"}
-      </Badge>
+      </Chip>
       <RemoveButton onClick={onRemove} label={`Remove ${person.name}`} busy={busy} />
     </div>
   );
@@ -554,7 +688,14 @@ function AgentMemberRow({
           {agent.statusLine ?? agent.status}
         </div>
       </div>
-      <ActivityPill activity={agent.activity as AgentActivity} />
+      {/* Activity, in the row's own chip rather than the rail's pill: this is a
+          dense list and the pill is built for a roster row twice this height. */}
+      <Chip
+        tone={agent.activity === "busy" ? "info" : "neutral"}
+        strong={agent.activity === "busy"}
+      >
+        {agent.activity}
+      </Chip>
       <RemoveButton onClick={onRemove} label={`Remove @${agent.handle}`} busy={busy} />
     </div>
   );

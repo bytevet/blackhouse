@@ -201,20 +201,17 @@ test.describe("Channel members dialog", () => {
       const dialog = await openMembersDialog(page);
 
       // Person is the default; agents are the other half of the same control.
-      await dialog
-        .getByRole("radiogroup", { name: "What to add" })
-        .getByRole("radio", { name: "Agent" })
-        .click();
+      await dialog.getByRole("button", { name: "Agent", exact: true }).click();
 
-      const picker = dialog.getByRole("combobox", { name: "Agent to add" });
-      // By value, not by label: the label is `@handle · displayName` and the
-      // id is what the dialog actually posts.
-      await picker.selectOption(agent.id);
+      // A text box backed by a datalist, matching the design. What you type is
+      // resolved against the candidate list on Add, so the handle is the input.
+      const picker = dialog.getByLabel("Agent to add");
+      await picker.fill(`@${agent.handle}`);
       await dialog.getByRole("button", { name: "Add", exact: true }).click();
 
       await expect(dialog.getByRole("button", { name: `Remove @${agent.handle}` })).toBeVisible();
-      // …and it stops being offered, because it is no longer a candidate.
-      await expect(picker.locator(`option[value="${agent.id}"]`)).toHaveCount(0);
+      // …and it stops being suggested, because it is no longer a candidate.
+      await expect(dialog.locator(`datalist option[value="@${agent.handle}"]`)).toHaveCount(0);
 
       const members = await fetchMembers(page, CHANNEL);
       expect(members.agents.some((a) => a.id === agent.id)).toBe(true);
