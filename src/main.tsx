@@ -5,10 +5,12 @@ import { App } from "./App";
 import { AppThemeProvider } from "@/components/theme-provider";
 // Initialize i18next once, before any component that uses t() mounts.
 import "./i18n";
-// NotYet UI ships one stylesheet plus its font faces; both must load before
-// any component renders, since every `--ny-*` token is defined there.
+// NotYet UI's stylesheet must load before any component renders, since every
+// `--ny-*` token is defined there. Its companion `fonts.css` is deliberately
+// not imported: it fetches IBM Plex and three Noto CJK families from Google on
+// every load. `index.css` self-hosts the Latin faces and follows this import,
+// so its `--ny-font-sans` override lands after the token it replaces.
 import "@notyet.im/ui/styles.css";
-import "@notyet.im/ui/fonts.css";
 import "./index.css";
 
 createRoot(document.getElementById("root")!).render(

@@ -16,15 +16,37 @@
  * substitutes the `var()` into the utility itself, which resolves per element —
  * i.e. against the nearest `[data-theme]` ancestor. Do not drop `inline`.
  *
- * `@notyet.im/ui/styles.css` and `/fonts.css` are imported from `main.tsx`,
- * deliberately *after* this file: at equal specificity the design system then
- * wins over Tailwind's preflight, and `fonts.css`'s own `@import url(...)` of
- * the IBM Plex faces stays at the top of its own sheet where CSS requires it.
+ * `@notyet.im/ui/styles.css` is imported from `main.tsx` *before* this file, so
+ * at equal specificity a declaration here wins over the design system's own.
+ * That is what lets the `--ny-font-sans` override below stand, and it is the
+ * reason the override does not need a specificity trick to take effect.
  */
 @import "tailwindcss";
 
-/* xterm's typeface — self-hosted, unlike the IBM Plex faces `fonts.css` pulls
- * from Google. The terminal must render offline on a self-hosted box. */
+/* ── Typefaces ──────────────────────────────────────────────────────────────
+ * All self-hosted. The design system ships an optional `fonts.css` that pulls
+ * IBM Plex plus three Noto CJK families from Google on every load; that is a
+ * render-blocking round trip, a third party watching every visitor, and a blank
+ * page on a box with no route to the internet. Blackhouse is meant to run on
+ * someone's own VPS, so the Latin faces ship with the app instead.
+ *
+ * Only the weights the UI actually declares are fetched: 400/500/600 from the
+ * `--ny-font-weight-*` tokens, and 700, which handles, avatars and page titles
+ * ask for directly. `font-synthesis: none` below means an absent weight is
+ * silently rounded to the nearest one present rather than faked, so dropping a
+ * weight here reads as a deliberate design change, never as a broken font.
+ *
+ * Sans is the variable build — one file carrying the whole 100..700 axis.
+ * IBM Plex Mono has no variable release, so its four weights are four files.
+ * Both packages are split by `unicode-range`, so a Latin page downloads the
+ * Latin subset and nothing else regardless of how many subsets ship. */
+@import "@fontsource-variable/ibm-plex-sans";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
+@import "@fontsource/ibm-plex-mono/700.css";
+
+/* xterm's typeface. The terminal must render offline on a self-hosted box. */
 @import "@fontsource-variable/source-code-pro";
 
 /* There is no `.dark` class any more. `ThemeProvider` stamps `data-theme` on
@@ -37,6 +59,25 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  /* The whole UI renders through `--ny-font-sans` / `--ny-font-mono`, and the
+   * design system defines them naming the families Google serves. Fontsource's
+   * variable builds register under a *different* family name — `IBM Plex Sans
+   * Variable` — so leaving the token alone would point it at a face this page
+   * never loads and drop every screen to Helvetica. Restated here with the
+   * variable name first and the static name behind it, which is the same shape
+   * `terminal.tsx` uses for Source Code Pro.
+   *
+   * Noto Sans JP and KR are gone from the stack: there is no ja or ko locale to
+   * need them. Noto Sans SC stays, because zh-CN is a real locale — but the
+   * face itself is fetched only once that locale is active, from
+   * `src/i18n/index.ts`. Naming it in a fallback stack costs nothing until a
+   * glyph needs it.
+   *
+   * `--ny-font-mono` is deliberately *not* restated: `IBM Plex Mono` is a
+   * static build, so the self-hosted family name already matches the token and
+   * shadowing it here would only freeze a stack the design system may revise. */
+  --ny-font-sans: "IBM Plex Sans Variable", "IBM Plex Sans", "Noto Sans SC", Helvetica, sans-serif;
 
   /* ── Shell geometry ───────────────────────────────────────────────────────
    * The two measurements every full-page screen shares. They are tokens rather
