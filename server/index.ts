@@ -83,7 +83,25 @@ app.route("/", createIdeProxy(upgradeWebSocket));
 // Serve SPA static files in production
 app.use("/*", serveStatic({ root: "./dist/client" }));
 
-// SPA fallback — serve index.html for all non-API routes
+/**
+ * SPA fallback — but only for navigations.
+ *
+ * A build renames every chunk, so a tab left open across a deploy asks for an
+ * asset that no longer exists. Falling through to `index.html` answered those
+ * with `200 text/html`, and a browser will not execute HTML as a module: the
+ * chunk never resolves and the page hangs on a request that looked like it
+ * succeeded. A 404 is both true and diagnosable — the tab reloads instead of
+ * waiting.
+ *
+ * The test is a file extension in the last path segment. Routes in this app are
+ * slugs, handles and uuids; anything ending in `.js`, `.css`, `.woff2` or the
+ * like was meant to be a file, and if it is not on disk it is gone.
+ */
+app.get("/*", async (c, next) => {
+  const last = new URL(c.req.url).pathname.split("/").pop() ?? "";
+  if (/\.[a-z0-9]+$/i.test(last)) return c.notFound();
+  return next();
+});
 app.get("/*", serveStatic({ root: "./dist/client", path: "index.html" }));
 
 async function start() {

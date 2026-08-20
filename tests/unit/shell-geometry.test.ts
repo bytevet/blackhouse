@@ -125,3 +125,20 @@ describe("the rail follows the design's ordering", () => {
     expect(src.indexOf("currentUser.role")).toBeLessThan(src.indexOf('to="/settings"'));
   });
 });
+
+describe("the SPA fallback does not swallow missing files", () => {
+  it("404s a path that looks like a file", () => {
+    // Every build renames the chunks, so a tab open across a deploy asks for an
+    // asset that is gone. Falling through to index.html answered those with
+    // `200 text/html`, and a browser will not run HTML as a module — the chunk
+    // never resolves and the page hangs on a request that reported success.
+    const src = read("server/index.ts");
+    const fallback = src.slice(src.indexOf("SPA fallback"));
+    expect(fallback).toContain("c.notFound()");
+    // The discriminator is an extension on the last segment: app routes are
+    // slugs, handles and uuids, none of which carry one.
+    expect(fallback).toMatch(/\\.\[a-z0-9\]\+\$/i);
+    // …and the real fallback still exists for actual navigations.
+    expect(fallback).toContain('serveStatic({ root: "./dist/client", path: "index.html" })');
+  });
+});
