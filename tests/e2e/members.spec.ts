@@ -98,7 +98,11 @@ async function addAgentMember(page: Page, key: string, agentId: string): Promise
  */
 async function dropAgentMember(page: Page, key: string, agentId: string): Promise<void> {
   try {
-    const members = await fetchMembers(page, key);
+    // Deliberately not `fetchMembers`: an `expect` that fires from a `finally`
+    // reports as a failure of whatever the test was really about.
+    const res = await page.request.get(membersUrl(key), { failOnStatusCode: false });
+    if (!res.ok()) return;
+    const members = (await res.json()) as MembersResponse;
     const row = members.agents.find((a) => a.id === agentId);
     if (row) await removeMemberRequest(page, key, row.memberId);
   } catch {
@@ -137,10 +141,21 @@ function mentionOption(page: Page, handle: string) {
   return page.getByRole("option", { name: new RegExp(`@${handle}`) });
 }
 
-async function openChannel(page: Page, slug = CHANNEL) {
-  await signInAsAdmin(page);
+/**
+ * Land in the channel. Split from sign-in because every test that needs an
+ * agent has to create it *before* the shell mounts: the rail's roster is one
+ * fetch on mount, and the composer's `@` list is that roster filtered by
+ * membership. Creating first means nothing depends on the `agent.created`
+ * frame arriving.
+ */
+async function gotoChannel(page: Page, slug = CHANNEL) {
   await page.goto(`/channels/${slug}`, { waitUntil: "domcontentloaded" });
   await expect(composer(page)).toBeVisible();
+}
+
+async function openChannel(page: Page, slug = CHANNEL) {
+  await signInAsAdmin(page);
+  await gotoChannel(page, slug);
 }
 
 /** Open the dialog from the header count and wait for its first load. */
@@ -178,10 +193,11 @@ test.describe("Channel members dialog", () => {
   });
 
   test("adding an agent puts it in the Agents card", async ({ page }) => {
-    await openChannel(page);
+    await signInAsAdmin(page);
     const agent = await createAgent(page);
 
     try {
+      await gotoChannel(page);
       const dialog = await openMembersDialog(page);
 
       // Person is the default; agents are the other half of the same control.
@@ -209,11 +225,12 @@ test.describe("Channel members dialog", () => {
   });
 
   test("removing an agent takes it out of the Agents card", async ({ page }) => {
-    await openChannel(page);
+    await signInAsAdmin(page);
     const agent = await createAgent(page);
     await addAgentMember(page, CHANNEL, agent.id);
 
     try {
+      await gotoChannel(page);
       const dialog = await openMembersDialog(page);
       const remove = dialog.getByRole("button", { name: `Remove @${agent.handle}` });
       await expect(remove).toBeVisible();
@@ -232,20 +249,27 @@ test.describe("Channel members dialog", () => {
   });
 
   test("mentioning a non-member posts the message and offers the fix", async ({ page }) => {
-    await openChannel(page);
+    await signInAsAdmin(page);
     const agent = await createAgent(page);
 
     try {
+      await gotoChannel(page);
+
       // Trailing text, so the caret is not inside a mention when Enter is
       // pressed — otherwise Enter would pick from the listbox instead of send.
-      const body = `@${agent.handle} e2e non-member ping ${Date.now()}`;
-      await composer(page).fill(body);
+      const tail = `e2e non-member ping ${Date.now()}`;
+      await composer(page).fill(`@${agent.handle} ${tail}`);
       await composer(page).press("Enter");
 
+      // Wait for the composer to clear *first*. Until it does, the draft still
+      // holds this exact text, and a `getByText` for it matches both the posted
+      // row and the textarea — a strict-mode violation rather than a real
+      // failure. Clearing is also the signal the post was accepted, since the
+      // draft is only dropped once the server has taken it.
+      await expect(composer(page)).toHaveValue("");
       // The message still posts. Losing what someone typed over a membership
       // detail would be worse than telling them about it.
-      await expect(channelMain(page).getByText(body)).toBeVisible();
-      await expect(composer(page)).toHaveValue("");
+      await expect(channelMain(page).getByText(tail)).toBeVisible();
 
       const note = page.locator('[role="status"]', { hasText: "nothing was dispatched" });
       await expect(note).toContainText(`@${agent.handle} is not in #${CHANNEL}`);
@@ -263,11 +287,11 @@ test.describe("Channel members dialog", () => {
   });
 
   test("the @ autocomplete offers members only, live in both directions", async ({ page }) => {
-    await openChannel(page);
+    await signInAsAdmin(page);
     const agent = await createAgent(page);
-    let memberId: string | null = null;
 
     try {
+      await gotoChannel(page);
       const box = composer(page);
       await box.fill(`@${agent.handle}`);
 
@@ -278,14 +302,13 @@ test.describe("Channel members dialog", () => {
 
       // `channel.members` on the multiplexed stream is what makes the composer
       // agree with the dialog without a reload.
-      memberId = await addAgentMember(page, CHANNEL, agent.id);
+      const memberId = await addAgentMember(page, CHANNEL, agent.id);
       await expect(mentionOption(page, agent.handle)).toBeVisible();
 
       await box.press("Enter");
       await expect(box).toHaveValue(`@${agent.handle} `);
 
       await removeMemberRequest(page, CHANNEL, memberId);
-      memberId = null;
       await box.fill(`@${agent.handle}`);
       await expect(mentionOption(page, agent.handle)).toHaveCount(0);
       await expect(box).toHaveAttribute("aria-expanded", "false");
