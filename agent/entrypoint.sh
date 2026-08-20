@@ -121,17 +121,48 @@ if [ -f "$SIDECAR_DIR/index.mjs" ] && [ -n "$AGENT_ID" ] && [ -n "$AGENT_TOKEN" 
   export SIDECAR_PID
 fi
 
-# 2) Install Blackhouse skills via `npx skills add` from the server
-if [ -n "$AGENT_ID" ] && [ -n "$BLACKHOUSE_URL" ]; then
-  if command -v npx >/dev/null 2>&1; then
-    echo "[blackhouse] Installing skills from $BLACKHOUSE_URL..."
-    npx -y skills add "$BLACKHOUSE_URL" --yes --global 2>/dev/null || true
-  else
-    # Fallback: fetch SKILL.md directly
-    mkdir -p "$HOME/.claude/skills/blackhouse"
-    curl -sf "$BLACKHOUSE_URL/.well-known/agent-skills/blackhouse/SKILL.md" \
-      -o "$HOME/.claude/skills/blackhouse/SKILL.md" 2>/dev/null || true
+# 2) Install Blackhouse skills from the server.
+#
+# Nothing here may block starting the agent. This used to run
+# `npx -y skills add "$BLACKHOUSE_URL"` with no timeout and stderr discarded,
+# which hung the entrypoint outright: `npx -y` fetches a package from
+# registry.npmjs.org, and an agent under gVisor cannot resolve it — Docker's
+# embedded DNS is unreachable from a runsc sandbox, so only the names pinned
+# into /etc/hosts resolve. The container sat at "Installing skills…" forever,
+# never reached the `exec` below, and presented as an agent that started and did
+# nothing. With stderr silenced there was no way to see why.
+#
+# So: the harness first, because `$BLACKHOUSE_URL` is one of the pinned names
+# and is therefore the one host an agent can always reach. `npx` is attempted
+# only afterwards, only if the direct fetch failed, and under a hard timeout.
+# Both paths keep their output — a skills install that quietly did nothing is
+# how this stayed invisible.
+install_skills() {
+  mkdir -p "$HOME/.claude/skills/blackhouse"
+  if curl -sf --max-time 15 \
+      "$BLACKHOUSE_URL/.well-known/agent-skills/blackhouse/SKILL.md" \
+      -o "$HOME/.claude/skills/blackhouse/SKILL.md"; then
+    echo "[blackhouse] Skills installed from $BLACKHOUSE_URL"
+    return 0
   fi
+
+  if command -v npx >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
+    echo "[blackhouse] Direct skills fetch failed; trying npx (60s cap)..."
+    if timeout 60 npx -y skills add "$BLACKHOUSE_URL" --yes --global; then
+      echo "[blackhouse] Skills installed via npx"
+      return 0
+    fi
+  fi
+
+  # Not fatal. An agent without the skill scripts can still be mentioned, run,
+  # and be watched — it just cannot post back on its own initiative.
+  echo "[blackhouse] WARNING: could not install skills; continuing without them" >&2
+  return 0
+}
+
+if [ -n "$AGENT_ID" ] && [ -n "$BLACKHOUSE_URL" ]; then
+  echo "[blackhouse] Installing skills from $BLACKHOUSE_URL..."
+  install_skills
 fi
 
 # 3) Hand the PTY to the agent CLI — and to nothing else.

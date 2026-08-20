@@ -55,11 +55,20 @@ COPY agent/sidecar /opt/blackhouse/sidecar
 RUN groupadd --gid 1001 workspace \
     && useradd --uid 1001 --gid 1001 --shell /bin/bash --create-home workspace
 
-# Install Claude Code as workspace user via official installer
-USER workspace
-RUN curl -fsSL https://claude.ai/install.sh | bash
-ENV PATH="/home/workspace/.local/bin:${PATH}"
-USER root
+# Install Claude Code from npm.
+#
+# This used to be `curl -fsSL https://claude.ai/install.sh | bash`, which is the
+# documented installer and fails from a datacenter IP: claude.ai answers 403
+# with a Cloudflare bot challenge. Worse, it failed *silently* — in a pipeline
+# the exit status is bash's, and bash handed an empty stdin exits 0, so the
+# layer succeeded and the image shipped with no CLI. The agent then started,
+# ran `exec claude`, and died with `claude: not found`.
+#
+# npm is the same distribution and needs no interactive challenge. Installed as
+# root into the global prefix (`/usr/local/bin`), already on every user's PATH,
+# rather than into the workspace user's home.
+RUN npm install -g @anthropic-ai/claude-code \
+    && command -v claude
 
 # Pre-create volume mount directories as workspace user so Docker
 # preserves ownership when mounting named volumes (avoids root:root)

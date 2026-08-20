@@ -52,7 +52,9 @@ COPY agent/sidecar /opt/blackhouse/sidecar
 # --- Agent-specific install ---------------------------------------------------
 
 # Install Codex CLI globally
-RUN npm install -g @openai/codex
+# Verified, so a partial install cannot ship as a working image.
+RUN npm install -g @openai/codex \
+    && command -v codex
 
 # Create non-root workspace user
 RUN groupadd --gid 1001 workspace \
