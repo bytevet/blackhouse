@@ -20,8 +20,10 @@ import {
   Input,
   Select,
   Spinner,
+  Switch,
   Text,
   Textarea,
+  VisuallyHidden,
 } from "@notyet.im/ui";
 import { client, unwrap } from "@/lib/api";
 import { useResource } from "@/hooks/use-resource";
@@ -29,6 +31,14 @@ import { useSession } from "@/lib/auth-client";
 import { SettingsHeader } from "@/layouts/settings-layout";
 import { timeAgo } from "@/lib/time";
 import { AGENT_PRESETS, PRESET_OPTIONS, type PresetId } from "@/lib/agent-presets";
+// The chip-and-input editor the egress screen is built around. Shared rather
+// than re-cut here so a host typed in one place is tidied the same way in the
+// other — this form seeds the list, that page edits what the proxy reads.
+import { AllowlistEditor } from "./egress";
+
+type EgressPolicy = "none" | "allowlist" | "open";
+
+const EGRESS_POLICIES: EgressPolicy[] = ["none", "allowlist", "open"];
 
 interface BlueprintRow {
   id: string;
@@ -56,7 +66,17 @@ interface BlueprintRow {
    */
   lastBuiltAt: string | null;
   sandboxRuntime: string;
-  egressPolicy: string;
+  egressPolicy: EgressPolicy;
+  /**
+   * A creation-time seed, not the live allowlist. It is copied into
+   * blueprint-scoped `egress_rules` once — on the first agent start, or from
+   * the button in Settings → Egress — and the rules are what the proxy reads
+   * from then on.
+   */
+  egressAllowlist: string[] | null;
+  /** Each one starts a real service inside the sandbox; both default off. */
+  enableIde: boolean;
+  enableBrowser: boolean;
 }
 
 interface DraftState {
@@ -65,6 +85,10 @@ interface DraftState {
   cli: PresetId;
   agentCommand: string;
   dockerfileContent: string;
+  egressPolicy: EgressPolicy;
+  egressAllowlist: string[];
+  enableIde: boolean;
+  enableBrowser: boolean;
 }
 
 const EMPTY_DRAFT: DraftState = {
@@ -73,6 +97,13 @@ const EMPTY_DRAFT: DraftState = {
   cli: "claude-code",
   agentCommand: AGENT_PRESETS["claude-code"].agentCommand,
   dockerfileContent: "",
+  // Matches the column defaults: an allowlist policy with nothing on it yet,
+  // and neither service running. A new blueprint must not be heavier than the
+  // one an operator would have got before these switches existed.
+  egressPolicy: "allowlist",
+  egressAllowlist: [],
+  enableIde: false,
+  enableBrowser: false,
 };
 
 function cliIcon(cli: string) {
@@ -160,6 +191,41 @@ function BuildStatus({ row, onShowLog }: { row: BlueprintRow; onShowLog: () => v
   );
 }
 
+/** One sandbox service: the switch, its name, and what running it costs. */
+function ServiceToggle({
+  checked,
+  onChange,
+  title,
+  help,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  title: string;
+  help: string;
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+      <div style={{ flex: "none", marginTop: 1 }}>
+        <Switch
+          size="sm"
+          checked={checked}
+          onChange={onChange}
+          // The visible name is to the right; this is the control's own.
+          label={<VisuallyHidden>{title}</VisuallyHidden>}
+        />
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <Text as="div" size="sm">
+          {title}
+        </Text>
+        <Text as="div" size="xs" tone="subtle" style={{ marginTop: 2, lineHeight: 1.45 }}>
+          {help}
+        </Text>
+      </div>
+    </div>
+  );
+}
+
 /**
  * Blueprints — the reusable agent definitions the create-agent wizard starts
  * from. Reads are open to any member; every mutation is admin-only on the
@@ -196,6 +262,10 @@ export function BlueprintsPage() {
         name: draft.name.trim(),
         agentCommand: draft.agentCommand.trim() || undefined,
         dockerfileContent: draft.dockerfileContent.trim() || null,
+        egressPolicy: draft.egressPolicy,
+        egressAllowlist: draft.egressAllowlist,
+        enableIde: draft.enableIde,
+        enableBrowser: draft.enableBrowser,
       };
       const res = draft.id
         ? await client.api.settings.blueprints[":id"].$put({ param: { id: draft.id }, json })
@@ -354,6 +424,8 @@ export function BlueprintsPage() {
                   <span style={metaChip}>{bp.image ?? t("blueprints.builtImage")}</span>
                   <span style={metaChip}>{bp.sandboxRuntime}</span>
                   <span style={metaChip}>{bp.egressPolicy}</span>
+                  {bp.enableIde && <span style={metaChip}>ide</span>}
+                  {bp.enableBrowser && <span style={metaChip}>browser</span>}
                 </div>
               </div>
 
@@ -393,6 +465,10 @@ export function BlueprintsPage() {
                           cli: bp.cli,
                           agentCommand: bp.agentCommand ?? "",
                           dockerfileContent: bp.dockerfileContent ?? "",
+                          egressPolicy: bp.egressPolicy,
+                          egressAllowlist: bp.egressAllowlist ?? [],
+                          enableIde: bp.enableIde,
+                          enableBrowser: bp.enableBrowser,
                         })
                       }
                     >
@@ -498,6 +574,70 @@ export function BlueprintsPage() {
                 placeholder="claude --dangerously-skip-permissions"
               />
             </Field>
+
+            <Field label={t("blueprints.egressPolicy")} help={t("blueprints.egressPolicyHelp")}>
+              <Select
+                value={draft.egressPolicy}
+                label={t("blueprints.egressPolicy")}
+                onChange={(egressPolicy) => setDraft({ ...draft, egressPolicy })}
+                options={EGRESS_POLICIES.map((policy) => ({
+                  value: policy,
+                  label: t(`blueprints.policy.${policy}` as const),
+                }))}
+              />
+            </Field>
+
+            {/* Not a dismissible aside: `open` is the one policy under which
+                nothing below is consulted, and the list stays editable so a
+                blueprint can be moved back off `open` without retyping it. */}
+            {draft.egressPolicy === "open" && (
+              <Alert tone="warning">{t("blueprints.egressOpenWarning")}</Alert>
+            )}
+
+            <Field
+              label={t("blueprints.egressAllowlist")}
+              help={t("blueprints.egressAllowlistHelp")}
+            >
+              <AllowlistEditor
+                hosts={draft.egressAllowlist}
+                empty={t("blueprints.egressAllowlistEmpty")}
+                label={t("blueprints.egressAllowlistLabel")}
+                onAdd={(host) =>
+                  setDraft({ ...draft, egressAllowlist: [...draft.egressAllowlist, host] })
+                }
+                onRemove={(_host, index) =>
+                  setDraft({
+                    ...draft,
+                    egressAllowlist: draft.egressAllowlist.filter((_, i) => i !== index),
+                  })
+                }
+              />
+            </Field>
+
+            {/* Deliberately not a `Field`: two controls under one label would
+                leave the label pointing at whichever switch came first. */}
+            <div>
+              <Text as="div" size="sm" weight="semibold">
+                {t("blueprints.services")}
+              </Text>
+              <Text as="div" size="xs" tone="subtle" style={{ marginTop: 3, lineHeight: 1.5 }}>
+                {t("blueprints.servicesHelp")}
+              </Text>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
+                <ServiceToggle
+                  checked={draft.enableIde}
+                  onChange={(enableIde) => setDraft({ ...draft, enableIde })}
+                  title={t("blueprints.enableIde")}
+                  help={t("blueprints.enableIdeHelp")}
+                />
+                <ServiceToggle
+                  checked={draft.enableBrowser}
+                  onChange={(enableBrowser) => setDraft({ ...draft, enableBrowser })}
+                  title={t("blueprints.enableBrowser")}
+                  help={t("blueprints.enableBrowserHelp")}
+                />
+              </div>
+            </div>
 
             <Field label={t("blueprints.dockerfile")} help={t("blueprints.dockerfileHelp")}>
               <Textarea

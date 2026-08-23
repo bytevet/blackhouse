@@ -253,6 +253,22 @@ export const agentBlueprints = pgTable(
      *  time. `egress_rules` is authoritative at connect time. */
     egressAllowlist: jsonb("egress_allowlist").$type<string[] | null>(),
     /** bigint, not integer: 2 GiB (2147483648) overflows int4 by one. */
+    /**
+     * Whether an agent from this blueprint runs code-server and the browser
+     * service alongside its CLI.
+     *
+     * Both used to start unconditionally, and they are not small: a full VS Code
+     * server, and node + Playwright + Chromium, inside a gVisor sandbox. One
+     * such agent took a 2-CPU / 1.6GB host to load average 27 and stopped it
+     * answering SSH. Most agents never open either tab.
+     *
+     * Default false, so an existing blueprint gets the lighter behaviour on
+     * upgrade rather than keeping a cost nobody chose. Turning them on is one
+     * switch in the blueprint form.
+     */
+    enableIde: boolean("enable_ide").notNull().default(false),
+    enableBrowser: boolean("enable_browser").notNull().default(false),
+
     memoryBytes: bigint("memory_bytes", { mode: "number" }),
     nanoCpus: bigint("nano_cpus", { mode: "number" }),
     pidsLimit: integer("pids_limit"),
