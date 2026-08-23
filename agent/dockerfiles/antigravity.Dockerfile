@@ -43,10 +43,23 @@ ENV BROWSER=/opt/blackhouse/browser-shim.sh
 # on first launch, with `cp -n` so a user-supplied override wins.
 COPY agent/code-server-config /opt/blackhouse/code-server-config
 
+# The event sidecar. Zero dependencies (node builtins + global fetch), so it is
+# a plain COPY with no install step. entrypoint.sh prefers a copy fetched from
+# the server at boot over this one — rebuilding a ~3GB image to change one line
+# of an adapter is not an iteration loop anybody can live with.
+COPY agent/sidecar /opt/blackhouse/sidecar
+
 # --- Agent-specific install ---------------------------------------------------
 
 # Install Antigravity CLI (Go binary) to /usr/local/bin so all users can run `agy`
-RUN curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir /usr/local/bin
+# `set -o pipefail` and an explicit check: a piped installer reports the exit
+# status of the shell reading it, so a 403 or an empty download otherwise builds
+# a green image with no CLI in it. That is exactly how the Claude image shipped
+# broken.
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir /usr/local/bin \
+    && command -v antigravity
+SHELL ["/bin/sh", "-c"]
 
 # Create non-root workspace user
 RUN groupadd --gid 1001 workspace \

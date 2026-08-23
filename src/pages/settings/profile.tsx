@@ -1,186 +1,178 @@
 import { useState } from "react";
+import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
-import { z } from "zod";
-import { useSession } from "@/lib/auth-client";
-import { client } from "@/lib/api";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
-import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Save } from "lucide-react";
+import { LogOut } from "lucide-react";
+import {
+  Alert,
+  Button,
+  Field,
+  Input,
+  Panel,
+  PanelHeading,
+  Text,
+  Toast,
+  ToastViewport,
+} from "@notyet.im/ui";
+import { client, unwrap } from "@/lib/api";
+import { signOut, useSession } from "@/lib/auth-client";
 
-const displayNameSchema = z.object({
-  displayName: z
-    .string()
-    .min(1, "Display name is required")
-    .transform((v) => v.trim()),
-});
-
-const passwordSchema = z
-  .object({
-    currentPassword: z.string().min(1, "Current password is required"),
-    newPassword: z.string().min(1, "New password is required"),
-    confirmPassword: z.string().min(1, "Please confirm your password"),
-  })
-  .refine((data) => data.newPassword === data.confirmPassword, {
-    message: "Passwords do not match",
-    path: ["confirmPassword"],
-  });
-
+/**
+ * The signed-in user's own account: display name, password, sign out.
+ *
+ * Kept separate from Members because the operations are different — this
+ * screen calls `PUT /api/settings/profile`, which any member may use on
+ * themselves, while Members is admin-only and acts on other people.
+ */
 export function ProfilePage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { data: session } = useSession();
 
-  const [nameData, setNameData] = useState({ displayName: session?.user?.name || "" });
-  const [nameErrors, setNameErrors] = useState<Record<string, string>>({});
-  const [nameSaving, setNameSaving] = useState(false);
+  const [name, setName] = useState(session?.user?.name ?? "");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  const [passwordData, setPasswordData] = useState({
-    currentPassword: "",
-    newPassword: "",
-    confirmPassword: "",
-  });
-  const [passwordErrors, setPasswordErrors] = useState<Record<string, string>>({});
-  const [passwordSaving, setPasswordSaving] = useState(false);
-
-  async function handleNameSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setNameErrors({});
-    const result = displayNameSchema.safeParse(nameData);
-    if (!result.success) {
-      const errs: Record<string, string> = {};
-      for (const issue of result.error.issues) {
-        errs[String(issue.path[0])] = issue.message;
-      }
-      setNameErrors(errs);
-      return;
-    }
-    setNameSaving(true);
+  async function save(body: Record<string, string>) {
+    setBusy(true);
+    setError(null);
     try {
-      await client.api.settings.profile.$put({ json: { name: result.data.displayName } });
+      await unwrap(await client.api.settings.profile.$put({ json: body }));
+      setSaved(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setNameSaving(false);
+      setBusy(false);
     }
   }
 
-  async function handlePasswordSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setPasswordErrors({});
-    const result = passwordSchema.safeParse(passwordData);
-    if (!result.success) {
-      const errs: Record<string, string> = {};
-      for (const issue of result.error.issues) {
-        errs[String(issue.path[0])] = issue.message;
-      }
-      setPasswordErrors(errs);
+  async function saveName() {
+    setErrors({});
+    if (!name.trim()) {
+      setErrors({ name: t("profile.nameRequired") });
       return;
     }
-    setPasswordSaving(true);
-    try {
-      await client.api.settings.profile.$put({
-        json: {
-          currentPassword: result.data.currentPassword,
-          newPassword: result.data.newPassword,
-        },
-      });
-      setPasswordData({ currentPassword: "", newPassword: "", confirmPassword: "" });
-    } finally {
-      setPasswordSaving(false);
-    }
+    await save({ name: name.trim() });
+  }
+
+  async function savePassword() {
+    const next: Record<string, string> = {};
+    if (!currentPassword) next.currentPassword = t("profile.currentRequired");
+    if (newPassword.length < 8) next.newPassword = t("profile.passwordTooShort");
+    if (newPassword !== confirmPassword) next.confirmPassword = t("profile.passwordMismatch");
+    setErrors(next);
+    if (Object.keys(next).length > 0) return;
+
+    await save({ currentPassword, newPassword });
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
   }
 
   return (
-    <div className="max-w-md space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("settings.profile.displayName")}</CardTitle>
-          <CardDescription>{t("settings.profile.displayNameDescription")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleNameSubmit}>
-            <div className="flex gap-2">
-              <Field data-invalid={!!nameErrors.displayName} className="flex-1">
-                <Input
-                  value={nameData.displayName}
-                  onChange={(e) => setNameData({ displayName: e.target.value })}
-                  aria-invalid={!!nameErrors.displayName}
-                  placeholder={t("settings.profile.namePlaceholder")}
-                />
-                {nameErrors.displayName && (
-                  <FieldError errors={[{ message: nameErrors.displayName }]} />
-                )}
-              </Field>
-              <Button type="submit" disabled={nameSaving}>
-                <Save className="size-3" />
-                {nameSaving ? t("common.saving") : t("common.save")}
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      <div>
+        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, letterSpacing: "-.01em" }}>
+          {t("profile.title")}
+        </h1>
+        <Text as="p" size="sm" tone="muted" style={{ marginTop: 4, lineHeight: 1.5 }}>
+          {t("profile.description")}
+        </Text>
+      </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("settings.profile.changePassword")}</CardTitle>
-          <CardDescription>{t("settings.profile.changePasswordDescription")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handlePasswordSubmit}>
-            <FieldGroup>
-              <Field data-invalid={!!passwordErrors.currentPassword}>
-                <FieldLabel>{t("settings.profile.currentPassword")}</FieldLabel>
-                <Input
-                  type="password"
-                  value={passwordData.currentPassword}
-                  onChange={(e) =>
-                    setPasswordData((prev) => ({ ...prev, currentPassword: e.target.value }))
-                  }
-                  aria-invalid={!!passwordErrors.currentPassword}
-                />
-                {passwordErrors.currentPassword && (
-                  <FieldError errors={[{ message: passwordErrors.currentPassword }]} />
-                )}
-              </Field>
+      {error && (
+        <Alert tone="danger" title={t("profile.failed")} onDismiss={() => setError(null)}>
+          {error}
+        </Alert>
+      )}
 
-              <Field data-invalid={!!passwordErrors.newPassword}>
-                <FieldLabel>{t("settings.profile.newPassword")}</FieldLabel>
-                <Input
-                  type="password"
-                  value={passwordData.newPassword}
-                  onChange={(e) =>
-                    setPasswordData((prev) => ({ ...prev, newPassword: e.target.value }))
-                  }
-                  aria-invalid={!!passwordErrors.newPassword}
-                />
-                {passwordErrors.newPassword && (
-                  <FieldError errors={[{ message: passwordErrors.newPassword }]} />
-                )}
-              </Field>
+      <Panel
+        header={<PanelHeading title={t("profile.identity")} subtitle={session?.user?.email} />}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <Field
+            label={t("profile.displayName")}
+            help={t("profile.displayNameHelp")}
+            error={errors.name}
+          >
+            <Input value={name} onChange={setName} placeholder={t("profile.namePlaceholder")} />
+          </Field>
+          <div>
+            <Button variant="primary" size="sm" loading={busy} onClick={() => void saveName()}>
+              {t("common.save")}
+            </Button>
+          </div>
+        </div>
+      </Panel>
 
-              <Field data-invalid={!!passwordErrors.confirmPassword}>
-                <FieldLabel>{t("settings.profile.confirmPassword")}</FieldLabel>
-                <Input
-                  type="password"
-                  value={passwordData.confirmPassword}
-                  onChange={(e) =>
-                    setPasswordData((prev) => ({ ...prev, confirmPassword: e.target.value }))
-                  }
-                  aria-invalid={!!passwordErrors.confirmPassword}
-                />
-                {passwordErrors.confirmPassword && (
-                  <FieldError errors={[{ message: passwordErrors.confirmPassword }]} />
-                )}
-              </Field>
+      <Panel
+        header={
+          <PanelHeading
+            title={t("profile.changePassword")}
+            subtitle={t("profile.changePasswordHelp")}
+          />
+        }
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <Field label={t("profile.currentPassword")} error={errors.currentPassword}>
+            <Input
+              type="password"
+              value={currentPassword}
+              onChange={setCurrentPassword}
+              autoComplete="current-password"
+            />
+          </Field>
+          <div className="bh-form-pair">
+            <Field label={t("profile.newPassword")} error={errors.newPassword}>
+              <Input
+                type="password"
+                value={newPassword}
+                onChange={setNewPassword}
+                autoComplete="new-password"
+              />
+            </Field>
+            <Field label={t("profile.confirmPassword")} error={errors.confirmPassword}>
+              <Input
+                type="password"
+                value={confirmPassword}
+                onChange={setConfirmPassword}
+                autoComplete="new-password"
+              />
+            </Field>
+          </div>
+          <div>
+            <Button variant="primary" size="sm" loading={busy} onClick={() => void savePassword()}>
+              {t("profile.updatePassword")}
+            </Button>
+          </div>
+        </div>
+      </Panel>
 
-              <Button type="submit" disabled={passwordSaving} className="w-fit">
-                {passwordSaving
-                  ? t("settings.profile.updating")
-                  : t("settings.profile.updatePassword")}
-              </Button>
-            </FieldGroup>
-          </form>
-        </CardContent>
-      </Card>
+      <div>
+        <Button
+          variant="secondary"
+          size="sm"
+          iconStart={<LogOut size={14} />}
+          onClick={() => {
+            void signOut().then(() => navigate("/login", { replace: true }));
+          }}
+        >
+          {t("nav.signOut")}
+        </Button>
+      </div>
+
+      <ToastViewport>
+        <Toast
+          open={saved}
+          onClose={() => setSaved(false)}
+          tone="success"
+          title={t("profile.updated")}
+        />
+      </ToastViewport>
     </div>
   );
 }

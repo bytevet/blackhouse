@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<template id="__bundler_thumbnail" data-bg-color="#0b0c0e"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><rect width="200" height="200" fill="#0b0c0e"/><rect x="60" y="60" width="80" height="80" rx="20" fill="#2f7f6f"/><text x="100" y="128" font-family="ui-monospace,Menlo,monospace" font-size="56" font-weight="700" fill="#0b0c0e" text-anchor="middle">B</text></svg></template>
+<script src="icons.js"></script>
+<link rel="stylesheet" href="_ds/not-yet-dashboard-design-system-08a144c3-b949-4751-9eef-342d9527b153/_ds_bundle.css">
+<link rel="stylesheet" href="_ds/not-yet-dashboard-design-system-08a144c3-b949-4751-9eef-342d9527b153/styles.css">
+<script src="_ds/not-yet-dashboard-design-system-08a144c3-b949-4751-9eef-342d9527b153/_ds_bundle.js"></script>
+<style>
+  html,body{margin:0;height:100%}
+  *{box-sizing:border-box}
+  @keyframes nyPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.82)}}
+  @keyframes nyRing{0%{box-shadow:0 0 0 0 var(--ring-c)}70%{box-shadow:0 0 0 5px transparent}100%{box-shadow:0 0 0 0 transparent}}
+  @keyframes nyBlink{0%,49%{opacity:1}50%,100%{opacity:0}}
+  @keyframes nyShimmer{0%{background-position:-120px 0}100%{background-position:120px 0}}
+  @keyframes nyBar{0%{width:6%}50%{width:64%}100%{width:34%}}
+  a{color:var(--ny-accent-text)}
+  a:hover{color:var(--ny-accent)}
+  .bh-scroll::-webkit-scrollbar{width:10px;height:10px}
+  .bh-scroll::-webkit-scrollbar-thumb{background:var(--ny-border-strong);border-radius:8px;border:2px solid transparent;background-clip:content-box}
+  .bh-scroll::-webkit-scrollbar-track{background:transparent}
+</style>
+</helmet>
+<x-import component-from-global-scope="NotYetUI.ThemeProvider" theme="{{ theme }}" hint-size="100%,100%">
+<div style="height:100vh;width:100%;display:flex;flex-direction:column;background:var(--ny-bg);color:var(--ny-text);font-family:var(--ny-font-sans);font-size:14px;overflow:hidden">
+
+  <!-- CREATE CHANNEL DIALOG -->
+  <x-import component-from-global-scope="NotYetUI.Dialog" open="{{ newChannelOpen }}" onClose="{{ closeChannel }}" title="Create a channel" description="Channels organise a team and its agents around a piece of work." size="sm" hint-size="0,0">
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div>
+        <label style="display:block;font-size:12px;font-weight:600;color:var(--ny-text-muted);margin-bottom:6px">Name</label>
+        <div style="display:flex;align-items:center;gap:8px;border:1px solid var(--ny-border-strong);border-radius:9px;background:var(--ny-surface-sunken);padding:0 12px">
+          <span style="font-family:var(--ny-font-mono);color:var(--ny-text-subtle);font-size:15px">#</span>
+          <input placeholder="payments-refactor" style="flex:1;border:none;background:transparent;color:var(--ny-text);font-family:var(--ny-font-mono);font-size:14px;padding:10px 0;outline:none">
+        </div>
+        <div style="font-size:11px;color:var(--ny-text-subtle);margin-top:6px;font-family:var(--ny-font-mono)">lowercase, no spaces · use - to separate words</div>
+      </div>
+      <div>
+        <label style="display:block;font-size:12px;font-weight:600;color:var(--ny-text-muted);margin-bottom:6px">Repo &amp; branch <span style="font-weight:400;color:var(--ny-text-subtle)">(optional)</span></label>
+        <div style="display:flex;align-items:center;border:1px solid var(--ny-border-strong);border-radius:9px;background:var(--ny-surface-sunken);padding:0 12px">
+          <input value="acme/storefront" style="flex:1;border:none;background:transparent;color:var(--ny-text);font-family:var(--ny-font-mono);font-size:14px;padding:10px 0;outline:none">
+          <span style="color:var(--ny-text-subtle);font-family:var(--ny-font-mono)">@</span>
+          <input value="main" style="width:64px;border:none;background:transparent;color:var(--ny-text);font-family:var(--ny-font-mono);font-size:14px;padding:10px 0 10px 6px;outline:none">
+        </div>
+      </div>
+      <label style="display:flex;align-items:center;gap:9px;font-size:13px;color:var(--ny-text-muted);cursor:pointer"><input type="checkbox" style="accent-color:var(--ny-accent);width:15px;height:15px">Private — only invited members and agents</label>
+      <div style="display:flex;justify-content:flex-end;gap:8px;padding-top:4px">
+        <x-import component-from-global-scope="NotYetUI.Button" variant="ghost" size="md" onClick="{{ closeChannel }}" hint-size="auto,34px">Cancel</x-import>
+        <x-import component-from-global-scope="NotYetUI.Button" variant="primary" size="md" onClick="{{ closeChannel }}" hint-size="auto,34px">Create channel</x-import>
+      </div>
+    </div>
+  </x-import>
+
+
+  <div style="flex:1;display:flex;min-height:0">
+
+    <!-- ===================== LEFT SIDEBAR ===================== -->
+    <aside style="width:288px;flex:none;display:flex;flex-direction:column;background:var(--ny-surface-sunken);border-right:1px solid var(--ny-border);min-height:0">
+
+      <!-- workspace switcher -->
+      <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--ny-border)">
+        <div onClick="{{ goIndex }}" role="button" title="All screens" style="width:34px;height:34px;flex:none;border-radius:9px;background:var(--ny-accent);color:var(--ny-text-on-accent);display:grid;place-items:center;font-weight:700;font-size:15px;font-family:var(--ny-font-mono);cursor:pointer">B</div>
+        <div style="min-width:0;flex:1">
+          <div style="font-weight:600;font-size:13.5px;line-height:1.1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Acme Storefront</div>
+          <div style="font-size:11px;color:var(--ny-text-subtle);font-family:var(--ny-font-mono);margin-top:2px">blackhouse · self-hosted</div>
+        </div>
+        <div onClick="{{ toggleTheme }}" role="button" title="Toggle theme" style="width:30px;height:30px;flex:none;border-radius:7px;display:grid;place-items:center;cursor:pointer;color:var(--ny-text-subtle);border:1px solid var(--ny-border)" style-hover="background:var(--ny-surface-hover);color:var(--ny-text)">
+          <dc-import name="Icon" n="moon" sz="15" sw="2" hint-size="15px,15px"></dc-import>
+        </div>
+      </div>
+
+      <div class="bh-scroll" style="flex:1;overflow-y:auto;min-height:0;padding:10px 8px">
+        <!-- channels -->
+        <div style="display:flex;align-items:center;padding:6px 6px 4px 8px">
+          <span style="flex:1;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ny-text-subtle);font-family:var(--ny-font-mono)">Channels</span>
+          <div onClick="{{ newChannel }}" role="button" title="Create channel" style="width:26px;height:26px;flex:none;border-radius:7px;display:grid;place-items:center;cursor:pointer;color:var(--ny-text-subtle);border:1px solid var(--ny-border)" style-hover="background:var(--ny-surface-hover);color:var(--ny-text);border-color:var(--ny-border-strong)"><dc-import name="Icon" n="plus" sz="16" sw="2.2" hint-size="16px,16px"></dc-import></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:1px">
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;color:var(--ny-text-muted);cursor:pointer" style-hover="background:var(--ny-surface-hover)"><span style="font-family:var(--ny-font-mono);color:var(--ny-text-subtle)">#</span>general</div>
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;background:var(--ny-surface-selected);color:var(--ny-text);font-weight:600"><span style="font-family:var(--ny-font-mono);color:var(--ny-accent-text)">#</span>backend<span style="margin-left:auto;font-size:11px;font-family:var(--ny-font-mono);background:var(--ny-accent);color:var(--ny-text-on-accent);border-radius:20px;padding:1px 7px">3</span></div>
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;color:var(--ny-text-muted);cursor:pointer" style-hover="background:var(--ny-surface-hover)"><span style="font-family:var(--ny-font-mono);color:var(--ny-text-subtle)">#</span>frontend</div>
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;color:var(--ny-text-muted);cursor:pointer" style-hover="background:var(--ny-surface-hover)"><span style="font-family:var(--ny-font-mono);color:var(--ny-text-subtle)">#</span>incidents<span style="margin-left:auto;font-size:11px;font-family:var(--ny-font-mono);color:var(--ny-danger-text)">●</span></div>
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;color:var(--ny-text-muted);cursor:pointer" style-hover="background:var(--ny-surface-hover)"><span style="font-family:var(--ny-font-mono);color:var(--ny-text-subtle)">#</span>random</div>
+        </div>
+
+        <!-- agent roster -->
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 8px 4px 8px">
+          <span style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ny-text-subtle);font-family:var(--ny-font-mono)">Agents</span>
+          <div style="display:flex;align-items:center;gap:6px"><span style="font-size:11px;color:var(--ny-text-subtle);font-family:var(--ny-font-mono)">4</span><div onClick="{{ goCreate }}" role="button" title="Create agent" style="width:26px;height:26px;border-radius:7px;display:grid;place-items:center;cursor:pointer;color:var(--ny-text-subtle);border:1px solid var(--ny-border)" style-hover="background:var(--ny-surface-hover);color:var(--ny-text);border-color:var(--ny-border-strong)"><dc-import name="Icon" n="plus" sz="16" sw="2.2" hint-size="16px,16px"></dc-import></div></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <sc-for list="{{ agents }}" as="a" hint-placeholder-count="4">
+            <div onClick="{{ a.open }}" role="button" style="display:flex;gap:10px;align-items:flex-start;padding:8px 8px;border-radius:9px;cursor:pointer" style-hover="background:var(--ny-surface-hover)">
+              <div style="position:relative;flex:none;margin-top:1px">
+                <div style="width:30px;height:30px;border-radius:8px;background:var(--ny-surface-raised);border:1px solid var(--ny-border-strong);display:grid;place-items:center;font-family:var(--ny-font-mono);font-weight:600;font-size:12px;color:var(--ny-text)">{{ a.initials }}</div>
+                <span style="{{ a.dotStyle }}"></span>
+              </div>
+              <div style="min-width:0;flex:1">
+                <div style="display:flex;align-items:center;gap:6px">
+                  <span style="font-family:var(--ny-font-mono);font-size:13px;font-weight:600;color:var(--ny-text)">{{ a.handle }}</span>
+                  <span style="{{ a.actStyle }}">{{ a.activity }}</span>
+                </div>
+                <div style="font-size:11.5px;color:var(--ny-text-subtle);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--ny-font-mono)">{{ a.statusLine }}</div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <!-- current user -->
+      <div style="border-top:1px solid var(--ny-border);padding:10px 12px;display:flex;align-items:center;gap:9px">
+        <div style="width:28px;height:28px;border-radius:50%;background:var(--ny-info-subtle);color:var(--ny-info-text);display:grid;place-items:center;font-size:11px;font-weight:700">DO</div>
+        <div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:600">Dana Okafor</div><div style="font-size:10.5px;color:var(--ny-text-subtle);font-family:var(--ny-font-mono)">owner</div></div>
+        <div onClick="{{ goSettings }}" role="button" title="Workspace settings" style="width:28px;height:28px;flex:none;border-radius:7px;display:grid;place-items:center;cursor:pointer;color:var(--ny-text-subtle)" style-hover="background:var(--ny-surface-hover);color:var(--ny-text)"><dc-import name="Icon" n="settings" sz="16" sw="2" hint-size="16px,16px"></dc-import></div>
+      </div>
+    </aside>
+
+    <!-- ===================== CENTER ===================== -->
+    <main style="flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--ny-bg)">
+
+      <!-- channel header -->
+      <header style="flex:none;display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--ny-border)">
+        <div style="min-width:0;flex:1">
+          <div style="display:flex;align-items:center;gap:8px"><span style="font-family:var(--ny-font-mono);color:var(--ny-text-subtle);font-size:17px">#</span><span style="font-weight:700;font-size:16px">backend</span><span style="width:1px;height:14px;background:var(--ny-border-strong)"></span><span style="font-size:12.5px;color:var(--ny-text-subtle)">2 humans · 3 agents</span></div>
+          <div style="font-size:12px;color:var(--ny-text-subtle);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Payments refactor · <span style="font-family:var(--ny-font-mono)">acme/storefront</span> @ <span style="font-family:var(--ny-font-mono)">main</span></div>
+        </div>
+        <sc-if value="{{ autoApprove }}" hint-placeholder-val="{{ false }}">
+          <div title="Auto-approve is on for this channel" style="display:flex;align-items:center;gap:6px;padding:5px 10px;border-radius:8px;border:1px solid var(--ny-info-border);background:var(--ny-info-subtle);font-family:var(--ny-font-mono);font-size:11px;color:var(--ny-info-text)"><dc-import name="Icon" n="zap" sz="12" sw="2" hint-size="12px,12px"></dc-import>auto-approve on</div>
+        </sc-if>
+        <div onClick="{{ toggleNotes }}" role="button" style="display:flex;align-items:center;gap:6px;padding:6px 11px;border-radius:8px;border:1px solid var(--ny-border);font-size:12px;color:var(--ny-text-muted);cursor:pointer;font-family:var(--ny-font-mono)" style-hover="background:var(--ny-surface-hover);color:var(--ny-text)"><span style="width:7px;height:7px;border-radius:50%;background:var(--ny-warning)"></span>design notes</div>
+        <x-import component-from-global-scope="NotYetUI.Button" variant="secondary" size="sm" hint-size="auto,28px">Refactor plan</x-import>
+
+        <!-- CHANNEL OVERFLOW MENU (layer-2) -->
+        <div style="position:relative;flex:none">
+          <div onClick="{{ toggleChannelMenu }}" role="button" title="Channel settings" style="width:30px;height:30px;border-radius:8px;display:grid;place-items:center;cursor:pointer;color:var(--ny-text-subtle);border:1px solid var(--ny-border)" style-hover="background:var(--ny-surface-hover);color:var(--ny-text)"><dc-import name="Icon" n="ellipsis" sz="16" sw="2" hint-size="16px,16px"></dc-import></div>
+          <sc-if value="{{ channelMenuOpen }}" hint-placeholder-val="{{ false }}">
+            <div onClick="{{ closeChannelMenu }}" style="position:fixed;inset:0;z-index:40"></div>
+            <div style="position:absolute;top:calc(100% + 8px);right:0;width:308px;background:var(--ny-surface-raised);border:1px solid var(--ny-border-strong);border-radius:12px;box-shadow:var(--ny-shadow-lg);overflow:hidden;z-index:41">
+              <div style="padding:9px 13px 7px;font-size:10.5px;font-family:var(--ny-font-mono);text-transform:uppercase;letter-spacing:.05em;color:var(--ny-text-subtle);border-bottom:1px solid var(--ny-border)">#backend · channel settings</div>
+              <!-- auto-approve (yolo) row -->
+              <div style="{{ menuYoloStyle }}">
+                <div style="display:flex;align-items:flex-start;gap:10px">
+                  <span style="flex:none;width:26px;height:26px;border-radius:7px;display:grid;place-items:center;background:var(--ny-warning-subtle);color:var(--ny-warning-text);margin-top:1px"><dc-import name="Icon" n="zap" sz="14" sw="2" hint-size="14px,14px"></dc-import></span>
+                  <div style="flex:1;min-width:0">
+                    <div style="display:flex;align-items:center;gap:7px"><span style="font-size:13px;font-weight:600;color:var(--ny-text)">Auto-approve dispatches</span><span style="font-size:9px;font-family:var(--ny-font-mono);text-transform:uppercase;letter-spacing:.05em;color:var(--ny-warning-text);border:1px solid var(--ny-warning-border);border-radius:4px;padding:0 4px">yolo</span></div>
+                    <div style="font-size:11.5px;line-height:1.45;color:var(--ny-text-subtle);margin-top:3px">Skip the approval hold — agents dispatch each other instantly in this channel. High-trust rooms only.</div>
+                    <sc-if value="{{ autoApprove }}" hint-placeholder-val="{{ false }}">
+                      <div style="margin-top:7px;font-size:11px;font-family:var(--ny-font-mono);color:var(--ny-warning-text);display:flex;align-items:center;gap:5px"><dc-import name="Icon" n="triangle-alert" sz="12" sw="2" hint-size="12px,12px"></dc-import>on for everyone in #backend</div>
+                    </sc-if>
+                  </div>
+                  <div title="Toggle auto-approve" style="flex:none;margin-top:1px"><x-import component-from-global-scope="NotYetUI.Switch" size="sm" checked="{{ autoApprove }}" onChange="{{ toggleAuto }}" hint-size="34px,20px"></x-import></div>
+                </div>
+              </div>
+              <div style="height:1px;background:var(--ny-border)"></div>
+              <div style="padding:5px">
+                <div role="button" style="display:flex;align-items:center;gap:10px;padding:8px 9px;border-radius:8px;cursor:pointer;font-size:13px;color:var(--ny-text-muted)" style-hover="background:var(--ny-surface-hover);color:var(--ny-text)"><dc-import name="Icon" n="square-pen" sz="15" sw="2" hint-size="15px,15px"></dc-import>Edit channel &amp; repo</div>
+                <div role="button" style="display:flex;align-items:center;gap:10px;padding:8px 9px;border-radius:8px;cursor:pointer;font-size:13px;color:var(--ny-text-muted)" style-hover="background:var(--ny-surface-hover);color:var(--ny-text)"><dc-import name="Icon" n="bell" sz="15" sw="2" hint-size="15px,15px"></dc-import>Notification preferences</div>
+                <div role="button" style="display:flex;align-items:center;gap:10px;padding:8px 9px;border-radius:8px;cursor:pointer;font-size:13px;color:var(--ny-danger-text)" style-hover="background:var(--ny-danger-subtle)"><dc-import name="Icon" n="log-out" sz="15" sw="2" hint-size="15px,15px"></dc-import>Leave channel</div>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+      </header>
+
+      <div style="flex:1;display:flex;min-height:0">
+        <!-- transcript -->
+        <div class="bh-scroll" style="flex:1;overflow-y:auto;min-width:0;padding:22px 26px 8px">
+          <div style="max-width:820px;margin:0 auto;display:flex;flex-direction:column;gap:2px">
+
+            <!-- day divider -->
+            <div style="display:flex;align-items:center;gap:12px;margin:4px 0 14px"><div style="flex:1;height:1px;background:var(--ny-border)"></div><span style="font-size:11px;color:var(--ny-text-subtle);font-family:var(--ny-font-mono)">Today</span><div style="flex:1;height:1px;background:var(--ny-border)"></div></div>
+
+            <!-- HUMAN MESSAGE -->
+            <div style="display:flex;gap:12px;padding:10px 8px;border-radius:10px">
+              <div style="width:38px;height:38px;flex:none;border-radius:50%;background:var(--ny-info-subtle);color:var(--ny-info-text);display:grid;place-items:center;font-size:13px;font-weight:700">DO</div>
+              <div style="min-width:0;flex:1">
+                <div style="display:flex;align-items:baseline;gap:8px"><span style="font-weight:700;font-size:14px">Dana Okafor</span><span style="font-size:11px;color:var(--ny-text-subtle);font-family:var(--ny-font-mono)">10:24</span></div>
+                <div style="margin-top:3px;line-height:1.55;color:var(--ny-text)"><span style="font-family:var(--ny-font-mono);color:var(--ny-accent-text);background:var(--ny-accent-subtle);padding:1px 5px;border-radius:5px">@scout</span> summarise everything the checkout flow touches — we're about to refactor the payments module and I don't want to miss a call site.</div>
+              </div>
+            </div>
+
+            <!-- AGENT ACTIVITY TURN (collapsible) -->
+            <div style="display:flex;gap:12px;padding:2px 8px 2px">
+              <div style="width:38px;flex:none;display:flex;justify-content:center"><div style="width:2px;background:var(--ny-border);border-radius:2px;margin-top:2px"></div></div>
+              <div style="flex:1;min-width:0;border:1px solid var(--ny-border);border-radius:10px;background:var(--ny-surface-sunken);overflow:hidden">
+                <!-- summary row -->
+                <div onClick="{{ toggleTurn }}" role="button" style="display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer" style-hover="background:var(--ny-surface-hover)">
+                  <span style="{{ chevronStyle }}"><dc-import name="Icon" n="chevron-right" sz="12" sw="2.5" hint-size="12px,12px"></dc-import></span>
+                  <div style="width:22px;height:22px;flex:none;border-radius:6px;background:var(--ny-surface-raised);border:1px solid var(--ny-border-strong);display:grid;place-items:center;font-family:var(--ny-font-mono);font-size:10px;font-weight:700">SC</div>
+                  <span style="font-family:var(--ny-font-mono);font-size:12.5px;color:var(--ny-text-muted)"><span style="color:var(--ny-text);font-weight:600">@scout</span> worked</span>
+                  <span style="font-family:var(--ny-font-mono);font-size:12px;color:var(--ny-text-subtle)">8 tool calls · 31s · 9.4k tokens</span>
+                  <span style="margin-left:auto;display:flex;align-items:center;gap:6px;font-family:var(--ny-font-mono);font-size:11px;color:var(--ny-success-text)"><span style="width:6px;height:6px;border-radius:50%;background:var(--ny-success)"></span>done</span>
+                </div>
+                <!-- expandable body -->
+                <sc-if value="{{ turnOpen }}" hint-placeholder-val="{{ false }}">
+                  <div style="border-top:1px solid var(--ny-border);padding:4px 12px 8px 12px;font-family:var(--ny-font-mono);font-size:12.5px">
+                    <sc-for list="{{ toolCalls }}" as="t" hint-placeholder-count="5">
+                      <div style="display:flex;align-items:center;gap:9px;padding:5px 2px;color:var(--ny-text-muted)">
+                        <span style="{{ t.iconStyle }}">{{ t.glyph }}</span>
+                        <span style="color:var(--ny-text-subtle);min-width:44px">{{ t.verb }}</span>
+                        <span style="color:var(--ny-text)">{{ t.target }}</span>
+                        <span style="margin-left:auto;color:var(--ny-text-subtle);font-size:11px">{{ t.meta }}</span>
+                      </div>
+                    </sc-for>
+                  </div>
+                </sc-if>
+              </div>
+            </div>
+
+            <!-- AGENT TEXT REPLY -->
+            <div style="display:flex;gap:12px;padding:12px 8px;border-radius:10px">
+              <div style="position:relative;width:38px;height:38px;flex:none">
+                <div style="width:38px;height:38px;border-radius:10px;background:var(--ny-surface-raised);border:1px solid var(--ny-accent-border);display:grid;place-items:center;font-family:var(--ny-font-mono);font-size:12px;font-weight:700;color:var(--ny-accent-text)">SC</div>
+              </div>
+              <div style="min-width:0;flex:1">
+                <div style="display:flex;align-items:baseline;gap:8px"><span style="font-family:var(--ny-font-mono);font-weight:700;font-size:14px;color:var(--ny-text)">@scout</span><span style="font-size:10px;font-family:var(--ny-font-mono);color:var(--ny-accent-text);border:1px solid var(--ny-accent-border);background:var(--ny-accent-subtle);border-radius:5px;padding:0 5px">agent</span><span style="font-size:11px;color:var(--ny-text-subtle);font-family:var(--ny-font-mono)">10:24</span></div>
+                <div style="margin-top:5px;line-height:1.6;color:var(--ny-text)">
+                  <p style="margin:0 0 10px">The checkout flow touches <strong>4 modules</strong>. The payments call sites you'll need to migrate:</p>
+                  <ul style="margin:0 0 12px;padding-left:20px;line-height:1.75">
+                    <li><code style="font-family:var(--ny-font-mono);font-size:12.5px;background:var(--ny-surface-sunken);border:1px solid var(--ny-border);border-radius:4px;padding:1px 5px">src/lib/payments/stripe.ts</code> — the client wrapper (7 exports)</li>
+                    <li><code style="font-family:var(--ny-font-mono);font-size:12.5px;background:var(--ny-surface-sunken);border:1px solid var(--ny-border);border-radius:4px;padding:1px 5px">src/app/checkout/actions.ts</code> — 3 server actions call it directly</li>
+                    <li><code style="font-family:var(--ny-font-mono);font-size:12.5px;background:var(--ny-surface-sunken);border:1px solid var(--ny-border);border-radius:4px;padding:1px 5px">src/db/schema.ts</code> — <code style="font-family:var(--ny-font-mono);font-size:12.5px;background:var(--ny-surface-sunken);border:1px solid var(--ny-border);border-radius:4px;padding:1px 5px">orders.payment_intent_id</code> FK</li>
+                  </ul>
+                  <p style="margin:0 0 8px">The one that will bite you is the webhook handler — it constructs the Stripe client a second time instead of importing the wrapper:</p>
+                  <pre style="margin:0;font-family:var(--ny-font-mono);font-size:12.5px;line-height:1.6;background:var(--ny-surface-sunken);border:1px solid var(--ny-border);border-radius:9px;padding:12px 14px;overflow-x:auto;color:var(--ny-text)"><span style="color:var(--ny-text-subtle)">// src/app/api/webhooks/stripe/route.ts:14</span>
+const stripe = new Stripe(process.env.<span style="color:var(--ny-warning-text)">STRIPE_KEY</span>!)
+<span style="color:var(--ny-text-subtle)">//        ^ bypasses lib/payments/stripe.ts — migrate this too</span></pre>
+                  <p style="margin:10px 0 0">I rendered a dependency map so you can see the blast radius before touching anything.</p>
+                </div>
+
+                <!-- ARTIFACT CARD -->
+                <div style="margin-top:12px;border:1px solid var(--ny-border);border-radius:12px;overflow:hidden;background:var(--ny-surface)">
+                  <div style="display:flex;align-items:center;gap:9px;padding:9px 12px;border-bottom:1px solid var(--ny-border);background:var(--ny-surface-sunken)">
+                    <span style="width:22px;height:22px;border-radius:6px;background:var(--ny-info-subtle);color:var(--ny-info-text);display:grid;place-items:center"><dc-import name="Icon" n="app-window" sz="13" sw="2" hint-size="13px,13px"></dc-import></span>
+                    <div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:600">checkout-flow-map.html</div><div style="font-size:10.5px;color:var(--ny-text-subtle);font-family:var(--ny-font-mono)">artifact · rendered HTML · 24 KB</div></div>
+                    <span style="font-size:10px;font-family:var(--ny-font-mono);color:var(--ny-info-text);border:1px solid var(--ny-info-border);background:var(--ny-info-subtle);border-radius:5px;padding:1px 6px">preview</span>
+                    <div onClick="{{ toggleArtifact }}" role="button" style="display:flex;align-items:center;gap:5px;font-size:11.5px;font-family:var(--ny-font-mono);color:var(--ny-text-muted);cursor:pointer;padding:3px 7px;border-radius:6px" style-hover="background:var(--ny-surface-hover);color:var(--ny-text)"><dc-import name="Icon" n="maximize-2" sz="13" sw="2" hint-size="13px,13px"></dc-import>{{ artifactLabel }}</div>
+                  </div>
+                  <!-- inline mini preview -->
+                  <div style="{{ artifactPreviewStyle }}">
+                    <div style="height:100%;padding:14px 16px;display:flex;flex-direction:column;gap:9px;background:radial-gradient(circle at 20% 10%, var(--ny-surface-hover), var(--ny-surface))">
+                      <div style="display:flex;gap:8px;align-items:center"><span style="width:9px;height:9px;border-radius:50%;background:var(--ny-info)"></span><span style="font-family:var(--ny-font-mono);font-size:11px;color:var(--ny-text-muted)">checkout/page.tsx</span></div>
+                      <div style="display:flex;gap:10px;padding-left:16px;flex-wrap:wrap">
+                        <span style="font-family:var(--ny-font-mono);font-size:11px;color:var(--ny-text-subtle);border:1px solid var(--ny-border);border-radius:6px;padding:3px 8px">actions.ts</span>
+                        <span style="font-family:var(--ny-font-mono);font-size:11px;color:var(--ny-accent-text);border:1px solid var(--ny-accent-border);background:var(--ny-accent-subtle);border-radius:6px;padding:3px 8px">payments/stripe.ts</span>
+                        <span style="font-family:var(--ny-font-mono);font-size:11px;color:var(--ny-warning-text);border:1px solid var(--ny-warning-border);background:var(--ny-warning-subtle);border-radius:6px;padding:3px 8px">webhooks/stripe ⚠</span>
+                      </div>
+                      <div style="padding-left:32px"><span style="font-family:var(--ny-font-mono);font-size:11px;color:var(--ny-text-subtle);border:1px solid var(--ny-border);border-radius:6px;padding:3px 8px">db/schema.ts · orders</span></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- PENDING DISPATCH CARD (agent -> agent, needs human approval) -->
+            <div style="display:flex;gap:12px;padding:10px 8px">
+              <div style="width:38px;flex:none;display:flex;justify-content:center"><span style="{{ dispatchIconStyle }}">{{ dispatchIcon }}</span></div>
+              <div style="{{ dispatchCardStyle }}">
+                <div style="display:flex;align-items:center;gap:9px;padding:11px 14px 6px">
+                  <span style="{{ dispatchEyebrowStyle }}">{{ dispatchEyebrow }}</span>
+                  <sc-if value="{{ dispatchPending }}" hint-placeholder-val="{{ true }}">
+                    <span style="margin-left:auto;font-family:var(--ny-font-mono);font-size:11.5px;color:var(--ny-warning-text);display:flex;align-items:center;gap:5px"><dc-import name="Icon" n="clock" sz="12" sw="2" hint-size="12px,12px"></dc-import>expires in {{ expiry }}</span>
+                  </sc-if>
+                </div>
+                <div style="padding:2px 14px 12px">
+                  <div style="display:flex;align-items:center;gap:8px;font-family:var(--ny-font-mono);font-size:13px;margin-bottom:9px"><span style="font-weight:700;color:var(--ny-text)">@scout</span><dc-import name="Icon" n="arrow-right" sz="16" sw="2" style="color:var(--ny-text-subtle)" hint-size="16px,16px"></dc-import><span style="font-weight:700;color:var(--ny-text)">@reviewer</span><span style="color:var(--ny-text-subtle)">wants to delegate</span></div>
+                  <div style="background:var(--ny-surface);border:1px solid var(--ny-border);border-radius:9px;padding:10px 12px;font-family:var(--ny-font-mono);font-size:12.5px;line-height:1.55;color:var(--ny-text)">Review the payments migration plan in <span style="color:var(--ny-accent-text)">checkout-flow-map.html</span> and flag any call site I missed before we start editing.</div>
+                  <sc-if value="{{ dispatchPending }}" hint-placeholder-val="{{ true }}">
+                    <div style="display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap">
+                      <x-import component-from-global-scope="NotYetUI.Button" variant="primary" size="sm" onClick="{{ approve }}" hint-size="auto,28px">Approve</x-import>
+                      <x-import component-from-global-scope="NotYetUI.Button" variant="secondary" size="sm" onClick="{{ approve }}" hint-size="auto,28px">Edit &amp; approve</x-import>
+                      <x-import component-from-global-scope="NotYetUI.Button" variant="danger" size="sm" onClick="{{ deny }}" hint-size="auto,28px">Deny</x-import>
+                      <span style="margin-left:auto;font-size:11px;color:var(--ny-text-subtle);font-family:var(--ny-font-mono)">runs in @reviewer's sandbox</span>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{ dispatchApproved }}" hint-placeholder-val="{{ false }}">
+                    <div style="display:flex;align-items:center;gap:8px;margin-top:12px;font-family:var(--ny-font-mono);font-size:12px;color:var(--ny-success-text)"><dc-import name="Icon" n="check" sz="15" sw="2.5" hint-size="15px,15px"></dc-import>Approved by Dana · dispatched to @reviewer · <a href="#" style="text-decoration:none">view run →</a></div>
+                  </sc-if>
+                  <sc-if value="{{ dispatchDenied }}" hint-placeholder-val="{{ false }}">
+                    <div style="display:flex;align-items:center;gap:8px;margin-top:12px;font-family:var(--ny-font-mono);font-size:12px;color:var(--ny-danger-text)"><dc-import name="Icon" n="x" sz="15" sw="2.5" hint-size="15px,15px"></dc-import>Denied by Dana · @scout notified</div>
+                  </sc-if>
+                  <sc-if value="{{ dispatchAuto }}" hint-placeholder-val="{{ false }}">
+                    <div style="display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;font-family:var(--ny-font-mono);font-size:12px;color:var(--ny-info-text)"><dc-import name="Icon" n="zap" sz="14" sw="2" hint-size="14px,14px"></dc-import>Auto-approved · dispatched to @reviewer with no hold<span style="width:1px;height:12px;background:var(--ny-border-strong)"></span><a href="#" style="text-decoration:none">view run →</a><span style="margin-left:auto;color:var(--ny-text-subtle)">override in channel settings</span></div>
+                  </sc-if>
+                </div>
+              </div>
+            </div>
+
+            <!-- QUEUED HUMAN MESSAGE (waiting on busy agent) -->
+            <div style="display:flex;gap:12px;padding:10px 8px;opacity:.92">
+              <div style="width:38px;height:38px;flex:none;border-radius:50%;background:var(--ny-info-subtle);color:var(--ny-info-text);display:grid;place-items:center;font-size:13px;font-weight:700">DO</div>
+              <div style="min-width:0;flex:1">
+                <div style="display:flex;align-items:baseline;gap:8px"><span style="font-weight:700;font-size:14px">Dana Okafor</span><span style="font-size:11px;color:var(--ny-text-subtle);font-family:var(--ny-font-mono)">10:26</span></div>
+                <div style="margin-top:3px;line-height:1.55;color:var(--ny-text)"><span style="font-family:var(--ny-font-mono);color:var(--ny-accent-text);background:var(--ny-accent-subtle);padding:1px 5px;border-radius:5px">@backend</span> once tests are green, open a PR against <span style="font-family:var(--ny-font-mono)">main</span>.</div>
+                <div style="margin-top:7px;display:inline-flex;align-items:center;gap:8px;border:1px dashed var(--ny-border-strong);border-radius:8px;padding:5px 10px;font-family:var(--ny-font-mono);font-size:11.5px;color:var(--ny-text-muted)">
+                  <span style="width:6px;height:6px;border-radius:50%;background:var(--ny-warning);animation:nyPulse 1.6s ease-in-out infinite"></span>
+                  Queued · <span style="color:var(--ny-text)">@backend</span> is busy (running tests) · delivers when idle
+                  <span style="width:1px;height:12px;background:var(--ny-border-strong)"></span>
+                  <span style="color:var(--ny-danger-text);cursor:pointer" style-hover="text-decoration:underline">cancel</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="height:8px"></div>
+          </div>
+        </div>
+
+        <!-- DESIGN NOTES RAIL -->
+        <sc-if value="{{ notesOpen }}" hint-placeholder-val="{{ false }}">
+          <aside class="bh-scroll" style="width:300px;flex:none;border-left:1px solid var(--ny-border);background:var(--ny-surface-sunken);overflow-y:auto;padding:16px 16px 24px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="width:7px;height:7px;border-radius:50%;background:var(--ny-warning)"></span><span style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-family:var(--ny-font-mono);color:var(--ny-text-subtle)">Design notes</span></div>
+            <p style="font-size:11.5px;color:var(--ny-text-subtle);line-height:1.5;margin:0 0 14px">Where I'd push on your structure.</p>
+            <sc-for list="{{ notes }}" as="n" hint-placeholder-count="3">
+              <div style="border:1px solid var(--ny-border);border-radius:9px;padding:10px 11px;margin-bottom:9px;background:var(--ny-surface)">
+                <div style="font-size:12px;font-weight:700;color:var(--ny-text);margin-bottom:4px">{{ n.title }}</div>
+                <div style="font-size:11.5px;line-height:1.55;color:var(--ny-text-muted)">{{ n.body }}</div>
+              </div>
+            </sc-for>
+          </aside>
+        </sc-if>
+      </div>
+
+      <!-- COMPOSER -->
+      <div style="flex:none;padding:12px 26px 18px;border-top:1px solid var(--ny-border);background:var(--ny-bg)">
+        <div style="max-width:820px;margin:0 auto;position:relative">
+
+          <!-- @mention autocomplete -->
+          <sc-if value="{{ mentionOpen }}" hint-placeholder-val="{{ true }}">
+            <div style="position:absolute;bottom:calc(100% + 8px);left:0;width:340px;background:var(--ny-surface-raised);border:1px solid var(--ny-border-strong);border-radius:12px;box-shadow:var(--ny-shadow-lg);overflow:hidden;z-index:5">
+              <div style="padding:7px 12px;font-size:10.5px;font-family:var(--ny-font-mono);text-transform:uppercase;letter-spacing:.05em;color:var(--ny-text-subtle);border-bottom:1px solid var(--ny-border)">Mention an agent — live status</div>
+              <sc-for list="{{ agents }}" as="a" hint-placeholder-count="4">
+                <div onClick="{{ a.pick }}" role="button" style="display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer" style-hover="background:var(--ny-surface-hover)">
+                  <div style="position:relative;flex:none"><div style="width:26px;height:26px;border-radius:7px;background:var(--ny-surface-sunken);border:1px solid var(--ny-border-strong);display:grid;place-items:center;font-family:var(--ny-font-mono);font-size:10px;font-weight:700">{{ a.initials }}</div><span style="{{ a.dotStyleSm }}"></span></div>
+                  <span style="font-family:var(--ny-font-mono);font-size:13px;font-weight:600;color:var(--ny-text)">{{ a.handle }}</span>
+                  <span style="{{ a.actStyle }}">{{ a.activity }}</span>
+                  <span style="margin-left:auto;font-family:var(--ny-font-mono);font-size:11px;color:var(--ny-text-subtle);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px">{{ a.statusLine }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+
+          <div style="border:1px solid var(--ny-border-strong);border-radius:14px;background:var(--ny-surface);overflow:hidden">
+            <textarea onChange="{{ onCompose }}" value="{{ composer }}" placeholder="Message #backend — type @ to mention an agent" style="width:100%;border:none;background:transparent;color:var(--ny-text);font-family:var(--ny-font-sans);font-size:14px;line-height:1.5;padding:12px 14px 4px;resize:none;outline:none;min-height:44px"></textarea>
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 12px 10px">
+              <!-- delivery mode -->
+              <div style="display:flex;align-items:center;gap:8px">
+                <div style="transform:scale(.82);transform-origin:left center;margin-right:-22px"><x-import component-from-global-scope="NotYetUI.SegmentedControl" variant="mono" items="{{ modeItems }}" value="{{ mode }}" onChange="{{ setMode }}" label="Delivery mode" hint-size="150px,28px"></x-import></div>
+                <span style="{{ modeHintStyle }}"><span style="{{ modeDotStyle }}"></span>{{ modeHint }}</span>
+              </div>
+              <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+                <span style="font-size:11px;color:var(--ny-text-subtle);font-family:var(--ny-font-mono)">⏎ to send</span>
+                <x-import component-from-global-scope="NotYetUI.Button" variant="primary" size="sm" hint-size="auto,28px">Send</x-import>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+</x-import>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  state = {
+    theme: this.props.theme ?? 'dark',
+    turnOpen: false,
+    artifactOpen: false,
+    mode: 'queue',
+    mentionOpen: false,
+    dispatch: 'pending',
+    notesOpen: false,
+    composer: '',
+    newChannelOpen: false,
+    autoApprove: false,
+    channelMenuOpen: false,
+  };
+
+  dot(color, ring, sm) {
+    const s = sm ? 8 : 10, off = sm ? -1 : -2;
+    let box = `position:absolute;right:${off}px;bottom:${off}px;width:${s}px;height:${s}px;border-radius:50%;background:var(--ny-${color});border:2px solid var(--ny-surface-sunken)`;
+    if (ring) box += `;--ring-c:var(--ny-${color});animation:nyRing 1.8s ease-out infinite`;
+    return box;
+  }
+
+  agentData() {
+    return [
+      { handle:'@scout', initials:'SC', proc:'success', activity:'busy', ring:true,
+        statusLine:'reading src/db/schema.ts' },
+      { handle:'@backend', initials:'BE', proc:'success', activity:'busy', ring:true,
+        statusLine:'running tests · 34/50' },
+      { handle:'@reviewer', initials:'RV', proc:'neutral', activity:'idle', ring:false,
+        statusLine:'idle · last run 12m ago' },
+      { handle:'@frontend', initials:'FE', proc:'danger', activity:'stopped', ring:false,
+        statusLine:'sandbox exited (code 1)' },
+    ];
+  }
+
+  activityStyle(a) {
+    if (a.activity === 'busy')
+      return 'font-family:var(--ny-font-mono);font-size:10px;font-weight:600;color:var(--ny-info-text);background:var(--ny-info-subtle);border:1px solid var(--ny-info-border);border-radius:20px;padding:0 6px;display:inline-flex;align-items:center;gap:4px';
+    if (a.activity === 'stopped')
+      return 'font-family:var(--ny-font-mono);font-size:10px;color:var(--ny-danger-text);background:var(--ny-danger-subtle);border:1px solid var(--ny-danger-border);border-radius:20px;padding:0 6px';
+    return 'font-family:var(--ny-font-mono);font-size:10px;color:var(--ny-text-subtle);border:1px solid var(--ny-border);border-radius:20px;padding:0 6px';
+  }
+
+  renderVals() {
+    const auto = this.state.autoApprove;
+    const dTone = auto ? 'info' : 'warning';
+    const svg = (w, d) => React.createElement('svg', { width: w, height: w, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 },
+      d.map((p, i) => React.createElement('path', { key: i, d: p })));
+    const dispatchIcon = auto
+      ? svg(15, ['M13 2 3 14h9l-1 8 10-12h-9l1-8Z'])
+      : svg(15, ['M12 9v4', 'M12 17h.01', 'M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z']);
+
+    const agents = this.agentData().map((a, i) => ({
+      ...a,
+      dotStyle: this.dot(a.proc, a.ring, false),
+      dotStyleSm: this.dot(a.proc, a.ring, true),
+      actStyle: this.activityStyle(a),
+      open: () => { window.location.href = 'Agent Detail.dc.html'; },
+      pick: () => this.setState({ composer: a.handle + ' ', mentionOpen: false }),
+    }));
+
+    const tc = (glyph, gcolor, verb, target, meta) => ({
+      glyph, verb, target, meta,
+      iconStyle: `font-family:var(--ny-font-mono);font-size:12px;color:var(--ny-${gcolor});width:14px;text-align:center`,
+    });
+    const toolCalls = [
+      tc('◇','info-text','Read','src/app/checkout/page.tsx','118 ln'),
+      tc('◇','info-text','Read','src/lib/payments/stripe.ts','204 ln'),
+      tc('⌕','text-subtle','Grep','"stripe" · 42 matches','—'),
+      tc('◇','info-text','Read','src/db/schema.ts','340 ln'),
+      tc('▶','success-text','Ran','rg --files src/app/checkout','0.4s'),
+    ];
+
+    const notes = [
+      { title:'Split process-state from activity', body:'Your roster folds status (running/stopped/error) and activity (idle/busy) into one dot. I broke them apart: a colored dot for the process, a pill for activity. They fail independently — a running agent can be idle.' },
+      { title:'Dispatch card = the warning tone', body:'You called it a "decision, not a notification." I gave it the warning surface + pulsing icon so it reads as a hold, not a toast. Approved/denied collapse to a quiet one-liner so history stays skimmable.' },
+      { title:'Queued messages live in the transcript', body:'A queued send shows in-place with a dashed chip explaining why it waits and who it waits on, plus cancel — rather than hiding in a separate outbox.' },
+      { title:'Interrupt should feel heavier than Queue', body:'The mode hint restyles to danger when Interrupt is chosen — the consequence ("stops @agent mid-task") is legible without a tooltip, per your ask.' },
+    ];
+
+    const modeItems = [{ value:'queue', label:'Queue' }, { value:'interrupt', label:'Interrupt' }];
+    const isInterrupt = this.state.mode === 'interrupt';
+    const modeHint = isInterrupt ? 'Stops the agent mid-task and runs this now' : 'Delivers when the agent is idle';
+    const modeHintStyle = 'display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-family:var(--ny-font-mono);'
+      + (isInterrupt ? 'color:var(--ny-danger-text)' : 'color:var(--ny-text-subtle)');
+    const modeDotStyle = 'width:6px;height:6px;border-radius:50%;background:'
+      + (isInterrupt ? 'var(--ny-danger)' : 'var(--ny-text-subtle)');
+
+    return {
+      theme: this.state.theme,
+      toggleTheme: () => this.setState(s => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
+      agents,
+      toolCalls,
+      notes,
+      turnOpen: this.state.turnOpen,
+      toggleTurn: () => this.setState(s => ({ turnOpen: !s.turnOpen })),
+      chevronStyle: `display:inline-flex;color:var(--ny-text-subtle);transition:transform .15s;transform:rotate(${this.state.turnOpen ? 90 : 0}deg)`,
+      artifactOpen: this.state.artifactOpen,
+      toggleArtifact: () => this.setState(s => ({ artifactOpen: !s.artifactOpen })),
+      artifactLabel: this.state.artifactOpen ? 'collapse' : 'open full pane',
+      artifactPreviewStyle: `height:${this.state.artifactOpen ? 300 : 150}px;transition:height .2s`,
+      mode: this.state.mode,
+      setMode: (v) => this.setState({ mode: v }),
+      modeItems, modeHint, modeHintStyle, modeDotStyle,
+      mentionOpen: this.state.mentionOpen,
+      composer: this.state.composer,
+      onCompose: (e) => {
+        const v = e.target.value;
+        this.setState({ composer: v, mentionOpen: /(^|\s)@[\w-]*$/.test(v) });
+      },
+      dispatchPending: !auto && this.state.dispatch === 'pending',
+      dispatchApproved: !auto && this.state.dispatch === 'approved',
+      dispatchDenied: !auto && this.state.dispatch === 'denied',
+      dispatchAuto: auto,
+      dispatchIcon: dispatchIcon,
+      dispatchIconStyle: 'width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--ny-' + dTone + '-subtle);color:var(--ny-' + dTone + '-text)' + (auto ? '' : ';animation:nyPulse 2.4s ease-in-out infinite'),
+      dispatchCardStyle: 'flex:1;min-width:0;overflow:hidden;border-radius:12px;border:1px solid var(--ny-' + dTone + '-border);background:var(--ny-' + dTone + '-subtle)',
+      dispatchEyebrow: auto ? 'Auto-approved · agent dispatch' : 'Approval required · agent dispatch',
+      dispatchEyebrowStyle: 'font-size:10px;font-family:var(--ny-font-mono);letter-spacing:.05em;text-transform:uppercase;font-weight:700;color:var(--ny-' + dTone + '-text)',
+      approve: () => this.setState({ dispatch: 'approved' }),
+      deny: () => this.setState({ dispatch: 'denied' }),
+      expiry: '4m 12s',
+      notesOpen: this.state.notesOpen,
+      toggleNotes: () => this.setState(s => ({ notesOpen: !s.notesOpen })),
+      newChannelOpen: this.state.newChannelOpen,
+      newChannel: () => this.setState({ newChannelOpen: true }),
+      closeChannel: () => this.setState({ newChannelOpen: false }),
+      goIndex: () => { window.location.href = 'Index.dc.html'; },
+      goCreate: () => { window.location.href = 'Create Agent.dc.html'; },
+      goSettings: () => { window.location.href = 'Settings.dc.html'; },
+      autoApprove: auto,
+      toggleAuto: () => this.setState(s => ({ autoApprove: !s.autoApprove })),
+      channelMenuOpen: this.state.channelMenuOpen,
+      toggleChannelMenu: () => this.setState(s => ({ channelMenuOpen: !s.channelMenuOpen })),
+      closeChannelMenu: () => this.setState({ channelMenuOpen: false }),
+      menuYoloStyle: 'padding:12px 13px;transition:background .15s' + (auto ? ';background:var(--ny-warning-subtle)' : ''),
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,17 +1,17 @@
 import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { Code, Eye, Trash2, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Code, Eye, Trash2 } from "lucide-react";
+import { Button, Dialog, Spinner, Text } from "@notyet.im/ui";
 import { timeAgo } from "@/lib/time";
 import { getHighlighter } from "@/lib/shiki";
 
 interface ResultViewerProps {
-  sessionId: string;
+  agentId: string;
   updatedAt?: string | Date;
   onDelete?: () => void;
 }
 
-export function ResultViewer({ sessionId, updatedAt, onDelete }: ResultViewerProps) {
+export function ResultViewer({ agentId, updatedAt, onDelete }: ResultViewerProps) {
   const { t } = useTranslation();
   const [showSource, setShowSource] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -19,7 +19,7 @@ export function ResultViewer({ sessionId, updatedAt, onDelete }: ResultViewerPro
   const [highlightedHtml, setHighlightedHtml] = useState<string | null>(null);
   const [loadingSource, setLoadingSource] = useState(false);
 
-  const resultUrl = `/api/sessions/${sessionId}/results/latest`;
+  const resultUrl = `/api/agents/${agentId}/results/latest`;
   const stableFallback = useRef(Date.now());
   const cacheBuster = updatedAt ? new Date(updatedAt).getTime() : stableFallback.current;
 
@@ -76,74 +76,119 @@ export function ResultViewer({ sessionId, updatedAt, onDelete }: ResultViewerPro
   }, [showSource, resultUrl, sourceHtml]);
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+      <div
+        style={{
+          flex: "none",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "6px 12px",
+          borderBottom: "1px solid var(--ny-border)",
+        }}
+      >
         {updatedAt && (
-          <span className="text-xs text-muted-foreground">
+          <Text size="xs" tone="subtle">
             {t("result.submitted", { when: timeAgo(updatedAt) })}
-          </span>
+          </Text>
         )}
-        <div className="ml-auto flex items-center gap-1">
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
           <Button
-            variant={showSource ? "default" : "outline"}
-            size="xs"
+            variant={showSource ? "primary" : "secondary"}
+            size="sm"
             onClick={() => setShowSource(!showSource)}
+            iconStart={showSource ? <Code size={13} /> : <Eye size={13} />}
           >
-            {showSource ? (
-              <>
-                <Code className="size-3" />
-                {t("result.source")}
-              </>
-            ) : (
-              <>
-                <Eye className="size-3" />
-                {t("result.preview")}
-              </>
-            )}
+            {showSource ? t("result.source") : t("result.preview")}
           </Button>
           {onDelete && (
             <Button
-              variant="destructive"
-              size="xs"
-              onClick={() => {
-                if (confirmDelete) {
-                  onDelete();
-                  setConfirmDelete(false);
-                } else {
-                  setConfirmDelete(true);
-                  setTimeout(() => setConfirmDelete(false), 3000);
-                }
-              }}
+              iconOnly
+              label={t("result.delete")}
+              variant="danger"
+              size="sm"
+              onClick={() => setConfirmDelete(true)}
             >
-              <Trash2 className="size-3" />
-              {confirmDelete && t("result.confirmDelete")}
+              <Trash2 size={13} />
             </Button>
           )}
         </div>
       </div>
+
       {showSource ? (
         loadingSource && !highlightedHtml && !sourceHtml ? (
-          <div className="flex flex-1 items-center justify-center">
-            <Loader2 className="size-4 animate-spin text-muted-foreground" />
+          <div style={{ flex: 1, display: "grid", placeItems: "center" }}>
+            <Spinner label={t("common.loading")} />
           </div>
         ) : highlightedHtml ? (
           <div
-            className="flex-1 overflow-auto"
+            className="bh-scroll line-numbers"
+            style={{ flex: 1, minHeight: 0, overflow: "auto" }}
             dangerouslySetInnerHTML={{ __html: highlightedHtml }}
           />
         ) : (
-          <pre className="flex-1 overflow-auto p-3 text-xs leading-relaxed text-foreground">
+          <pre
+            className="bh-scroll"
+            style={{
+              flex: 1,
+              minHeight: 0,
+              overflow: "auto",
+              margin: 0,
+              padding: 12,
+              fontFamily: "var(--ny-font-mono)",
+              fontSize: 12,
+              lineHeight: 1.6,
+              color: "var(--ny-text)",
+            }}
+          >
             {sourceHtml}
           </pre>
         )
       ) : (
+        /* The artifact is agent-authored HTML: it renders in a sandboxed frame
+         * on a white ground regardless of theme, since it carries no `--ny-*`
+         * tokens of its own and would otherwise be unreadable in dark mode.
+         *
+         * `allow-scripts` WITHOUT `allow-same-origin`, and the pair is the
+         * whole point. Granting both together lets the framed document call
+         * `parent.document`, read this origin's storage, and issue same-origin
+         * requests — which is to say it is not sandboxed at all, against
+         * content this project defines as untrusted and model-authored. The
+         * document needs an opaque origin, and omitting `allow-same-origin` is
+         * what gives it one; scripts still run. Nothing here depends on
+         * same-origin: the "Source" view fetches through the parent, which a
+         * frame's sandbox does not constrain. */
         <iframe
           src={`${resultUrl}?t=${cacheBuster}`}
-          sandbox="allow-scripts allow-same-origin"
-          className="flex-1 border-0 bg-white"
-          title="Session Result"
+          sandbox="allow-scripts"
+          style={{ flex: 1, minHeight: 0, border: 0, background: "#fff" }}
+          title="Agent result"
         />
       )}
+
+      <Dialog
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        title={t("result.delete")}
+        description={t("result.confirmDelete")}
+        size="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setConfirmDelete(false)}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => {
+                setConfirmDelete(false);
+                onDelete?.();
+              }}
+            >
+              {t("common.delete")}
+            </Button>
+          </>
+        }
+      />
     </div>
   );
 }

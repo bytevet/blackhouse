@@ -122,9 +122,9 @@ export async function getContainerEndpoint(
   if (hit && hit.expires > Date.now()) return hit.endpoint;
 
   const [codingSession] = await db
-    .select({ containerId: schema.codingSessions.containerId })
-    .from(schema.codingSessions)
-    .where(eq(schema.codingSessions.id, sessionId))
+    .select({ containerId: schema.agents.containerId })
+    .from(schema.agents)
+    .where(eq(schema.agents.id, sessionId))
     .limit(1);
 
   if (!codingSession || !codingSession.containerId) {

@@ -4,45 +4,91 @@
 [![Docker](https://github.com/bytevet/blackhouse/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/bytevet/blackhouse/actions/workflows/docker-publish.yml)
 [![Docker Image](https://img.shields.io/badge/ghcr.io-bytevet%2Fblackhouse-blue?logo=docker&logoColor=white)](https://github.com/bytevet/blackhouse/pkgs/container/blackhouse)
 
-Self-hosted control plane for coding agents. Hire a worker, ship it a task, watch it work — each agent runs in its own Docker container with a live terminal, an embedded VS Code IDE, and an embedded browser the agent can drive itself.
+**A Slack-like harness for coding agents.** Persistent named agents — `@scout`, `@reviewer`,
+`@backend` — live as teammates in channels alongside humans. Mention one and the prompt is injected
+into its **live TUI**: a real Claude Code or Codex process running on a PTY inside a sandboxed
+container. You can attach to that terminal and watch it work, or read the transcript a sidecar
+streams back into the channel.
 
-![Roster](docs/screenshots/roster.png)
+Two ideas shape everything else:
 
-A roster of digital workers, each tied to a containerized agent (Claude Code, Antigravity, Codex). Hire, send off-duty, re-spawn, dismiss — same vocabulary you'd use with a real team.
+**The agent is a live process, not a chat completion.** It has a terminal you can take over, a
+filesystem, an editor, a browser, and a state — idle, busy, or blocked on a prompt. The UI is built
+to make that machine present and inspectable rather than hidden behind a chat metaphor.
 
-![Session](docs/screenshots/session.png)
+**Agents run untrusted, model-authored code.** Isolation is a pluggable container runtime — gVisor
+where the host provides it, hardened `runc` everywhere else — and every place isolation could
+silently degrade is surfaced loudly rather than assumed away.
 
-Inside a session: live agent terminal on the left, embedded IDE / Result / Browser tabs on the right. The browser pane is a real Chromium running inside the container — the agent's `$BROWSER` shim navigates it, you watch it stream back as H.264 over a single binary WebSocket.
+## How it works
+
+```
+  #backend  ──  @scout summarise the checkout flow
+                        │
+                        ▼
+              mention parsed ──▶ run created ──▶ bracketed-paste onto the agent's PTY
+                                                              │
+                        ┌─────────────────────────────────────┘
+                        ▼
+              agent CLI works in its container (terminal · IDE · browser)
+                        │
+                        ▼
+              sidecar tails the session log ──▶ transcript in #backend
+```
+
+Agents can mention each other too, but an agent→agent dispatch opens an approval card in the channel
+rather than firing. A channel can opt into auto-approve; even then the card is still written, because
+"what did these agents ask each other to do" has to stay answerable afterwards.
 
 ## Features
 
-- **Three agent presets out of the box** — Claude Code, Antigravity, Codex. Each ships its own Dockerfile, entry command, credential volumes, and skill installer.
-- **Live terminal** — xterm.js with WebGL rendering, binary WebSocket protocol, multi-tab broadcast, 256 KB scrollback replay on reconnect.
-- **Embedded IDE** — A full code-server (VS Code) running inside the container, proxied as an iframe with `Content-Security-Policy: frame-ancestors 'self'`. File tree, integrated terminal, extensions — survives tab switches without reloading.
-- **Embedded browser** — Each container also runs a headless Chromium under Playwright. CDP screencast → libx264 → binary WebSocket → WebCodecs `VideoDecoder` on a `<canvas>`. Input (mouse, keyboard, wheel, contextmenu) round-trips as binary opcodes over the same socket. The agent's `$BROWSER` shim navigates this pane, so `npm`, `gh`, `vite open` all just work from inside the container.
-- **Skills system** — Agents install skills at boot via `npx skills add` from `.well-known/agent-skills/`. Ships a default `blackhouse` skill (`browser.sh`, `submit-result.sh`, `update-title.sh`).
-- **Templates** — Reusable system prompts + git requirements. Public + private scopes.
-- **Result viewer** — Agents POST rich HTML results via token auth; renders in a sandboxed iframe.
-- **i18n** — English + Simplified Chinese, language switcher in the sidebar, `Intl.RelativeTimeFormat`-backed date formatting.
-- **Role-based access** — Admin and user roles with per-route guards via Better Auth.
-- **Type-safe API** — Hono RPC client with end-to-end type inference; e2e tests probe the binary WS contract directly.
-- **Dark / light theme** — Persistent across reloads.
-- **Responsive** — Desktop and mobile layouts with resizable, mountable panels (browser/IDE state survives tab switches).
+- **Channels, not sessions** — Humans and agents share one transcript. `@mention` autocomplete shows
+  each agent's live status, so you can see one is busy before you send.
+- **Prompt injection into a live TUI** — Bracketed-paste onto the agent's stdin, chunked and timed
+  per CLI. Choose **queue** (deliver when idle) or **interrupt** (stop the current turn) per message.
+- **Readable transcripts** — A sidecar tails Claude Code's session JSONL and posts structured events.
+  Prose reads as conversation; tool calls collapse into one summary row per turn that expands to
+  `◇ Read src/db/schema.ts · 340 ln`. CLIs without a structured log fall back to a server-side PTY
+  scraper, so a BYO agent gets a transcript with nothing installed in its container.
+- **Pluggable sandbox runtimes** — `runsc` (gVisor), hardened `runc`, and a documented Kata stub
+  behind one driver interface. The UI always shows which runtime _actually_ ran, and flags a fallback
+  loudly: believing you have isolation you don't is the failure mode worth being noisy about.
+- **Per-agent network egress** — `none`, `allowlist`, or `open`. Enforcement is topological: agents
+  sit on an internal network with no route out, so all traffic must cross a CONNECT proxy applying a
+  per-agent domain allowlist. Where enforcement can't actually hold, the harness refuses to start the
+  agent rather than pretending.
+- **Live terminal** — xterm.js, WebGL, binary WebSocket, multi-tab broadcast, 256 KB scrollback
+  replay. One server-owned attach stream per agent with a write mutex, so injected prompts and your
+  keystrokes can't corrupt each other.
+- **Embedded IDE** — code-server inside the container, proxied into a resizable split beside the
+  terminal.
+- **Embedded browser** — headless Chromium under Playwright. CDP screencast → libx264 → binary
+  WebSocket → WebCodecs `VideoDecoder`. The agent's `$BROWSER` shim drives the same pane, so `gh`,
+  `npm docs` and dev-server "open in browser" prompts all land somewhere you can see.
+- **Blueprints** — Reusable agent definitions: CLI, image, system prompt, skills, MCP config, sandbox
+  runtime, egress defaults, resources.
+- **Budgets and schedules** — Per-agent daily cap; hitting it _pauses_ the agent (container and
+  terminal stay attachable, new runs refused) rather than killing it. Cron-shaped schedules fire runs
+  into a channel.
+- **Skills** — Agents install channel-native scripts at boot: post, mention, read, publish an
+  artifact, set a status line, drive the browser.
+- **i18n** — English + Simplified Chinese, with `t()` keys type-checked against the locale file.
+- **Dark / light** — Both first-class, persisted.
 
 ## Tech Stack
 
-- **Server** — [Hono](https://hono.dev) (REST + WS), [@hono/node-ws](https://hono.dev/docs/helpers/websocket)
-- **Client** — [React 19](https://react.dev) + [React Router v7](https://reactrouter.com) + [hono/client](https://hono.dev/docs/guides/rpc) type-safe RPC
-- **UI** — [shadcn/ui](https://ui.shadcn.com) on [base-ui](https://base-ui.com) primitives, [Tailwind CSS v4](https://tailwindcss.com)
+- **Server** — [Hono](https://hono.dev) (REST + WS + SSE), [@hono/node-ws](https://hono.dev/docs/helpers/websocket)
+- **Client** — [React 19](https://react.dev) + [React Router v7](https://reactrouter.com)
+- **UI** — [NotYet UI](https://github.com/notyet-im/ui) with `--ny-*` design tokens
 - **Database** — [PostgreSQL](https://www.postgresql.org) + [Drizzle ORM](https://orm.drizzle.team)
 - **Auth** — [Better Auth](https://www.better-auth.com) (username/password, admin plugin, optional GitHub OAuth)
-- **Containers** — [dockerode](https://github.com/apocas/dockerode) — Docker + Podman socket compatible
+- **Containers** — [dockerode](https://github.com/apocas/dockerode) over `runc` / `runsc` / Kata — Docker + Podman socket compatible
 - **Terminal** — [xterm.js](https://xtermjs.org) with WebGL renderer
 - **IDE in browser** — [code-server](https://github.com/coder/code-server)
-- **Browser in browser** — [Playwright](https://playwright.dev) + headless Chromium + ffmpeg (libx264 zerolatency) + [WebCodecs](https://developer.mozilla.org/en-US/docs/Web/API/WebCodecs_API) `VideoDecoder`
+- **Browser in browser** — [Playwright](https://playwright.dev) + headless Chromium + ffmpeg (libx264 zerolatency) + [WebCodecs](https://developer.mozilla.org/en-US/docs/Web/API/WebCodecs_API)
 - **i18n** — [i18next](https://www.i18next.com) + [react-i18next](https://react.i18next.com)
 - **Build** — [Vite](https://vite.dev) (client), [tsx](https://tsx.is) (server)
-- **Testing** — [Vitest](https://vitest.dev) (unit, 177 tests) + [Playwright](https://playwright.dev) (e2e, 39 tests including docker-gated suite)
+- **Testing** — [Vitest](https://vitest.dev) (unit) + [Playwright](https://playwright.dev) (e2e)
 
 ## Quick Start (Docker Compose)
 
@@ -72,19 +118,30 @@ docker compose up -d
 
 ### Build agent images
 
-Sessions can't spawn until at least one agent preset has a built image:
+Agents can't start until at least one blueprint has a built image:
 
-1. **Settings → Agent Configs**
-2. Click **Build** next to the preset you want
+1. **Settings → Blueprints**
+2. Click **Build** next to the blueprint you want
 3. Watch the build log; first build downloads Chromium, code-server, and Node, so plan for ~5–10 minutes and ~3 GB per preset
 
 Heads-up: building all three presets concurrently can pressure Podman's default VM memory cap (3.8 GB). Build one at a time, or bump the cap (`podman machine set --memory 8192 && podman machine start`).
 
-### Hire a worker
+### Create an agent and talk to it
 
-1. **Dashboard** → **Hire Worker**
-2. Pick an agent, optionally choose a template + git repo
-3. The session page opens with terminal connected; click the right-edge panel to reveal IDE / Browser / Result tabs
+1. **Agents → New agent**
+2. Pick a blueprint, give it a `@handle`, and choose its repo, sandbox runtime and egress policy
+3. Add it to a channel, then post `@handle do something`
+4. Open the agent's **Terminal** tab to watch the prompt land in its live TUI
+
+### Sandbox runtimes
+
+gVisor (`runsc`) is used automatically where the host has it registered, and `runc` everywhere else —
+including macOS and Podman, where `runsc` does not exist. **Settings → Sandbox runtimes** shows what
+this host actually supports, and an agent whose requested runtime fell back says so on its header.
+
+To install gVisor on a Linux host, see the
+[gVisor docs](https://gvisor.dev/docs/user_guide/install/); register it as a Docker runtime named
+`runsc`. Kata is a documented stub — the driver probes for it and refuses rather than pretending.
 
 ## Local Development
 
@@ -128,7 +185,7 @@ npx playwright test    # Non-docker e2e (24 tests, ~20s)
 E2E_DOCKER=1 npx playwright test  # Full suite including container-gated tests (39 tests, ~1.7m)
 npm run db:generate    # New migration from schema diff
 npm run db:push        # Push schema directly (dev only)
-npm run db:seed        # Seed admin user + agent presets
+npm run db:seed        # Seed admin user, blueprints, #general
 npm run db:studio      # Drizzle Studio
 ```
 
@@ -147,45 +204,48 @@ The `E2E_DOCKER` suite hires real agent containers and exercises the IDE + brows
 
 ```
 server/                    # Hono API server
-├── index.ts               # Mounts routes, serves SPA, runs migrations + seed
-├── api/                   # REST handlers (chained for hono/client RPC inference)
-│   ├── auth.ts            # Better Auth mount
-│   ├── sessions.ts        # Session CRUD + Docker lifecycle
-│   ├── templates.ts       # Template CRUD
-│   ├── settings.ts        # Agent configs, Docker, users, profile, volumes
-│   ├── files.ts           # File explorer + viewer
-│   ├── result.ts          # Agent result/title submission (token auth)
-│   └── skills.ts          # .well-known/agent-skills endpoint
-├── ws/
-│   ├── terminal.ts        # Binary WS terminal (0x00 data / 0x01 resize)
-│   └── browser.ts         # Browser-pane WS proxy with upstream-open queue + flush
-├── proxy/ide.ts           # code-server HTTP + WS proxy with CSP frame-ancestors
-├── middleware/auth.ts     # Auth + admin Hono middleware
-├── db/                    # Drizzle schema, connection, migrations, seed
-└── lib/                   # Docker client, Better Auth, pagination, ws-binary
+├── index.ts               # Mounts routes, runs migrations + seed, probes runtimes, starts jobs
+├── api/
+│   ├── agents.ts          # Agent CRUD + lifecycle + the raw inject endpoint
+│   ├── channels.ts        # Channels, keyset transcript, posting + mention routing
+│   ├── stream.ts          # ONE multiplexed SSE connection per tab
+│   ├── dispatches.ts      # Approve / deny agent→agent dispatch
+│   ├── agent-runtime.ts   # Called from INSIDE containers (sidecar + skill scripts)
+│   ├── egress.ts          # Workspace egress rules
+│   ├── settings.ts        # Blueprints, image builds, docker config, users
+│   └── skills.ts          # .well-known/agent-skills
+├── agents/
+│   ├── pty-hub.ts         # Server-owned attach stream, scrollback, write mutex
+│   ├── injector.ts        # Prompt → PTY bytes (bracketed paste, interrupt)
+│   ├── lifecycle.ts       # SandboxSpec construction, start / stop / destroy
+│   ├── events.ts          # Sidecar event contract + transcript projection
+│   ├── pty-scrape.ts      # Degraded transcript for CLIs with no structured log
+│   └── dispatch.ts        # Agent→agent approval state machine
+├── sandbox/               # runc / runsc / kata drivers behind one interface
+├── egress/                # Allowlist matching, rule resolution, proxy management
+├── ws/                    # terminal.ts (0x00 data / 0x01 resize / 0x02 system), browser.ts
+├── proxy/ide.ts           # code-server HTTP + WS proxy
+└── lib/                   # mentions, stream-bus, scheduler, auth helpers, docker client
 src/                       # React SPA
-├── pages/                 # dashboard, session, templates, settings, login
+├── pages/                 # channel, agent, agents, create-agent, settings/*, login
 ├── components/
-│   ├── browser-viewer.tsx # WebCodecs canvas + binary WS opcode demux
-│   ├── ide-viewer.tsx     # code-server iframe
-│   ├── result-viewer.tsx  # Sandboxed agent result iframe
-│   └── ui/                # shadcn/ui (DO NOT modify)
-├── lib/
-│   ├── browser-input-codec.ts  # Binary WS wire format (opcodes 0x01–0x86)
-│   ├── browser-ws-rpc.ts       # Request/response correlation for WS opcodes
-│   └── api.ts                  # hono/client RPC instance
-└── i18n/                  # en + zh-CN translation tables
+│   ├── channel/           # Transcript, the five message kinds, composer, mention autocomplete
+│   ├── agent/             # Split pane, header, terminal / IDE / browser / artifacts panes
+│   └── browser-viewer.tsx # WebCodecs canvas + binary WS opcode demux
+├── lib/agent-status.ts    # THE status → tone mapping (status and activity are separate signals)
+└── i18n/                  # en + zh-CN, with t() keys type-checked against en.json
 agent/                     # COPY'd into every agent container at image-build time
-├── dockerfiles/           # Per-preset Dockerfile (claude-code / antigravity / codex)
+├── dockerfiles/           # Per-CLI images + a mock image used by tests
+├── entrypoint.sh          # Clones, starts services, execs the agent CLI
+├── sidecar/               # Tails the CLI's session log, POSTs events to the harness
+├── egress-proxy/          # Zero-dependency CONNECT proxy with a per-agent allowlist
 ├── browser-service/       # In-container Playwright + ffmpeg + WS server
-├── entrypoint.sh          # Boots browser-service + code-server + agent CLI
-└── skills/blackhouse/     # Default skill set — browser.sh, submit-result.sh, etc.
-scripts/
-├── smoke-browser-ws.ts    # Node-side wire-format smoke for the browser pane
-└── redact-email.mjs       # One-shot redactor used to prep these screenshots
+└── skills/blackhouse/     # post / mention / read / artifacts / status-line / browser
+design/                    # Hi-fi prototype the UI was built from
+docs/                      # Implementation plan
 tests/
-├── unit/                  # Vitest: codec round-trip, RPC, schema, helpers
-└── e2e/                   # Playwright: session lifecycle, IDE, browser, settings
+├── unit/                  # Vitest: sandbox specs, injection bytes, mentions, allowlist, …
+└── e2e/                   # Playwright: channels, agents, dispatch, settings
 ```
 
 ## Wire format — embedded browser pane
@@ -216,20 +276,23 @@ No REST, no SSE, no JSON-over-WS fallback. The one exception is an in-container 
 
 ## Environment Variables
 
-| Variable                   | Purpose                                                                                                                                                                                                                                                                         | Default                                                                      |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `BETTER_AUTH_SECRET`       | Auth session signing key (**required**)                                                                                                                                                                                                                                         | —                                                                            |
-| `BETTER_AUTH_URL`          | Public URL of the app                                                                                                                                                                                                                                                           | `http://localhost:3000`                                                      |
-| `ADMIN_PASSWORD`           | Initial admin password (random if omitted)                                                                                                                                                                                                                                      | —                                                                            |
-| `POSTGRES_PASSWORD`        | Database password                                                                                                                                                                                                                                                               | `blackhouse`                                                                 |
-| `DATABASE_URL`             | PostgreSQL connection string (local dev)                                                                                                                                                                                                                                        | —                                                                            |
-| `BLACKHOUSE_CONTAINER_URL` | URL agent containers use to reach Blackhouse                                                                                                                                                                                                                                    | `http://host.docker.internal:3000` (dev) / `http://app:3000` (compose)       |
-| `BLACKHOUSE_NETWORK`       | When set, every spawned agent container attaches to this Docker network so the app can reach it by container IP + internal port (bypassing host port mapping). Required when Blackhouse itself runs inside a container — e.g. via `compose.yml`, which sets it to `blackhouse`. | — (unset = local-dev path: agent maps ports to host `127.0.0.1:<ephemeral>`) |
-| `DOCKER_HOST_SOCKET`       | Docker / Podman socket path                                                                                                                                                                                                                                                     | `/var/run/docker.sock`                                                       |
-| `PORT`                     | Host port for the app                                                                                                                                                                                                                                                           | `3000`                                                                       |
-| `GITHUB_CLIENT_ID`         | GitHub OAuth (optional)                                                                                                                                                                                                                                                         | —                                                                            |
-| `GITHUB_CLIENT_SECRET`     | GitHub OAuth (optional)                                                                                                                                                                                                                                                         | —                                                                            |
-| `E2E_DOCKER`               | When set, Playwright suite runs the container-gated tests; caps workers at 2                                                                                                                                                                                                    | —                                                                            |
+| Variable                     | Purpose                                                                                                                                                                                                                                                                           | Default                                                                      |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `BETTER_AUTH_SECRET`         | Auth session signing key (**required**)                                                                                                                                                                                                                                           | —                                                                            |
+| `BETTER_AUTH_URL`            | Public URL of the app                                                                                                                                                                                                                                                             | `http://localhost:3000`                                                      |
+| `ADMIN_PASSWORD`             | Initial admin password (random if omitted)                                                                                                                                                                                                                                        | —                                                                            |
+| `POSTGRES_PASSWORD`          | Database password                                                                                                                                                                                                                                                                 | `blackhouse`                                                                 |
+| `DATABASE_URL`               | PostgreSQL connection string (local dev)                                                                                                                                                                                                                                          | —                                                                            |
+| `BLACKHOUSE_CONTAINER_URL`   | URL agent containers use to reach Blackhouse                                                                                                                                                                                                                                      | `http://host.docker.internal:3000` (dev) / `http://app:3000` (compose)       |
+| `BLACKHOUSE_NETWORK`         | When set, every spawned agent container attaches to this Docker network so the app can reach it by container IP + internal port (bypassing host port mapping). Required when Blackhouse itself runs inside a container — e.g. via `compose.yml`, which sets it to `blackhouse`.   | — (unset = local-dev path: agent maps ports to host `127.0.0.1:<ephemeral>`) |
+| `DOCKER_HOST_SOCKET`         | Docker / Podman socket path                                                                                                                                                                                                                                                       | `/var/run/docker.sock`                                                       |
+| `PORT`                       | Host port for the app                                                                                                                                                                                                                                                             | `3000`                                                                       |
+| `GITHUB_CLIENT_ID`           | GitHub OAuth (optional)                                                                                                                                                                                                                                                           | —                                                                            |
+| `GITHUB_CLIENT_SECRET`       | GitHub OAuth (optional)                                                                                                                                                                                                                                                           | —                                                                            |
+| `E2E_DOCKER`                 | When set, Playwright suite runs the container-gated tests; caps workers at 2                                                                                                                                                                                                      | —                                                                            |
+| `BLACKHOUSE_EGRESS_ENFORCE`  | Force per-agent egress enforcement on or off, overriding the stored setting. Enforcement is **off by default**: where it cannot actually hold (host-mode networking, or a harness URL an internal network can't reach) the harness refuses to start the agent rather than pretend | — (stored setting, default off)                                              |
+| `BLACKHOUSE_MIGRATE_LENIENT` | Warn instead of throwing when a migration fails. Off by default — a half-applied migration on a booting server is the worst failure mode here                                                                                                                                     | —                                                                            |
+| `BLACKHOUSE_DEBUG_SHELL`     | Drop to a shell after the agent CLI exits. Off by default, because a shell on the PTY means an injected prompt runs as a shell command                                                                                                                                            | —                                                                            |
 
 ## License
 

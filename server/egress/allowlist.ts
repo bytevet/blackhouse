@@ -1,0 +1,541 @@
+/**
+ * Egress allowlist matching — the security-critical core of Phase 6.
+ *
+ * This module is deliberately **pure**: no I/O, no Docker, no DB. It is the one
+ * piece of the egress mechanism that decides "may this agent reach this host",
+ * so it is isolated to make it exhaustively unit-testable
+ * (`tests/unit/egress-allowlist.test.ts`).
+ *
+ * ## Mirror
+ *
+ * `agent/egress-proxy/allowlist.mjs` is a hand-port of this file, because the
+ * proxy runs inside a container as a zero-dependency `.mjs` and cannot import
+ * TypeScript. **The two must stay byte-for-byte equivalent in behaviour.** The
+ * unit test imports *both* and runs one shared case table against each, so
+ * drift fails CI rather than silently opening a hole in the proxy.
+ *
+ * ## Rule grammar
+ *
+ * | Rule                | Matches                                                    |
+ * | ------------------- | ---------------------------------------------------------- |
+ * | `example.com`       | exactly `example.com`, on ports 80/443 only                |
+ * | `example.com:8080`  | exactly `example.com`, port 8080 only                      |
+ * | `example.com:*`     | exactly `example.com`, any port                            |
+ * | `.example.com`      | any *subdomain* of `example.com` — NOT the apex            |
+ * | `*.example.com`     | alias for `.example.com`                                   |
+ * | `192.0.2.10`        | that IPv4 literal                                          |
+ * | `[2001:db8::1]`     | that IPv6 literal (brackets optional)                      |
+ * | `*`                 | everything (equivalent to `egress_mode = 'open'`)          |
+ *
+ * ### Why ports 80/443 by default
+ *
+ * This allowlist only ever guards an HTTP forward proxy, so the ports a rule
+ * plausibly means are the two HTTP schemes' defaults. Anything else (an
+ * internal registry on 5000, a staging box on 8443) is unusual enough that it
+ * should be written down. `host:*` is the documented escape hatch.
+ *
+ * ### The two classic bugs, and why they cannot happen here
+ *
+ * - `evil-example.com` must NOT match `.example.com`. Suffix rules compare
+ *   against `"." + base`, so the candidate must have a *label boundary* before
+ *   the base. `"evil-example.com".endsWith(".example.com")` is false.
+ * - `example.com.attacker.net` must NOT match `example.com`. Non-suffix rules
+ *   are exact string equality on the fully normalized host, never `startsWith`
+ *   or `includes`.
+ *
+ * ### Normalization
+ *
+ * Both sides (host and rule) go through {@link normalizeHost}: case folding,
+ * trailing-dot stripping, IDN/punycode folding via WHATWG `URL` (so
+ * `münchen.de` and `xn--mnchen-3ya.de` are the same host), and IPv6 expansion
+ * (so `2001:db8::1` and `2001:0db8:0000:...:0001` are the same address).
+ *
+ * Anything containing `/`, `?`, `#`, `@`, whitespace or control characters is
+ * rejected outright rather than normalized. `new URL("http://evil.com@good.com")`
+ * has hostname `good.com`, and `new URL("http://example.com/x")` has hostname
+ * `example.com` — feeding attacker-controlled text through `URL` without that
+ * pre-filter is how a matcher gets tricked into approving the wrong host.
+ *
+ * ## Fail-closed
+ *
+ * An empty, absent, or entirely-malformed rule set denies everything. Individual
+ * malformed rules are skipped (never throw, never match); a rule set that is
+ * *all* garbage therefore denies. There is no code path in which a parse failure
+ * produces `allowed: true`.
+ */
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+/** Per-agent egress policy mode. Mirrors `agent_blueprints.egress_policy`. */
+export type EgressMode = "none" | "allowlist" | "open";
+
+/** Why a request was denied. `null` when it was allowed. */
+export type DenyReason = "no-rules" | "no-match" | "invalid-host" | "invalid-port" | "mode-none";
+
+export interface MatchResult {
+  allowed: boolean;
+  /** The rule that granted access, verbatim as written. `null` when denied. */
+  rule: string | null;
+  /** Machine-readable denial reason, for the audit log. `null` when allowed. */
+  reason: DenyReason | null;
+}
+
+/** A host split from its port, both normalized. */
+export interface ParsedTarget {
+  /** Normalized host: lowercase, punycode, no trailing dot, IPv6 expanded. */
+  host: string;
+  /** Explicit port, or `null` if the input carried none. */
+  port: number | null;
+  kind: "domain" | "ipv4" | "ipv6";
+}
+
+/** Ports a bare (portless) rule covers. */
+export const DEFAULT_RULE_PORTS: readonly number[] = [80, 443];
+
+// ---------------------------------------------------------------------------
+// Normalization
+// ---------------------------------------------------------------------------
+
+/**
+ * Characters that must never survive into `new URL()`.
+ *
+ * Slash, backslash, question mark, hash and at-sign are the ones that let a
+ * crafted string re-point URL parsing at a different hostname
+ * (`evil.com@good.com`). A colon here means a port that should already have
+ * been split off, so its presence marks a malformed rule such as
+ * `example.com:8080:*` — which must be dropped, not silently read as
+ * "example.com on any port", because that grants strictly more than the
+ * operator wrote. Percent could smuggle an encoded separator, brackets belong
+ * only to the IPv6 branch that returns above this check, and whitespace or
+ * control characters have no business in a host at all.
+ *
+ * The hyphen is deliberately absent: it is a legal host character, and a
+ * hyphen written just before the closing bracket of a character class would
+ * be a literal rather than a range, silently rejecting every hyphenated host.
+ */
+const UNSAFE_HOST_CHARS = /[/\\?#@:%[\]\s\x00-\x1f\x7f]/;
+
+const IPV4_RE = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+
+function normalizeIPv4(input: string): string | null {
+  const m = IPV4_RE.exec(input);
+  if (!m) return null;
+  const octets = m.slice(1, 5).map((o) => Number(o));
+  // Reject leading zeros: "010.0.0.1" is octal in some resolvers and decimal in
+  // others. Ambiguous input is denied rather than guessed at.
+  for (let i = 0; i < 4; i++) {
+    if (m[i + 1].length > 1 && m[i + 1][0] === "0") return null;
+    if (!Number.isInteger(octets[i]) || octets[i] < 0 || octets[i] > 255) return null;
+  }
+  return octets.join(".");
+}
+
+/**
+ * Expand an IPv6 literal to its full 8-group, zero-padded, lowercase form so
+ * that textually different spellings of one address compare equal.
+ * Handles `::` elision, an embedded IPv4 tail, and a `%zone` suffix.
+ */
+export function normalizeIPv6(input: string): string | null {
+  let s = input.toLowerCase();
+  const zone = s.indexOf("%");
+  if (zone !== -1) s = s.slice(0, zone);
+  if (s.length === 0) return null;
+
+  // Fold a trailing dotted-quad (`::ffff:192.0.2.1`) into two hex groups.
+  const v4 = /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(s);
+  if (v4) {
+    const dotted = normalizeIPv4(v4[1]);
+    if (!dotted) return null;
+    const p = dotted.split(".").map(Number);
+    const hi = ((p[0] << 8) | p[1]).toString(16).padStart(4, "0");
+    const lo = ((p[2] << 8) | p[3]).toString(16).padStart(4, "0");
+    s = s.slice(0, v4.index) + hi + ":" + lo;
+  }
+
+  const halves = s.split("::");
+  if (halves.length > 2) return null;
+
+  const head = halves[0].length > 0 ? halves[0].split(":") : [];
+  const tail = halves.length === 2 && halves[1].length > 0 ? halves[1].split(":") : [];
+
+  let groups: string[];
+  if (halves.length === 1) {
+    if (head.length !== 8) return null;
+    groups = head;
+  } else {
+    const fill = 8 - head.length - tail.length;
+    if (fill < 1) return null; // `::` must stand for at least one group
+    groups = [...head, ...new Array<string>(fill).fill("0"), ...tail];
+  }
+
+  const out: string[] = [];
+  for (const g of groups) {
+    if (!/^[0-9a-f]{1,4}$/.test(g)) return null;
+    out.push(g.padStart(4, "0"));
+  }
+  return out.join(":");
+}
+
+/**
+ * Normalize a bare host (no port). Returns `null` for anything unparseable —
+ * callers must treat `null` as "deny".
+ */
+export function normalizeHost(raw: string): ParsedTarget | null {
+  if (typeof raw !== "string") return null;
+  let h = raw.trim();
+  if (h.length === 0) return null;
+
+  // Bracketed IPv6.
+  if (h.startsWith("[")) {
+    if (!h.endsWith("]")) return null;
+    const inner = h.slice(1, -1);
+    const v6 = normalizeIPv6(inner);
+    return v6 ? { host: v6, port: null, kind: "ipv6" } : null;
+  }
+
+  // Bare IPv6 (two or more colons — one colon is host:port).
+  if (h.indexOf(":") !== h.lastIndexOf(":")) {
+    const v6 = normalizeIPv6(h);
+    return v6 ? { host: v6, port: null, kind: "ipv6" } : null;
+  }
+
+  if (UNSAFE_HOST_CHARS.test(h)) return null;
+
+  // Strip the FQDN root dot: `example.com.` and `example.com` are one host.
+  while (h.endsWith(".")) h = h.slice(0, -1);
+  if (h.length === 0) return null;
+  // A leading or doubled dot is a malformed label, not a wildcard — wildcard
+  // stripping happens in `parseRule` before we ever get here.
+  if (h.startsWith(".") || h.includes("..")) return null;
+
+  const v4 = normalizeIPv4(h);
+  if (v4) return { host: v4, port: null, kind: "ipv4" };
+
+  // Everything else is a domain. WHATWG `URL` applies IDNA ToASCII (punycode)
+  // and ASCII case folding. It throws on anything it cannot represent.
+  let hostname: string;
+  try {
+    hostname = new URL("http://" + h).hostname;
+  } catch {
+    return null;
+  }
+  if (hostname.length === 0) return null;
+  // Defence in depth: URL should never hand back a bracketed or dotted form
+  // here given the pre-filter above, but if it does, refuse rather than guess.
+  if (hostname.startsWith("[")) return null;
+  while (hostname.endsWith(".")) hostname = hostname.slice(0, -1);
+  if (hostname.length === 0) return null;
+  return { host: hostname, port: null, kind: "domain" };
+}
+
+/**
+ * Split `host`, `host:port`, `[v6]`, or `[v6]:port` and normalize the host.
+ * `null` means unparseable — deny.
+ */
+export function parseTarget(raw: string): ParsedTarget | null {
+  if (typeof raw !== "string") return null;
+  const s = raw.trim();
+  if (s.length === 0) return null;
+
+  let hostPart = s;
+  let portPart: string | null = null;
+
+  if (s.startsWith("[")) {
+    const close = s.indexOf("]");
+    if (close === -1) return null;
+    hostPart = s.slice(0, close + 1);
+    const rest = s.slice(close + 1);
+    if (rest.length > 0) {
+      if (rest[0] !== ":") return null;
+      portPart = rest.slice(1);
+    }
+  } else {
+    const first = s.indexOf(":");
+    // Exactly one colon means host:port. Two or more means a bare IPv6 literal,
+    // which carries no port.
+    if (first !== -1 && first === s.lastIndexOf(":")) {
+      hostPart = s.slice(0, first);
+      portPart = s.slice(first + 1);
+    }
+  }
+
+  const parsed = normalizeHost(hostPart);
+  if (!parsed) return null;
+
+  if (portPart === null) return parsed;
+  if (!/^\d{1,5}$/.test(portPart)) return null;
+  const port = Number(portPart);
+  if (port < 1 || port > 65535) return null;
+  return { ...parsed, port };
+}
+
+// ---------------------------------------------------------------------------
+// Rules
+// ---------------------------------------------------------------------------
+
+interface ParsedRule {
+  /** The rule exactly as the operator wrote it, for audit output. */
+  raw: string;
+  /** `true` for `.suffix` / `*.suffix` rules. */
+  suffix: boolean;
+  /** `true` for the catch-all `*`. */
+  any: boolean;
+  /** Normalized host (empty when `any`). */
+  host: string;
+  kind: "domain" | "ipv4" | "ipv6" | "any";
+  /** `null` = the default 80/443 set; `"*"` = any port; else a single port. */
+  port: number | "*" | null;
+}
+
+/** Parse one rule string. `null` = malformed; the caller skips it. */
+function parseRule(raw: string): ParsedRule | null {
+  if (typeof raw !== "string") return null;
+  let s = raw.trim();
+  if (s.length === 0) return null;
+  // `#` starts a comment so an allowlist textarea can carry annotations.
+  if (s.startsWith("#")) return null;
+
+  if (s === "*") {
+    return { raw, suffix: false, any: true, host: "", kind: "any", port: "*" };
+  }
+
+  // Pull an explicit port off the end before touching the host, so that `:*`
+  // never reaches `normalizeHost`.
+  let portPart: string | null = null;
+  if (s.endsWith(":*")) {
+    portPart = "*";
+    s = s.slice(0, -2);
+  }
+
+  let suffix = false;
+  if (s.startsWith("*.")) {
+    suffix = true;
+    s = s.slice(2);
+  } else if (s.startsWith(".")) {
+    suffix = true;
+    s = s.slice(1);
+  }
+
+  if (s.length === 0) return null;
+
+  const target = portPart === "*" ? normalizeHost(s) : parseTarget(s);
+  if (!target) return null;
+
+  // A suffix rule over an IP literal is meaningless — there are no subdomains
+  // of an address. Reject rather than silently treat it as exact.
+  if (suffix && target.kind !== "domain") return null;
+  // `.com` or `.io` would allowlist an entire TLD by accident. Require at least
+  // two labels in a suffix rule.
+  if (suffix && !target.host.includes(".")) return null;
+
+  const port: number | "*" | null = portPart === "*" ? "*" : (target.port ?? null);
+
+  return { raw, suffix, any: false, host: target.host, kind: target.kind, port };
+}
+
+function portAllowed(rule: ParsedRule, port: number): boolean {
+  if (rule.port === "*") return true;
+  if (rule.port === null) return DEFAULT_RULE_PORTS.includes(port);
+  return rule.port === port;
+}
+
+// ---------------------------------------------------------------------------
+// Matching
+// ---------------------------------------------------------------------------
+
+/**
+ * Decide whether `host` (optionally `host:port`, or with `port` passed
+ * separately) is permitted by `rules`.
+ *
+ * Fails closed: a missing/empty rule list, an unparseable host, or an
+ * out-of-range port all deny.
+ *
+ * @param host  `example.com`, `example.com:443`, `1.2.3.4`, `[2001:db8::1]:8443`
+ * @param rules the effective allowlist for this agent
+ * @param port  the connection port, when not already part of `host`. When both
+ *              are present, this argument wins.
+ */
+export function matchHost(
+  host: string,
+  rules: readonly string[] | null | undefined,
+  port?: number,
+): MatchResult {
+  const target = parseTarget(host);
+  if (!target) return { allowed: false, rule: null, reason: "invalid-host" };
+
+  let effectivePort: number;
+  if (typeof port === "number") {
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      return { allowed: false, rule: null, reason: "invalid-port" };
+    }
+    effectivePort = port;
+  } else if (target.port !== null) {
+    effectivePort = target.port;
+  } else {
+    // A CONNECT with no port is not a thing, but a plain-HTTP absolute URI with
+    // no port means 80. Defaulting here keeps callers from having to.
+    effectivePort = 80;
+  }
+
+  if (!Array.isArray(rules) || rules.length === 0) {
+    return { allowed: false, rule: null, reason: "no-rules" };
+  }
+
+  let sawValidRule = false;
+  for (const raw of rules) {
+    const rule = parseRule(raw);
+    if (!rule) continue;
+    sawValidRule = true;
+
+    if (rule.any) return { allowed: true, rule: rule.raw, reason: null };
+    if (!portAllowed(rule, effectivePort)) continue;
+
+    if (rule.suffix) {
+      // Label-boundary suffix. `.example.com` matches `a.example.com` and
+      // `a.b.example.com`, but never `example.com` itself and never
+      // `evil-example.com`.
+      if (target.kind !== "domain") continue;
+      if (target.host.endsWith("." + rule.host)) {
+        return { allowed: true, rule: rule.raw, reason: null };
+      }
+      continue;
+    }
+
+    // Exact equality on fully normalized hosts. Never `startsWith`/`includes`:
+    // that is what lets `example.com.attacker.net` through.
+    if (target.host === rule.host && target.kind === rule.kind) {
+      return { allowed: true, rule: rule.raw, reason: null };
+    }
+  }
+
+  return { allowed: false, rule: null, reason: sawValidRule ? "no-match" : "no-rules" };
+}
+
+/**
+ * Mode-aware wrapper. `none` denies unconditionally, `open` allows
+ * unconditionally, `allowlist` defers to {@link matchHost}.
+ *
+ * An unrecognized mode is treated as `allowlist` — the restrictive branch —
+ * so a future enum value that reaches an old proxy cannot mean "open".
+ */
+export function checkEgress(
+  mode: EgressMode | string,
+  host: string,
+  rules: readonly string[] | null | undefined,
+  port?: number,
+): MatchResult {
+  if (mode === "none") return { allowed: false, rule: null, reason: "mode-none" };
+  if (mode === "open") return { allowed: true, rule: "*", reason: null };
+  return matchHost(host, rules, port);
+}
+
+// ---------------------------------------------------------------------------
+// Canonicalization (used for the proxy sharing key)
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize + dedupe + sort a rule list into the canonical form that
+ * `proxy-manager.ts` hashes into a policy key. Two allowlists that differ only
+ * in order, case, punycode spelling, or duplicates must produce the same key so
+ * that the agents share one proxy container instead of two identical ones.
+ *
+ * Malformed rules are dropped here too, so they can never influence the key.
+ */
+export function canonicalizeRules(rules: readonly string[] | null | undefined): string[] {
+  if (!Array.isArray(rules)) return [];
+  const out = new Set<string>();
+  for (const raw of rules) {
+    const rule = parseRule(raw);
+    if (!rule) continue;
+    if (rule.any) {
+      out.add("*");
+      continue;
+    }
+    const host = rule.kind === "ipv6" ? `[${rule.host}]` : rule.host;
+    const prefix = rule.suffix ? "." : "";
+    const port = rule.port === null ? "" : `:${rule.port}`;
+    out.add(`${prefix}${host}${port}`);
+  }
+  return [...out].sort();
+}
+
+/**
+ * Was this rule written as a bare IP literal?
+ *
+ * The proxy's SSRF guard (below) refuses to connect to private address space,
+ * but an operator who allowlists `10.0.5.20` for an internal registry has made
+ * that decision explicitly and deliberately. The caller uses this to decide
+ * whether the guard applies to the rule that granted the request: a *domain*
+ * rule that resolves into private space is a rebinding attack, whereas an IP
+ * rule that is private is simply what it says.
+ */
+export function ruleIsIpLiteral(raw: string): boolean {
+  const rule = parseRule(raw);
+  return rule !== null && !rule.any && (rule.kind === "ipv4" || rule.kind === "ipv6");
+}
+
+// ---------------------------------------------------------------------------
+// SSRF guard
+// ---------------------------------------------------------------------------
+
+/**
+ * Is this a private / loopback / link-local / CGNAT address?
+ *
+ * The proxy is the one container with a route out, and it sits on the harness
+ * bridge network. An allowlisted domain whose DNS answer points at
+ * `169.254.169.254` (cloud metadata), `127.0.0.1`, or the harness's own subnet
+ * would otherwise turn the proxy into a confused deputy — a DNS-rebinding SSRF
+ * straight past the whole internal-network design.
+ *
+ * `proxy.mjs` calls this on `socket.remoteAddress` *after* the TCP connection
+ * is established, which is why there is no TOCTOU window: we test the address
+ * we actually connected to, not the one we resolved a moment earlier.
+ *
+ * The exception, applied by the caller: a rule that is *itself* an IP literal in
+ * a private range is an explicit operator decision (an internal registry), and
+ * is honoured.
+ *
+ * @param addr an IP literal — not a hostname.
+ */
+export function isBlockedAddress(addr: string): boolean {
+  if (typeof addr !== "string" || addr.length === 0) return true;
+  let s = addr.trim().toLowerCase();
+  if (s.startsWith("[") && s.endsWith("]")) s = s.slice(1, -1);
+  const zone = s.indexOf("%");
+  if (zone !== -1) s = s.slice(0, zone);
+
+  // IPv4-mapped IPv6 (`::ffff:10.0.0.1`) must be judged as the IPv4 it wraps.
+  const mapped = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(s);
+  if (mapped) s = mapped[1];
+
+  const v4 = normalizeIPv4(s);
+  if (v4) {
+    const [a, b] = v4.split(".").map(Number);
+    if (a === 0) return true; // "this network"
+    if (a === 10) return true; // RFC1918
+    if (a === 127) return true; // loopback
+    if (a === 169 && b === 254) return true; // link-local + cloud metadata
+    if (a === 172 && b >= 16 && b <= 31) return true; // RFC1918
+    if (a === 192 && b === 168) return true; // RFC1918
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT (RFC6598)
+    if (a === 192 && b === 0) return true; // RFC5736/6890 special-purpose
+    if (a >= 224) return true; // multicast + reserved + broadcast
+    return false;
+  }
+
+  const v6 = normalizeIPv6(s);
+  if (v6) {
+    if (v6 === "0000:0000:0000:0000:0000:0000:0000:0001") return true; // ::1
+    if (v6 === "0000:0000:0000:0000:0000:0000:0000:0000") return true; // ::
+    const head = parseInt(v6.slice(0, 4), 16);
+    if ((head & 0xfe00) === 0xfc00) return true; // fc00::/7 unique-local
+    if ((head & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
+    if ((head & 0xff00) === 0xff00) return true; // ff00::/8 multicast
+    return false;
+  }
+
+  // Not an IP literal at all — we were handed something unexpected. Deny.
+  return true;
+}

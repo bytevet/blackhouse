@@ -3,15 +3,15 @@ import type { createNodeWebSocket } from "@hono/node-ws";
 import WebSocket, { type RawData } from "ws";
 import type { AuthEnv } from "../middleware/auth.js";
 import { authMiddleware } from "../middleware/auth.js";
-import { requireSessionAccess, handleSessionAccessError } from "../lib/session.js";
+import { requireAgentAccess, handleAgentAccessError } from "../lib/agent-access.js";
 import { getContainerEndpoint } from "../lib/docker.js";
 import { rawDataToArrayBuffer } from "../lib/ws-binary.js";
 
 /**
- * IDE proxy mounted at `/api/sessions/:id/ide/*`.
+ * IDE proxy mounted at `/api/agents/:id/ide/*`.
  *
- * - Auth-gates every request via `authMiddleware` + `requireSessionAccess`.
- * - Strips the `/api/sessions/:id/ide` prefix and forwards to code-server on
+ * - Auth-gates every request via `authMiddleware` + `requireAgentAccess`.
+ * - Strips the `/api/agents/:id/ide` prefix and forwards to code-server on
  *   `http://127.0.0.1:<containerHostPort>/...`.
  * - HTTP: full fetch passthrough — preserves status, all headers (including
  *   `set-cookie`), and streams the body. Adds `Content-Security-Policy:
@@ -23,7 +23,7 @@ import { rawDataToArrayBuffer } from "../lib/ws-binary.js";
  * Mounted via `createIdeProxy(upgradeWebSocket)` from `server/index.ts`.
  */
 
-const PREFIX_RE = /^\/api\/sessions\/[^/]+\/ide/;
+const PREFIX_RE = /^\/api\/agents\/[^/]+\/ide/;
 
 // Headers we strip from the inbound request before forwarding to code-server.
 // These are hop-by-hop or break the proxy when forwarded verbatim.
@@ -53,22 +53,22 @@ const STRIP_RES_HEADERS = new Set([
 export function createIdeProxy(
   upgradeWebSocket: ReturnType<typeof createNodeWebSocket>["upgradeWebSocket"],
 ) {
-  const app = new Hono<AuthEnv>().onError(handleSessionAccessError);
+  const app = new Hono<AuthEnv>().onError(handleAgentAccessError);
 
   // Shared auth + ownership guard for everything under :id/ide.
-  app.use("/api/sessions/:id/ide/*", authMiddleware, async (c, next) => {
+  app.use("/api/agents/:id/ide/*", authMiddleware, async (c, next) => {
     const id = c.req.param("id");
-    if (!id) return c.json({ error: "Missing session id" }, 400);
-    await requireSessionAccess(id, c.get("session").user);
+    if (!id) return c.json({ error: "Missing agent id" }, 400);
+    await requireAgentAccess(id, c.get("session").user);
     await next();
   });
 
   // GET: branch between WS upgrade and HTTP proxy. code-server uses GET for
   // both its REST surface and the long-lived WS to the editor server.
   app.get(
-    "/api/sessions/:id/ide/*",
+    "/api/agents/:id/ide/*",
     upgradeWebSocket((c) => {
-      const sessionId = c.req.param("id")!;
+      const agentId = c.req.param("id")!;
       const targetPath = c.req.path.replace(PREFIX_RE, "") || "/";
       const url = new URL(c.req.url);
       const search = url.search;
@@ -79,7 +79,7 @@ export function createIdeProxy(
         async onOpen(_evt, ws) {
           let endpoint: Awaited<ReturnType<typeof getContainerEndpoint>>;
           try {
-            endpoint = await getContainerEndpoint(sessionId, 8443);
+            endpoint = await getContainerEndpoint(agentId, 8443);
           } catch (err) {
             try {
               ws.send(`[IDE unavailable: ${err instanceof Error ? err.message : String(err)}]`);
@@ -147,7 +147,7 @@ export function createIdeProxy(
   );
 
   // All other methods: HTTP proxy.
-  app.all("/api/sessions/:id/ide/*", async (c) => {
+  app.all("/api/agents/:id/ide/*", async (c) => {
     const id = c.req.param("id");
     return await proxyHttp(c, id);
   });
@@ -155,10 +155,10 @@ export function createIdeProxy(
   return app;
 }
 
-async function proxyHttp(c: import("hono").Context, sessionId: string) {
+async function proxyHttp(c: import("hono").Context, agentId: string) {
   let endpoint: Awaited<ReturnType<typeof getContainerEndpoint>>;
   try {
-    endpoint = await getContainerEndpoint(sessionId, 8443);
+    endpoint = await getContainerEndpoint(agentId, 8443);
   } catch (err) {
     return c.json(
       { error: "ide_unavailable", message: err instanceof Error ? err.message : String(err) },

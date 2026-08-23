@@ -20,8 +20,16 @@ import { volumeMountSchema } from "../lib/validation.js";
 // ---------------------------------------------------------------------------
 
 /** Pack a single file (resolved against cwd) into the tar stream. */
-function addFileToTar(pack: tar.Pack, relPath: string, opts?: { mode?: number }): void {
+function addFileToTar(
+  pack: tar.Pack,
+  relPath: string,
+  opts?: { mode?: number; optional?: boolean },
+): void {
   const abs = path.resolve(process.cwd(), relPath);
+  // `optional` is for context files that only some Dockerfiles want, and that
+  // the server image does not necessarily ship. Missing is not an error; the
+  // build fails clearly on the COPY if it turns out one was needed.
+  if (opts?.optional && !fs.existsSync(abs)) return;
   const stat = fs.statSync(abs);
   const buf = fs.readFileSync(abs);
   pack.entry(
@@ -70,6 +78,17 @@ function addDirToTar(pack: tar.Pack, relDir: string, opts?: { skip?: string[] })
   walk(root);
 }
 
+/** Safe projection of an agent for the container listing — never includes `agentToken`. */
+type AgentContainerInfo = {
+  id: string;
+  handle: string;
+  displayName: string;
+  status: string;
+  activity: string;
+  statusLine: string | null;
+  runtimeUsed: string | null;
+};
+
 const app = new Hono<AuthEnv>()
   // ---------------------------------------------------------------------------
   // PUT /api/settings/profile — update profile (requires auth)
@@ -117,43 +136,68 @@ const app = new Hono<AuthEnv>()
   // ---------------------------------------------------------------------------
   // Agent Configs — list requires auth, mutations require admin
   // ---------------------------------------------------------------------------
-  .get("/agent-configs", authMiddleware, async (c) => {
+  .get("/blueprints", authMiddleware, async (c) => {
     const rows = await db
       .select()
-      .from(schema.agentConfigs)
-      .orderBy(desc(schema.agentConfigs.createdAt));
+      .from(schema.agentBlueprints)
+      .orderBy(desc(schema.agentBlueprints.createdAt));
     return c.json(rows);
   })
 
   .post(
-    "/agent-configs",
+    "/blueprints",
     adminMiddleware,
     zValidator(
       "json",
       z.object({
-        preset: z.string(),
-        displayName: z.string(),
+        cli: z.enum(["claude-code", "codex", "antigravity", "custom"]),
+        name: z.string(),
         agentCommand: z.string().optional(),
         envVars: z.array(z.object({ key: z.string(), value: z.string() })).optional(),
         volumeMounts: volumeMountSchema.optional(),
         dockerfileContent: z.string().nullable().optional(),
+        // Egress was settable only in the database, and the service flags did
+        // not exist. Both decide whether an agent can reach the internet at
+        // all, so they belong on the form rather than in psql.
+        egressPolicy: z.enum(["none", "allowlist", "open"]).optional(),
+        egressAllowlist: z.array(z.string().min(1).max(253)).optional(),
+        enableIde: z.boolean().optional(),
+        enableBrowser: z.boolean().optional(),
       }),
     ),
     async (c) => {
       const data = c.req.valid("json");
 
-      const values: Partial<typeof schema.agentConfigs.$inferInsert> = {
-        preset: data.preset,
-        displayName: data.displayName,
-        agentCommand: data.agentCommand ?? null,
-        envVars: data.envVars ?? null,
-        volumeMounts: data.volumeMounts ?? null,
-        dockerfileContent: data.dockerfileContent ?? null,
+      const values: Partial<typeof schema.agentBlueprints.$inferInsert> = {
+        cli: data.cli,
+        name: data.name,
+        // Omitted means "leave alone", not "clear".
+        //
+        // These used to be `?? null`, so a PUT that sent only the fields it
+        // meant to change wiped every field it did not. Demonstrated the hard
+        // way: updating a blueprint's egress policy nulled its `agentCommand`,
+        // and the next agent from it refused to start because the entrypoint
+        // had nothing to exec. An explicit `null` in the payload still clears
+        // the field — `!== undefined` distinguishes the two, where `??` cannot.
+        ...(data.agentCommand !== undefined && { agentCommand: data.agentCommand }),
+        ...(data.envVars !== undefined && { envVars: data.envVars }),
+        ...(data.volumeMounts !== undefined && { volumeMounts: data.volumeMounts }),
+        ...(data.dockerfileContent !== undefined && {
+          dockerfileContent: data.dockerfileContent,
+        }),
+        // `??` not `?? null`: these four have non-null column defaults, and
+        // omitting a field from the payload must leave the stored value alone
+        // rather than reset it. A form that only edits the name should not
+        // silently disable an agent's egress.
+        ...(data.egressPolicy !== undefined && { egressPolicy: data.egressPolicy }),
+        ...(data.egressAllowlist !== undefined && { egressAllowlist: data.egressAllowlist }),
+        ...(data.enableIde !== undefined && { enableIde: data.enableIde }),
+        ...(data.enableBrowser !== undefined && { enableBrowser: data.enableBrowser }),
         updatedAt: new Date(),
       };
 
       const inserted = await db
-        .insert(schema.agentConfigs)
+        .insert(schema.agentBlueprints)
         .values(values as Required<typeof values>)
         .returning();
 
@@ -162,38 +206,63 @@ const app = new Hono<AuthEnv>()
   )
 
   .put(
-    "/agent-configs/:id",
+    "/blueprints/:id",
     adminMiddleware,
     zValidator(
       "json",
       z.object({
-        preset: z.string(),
-        displayName: z.string(),
+        cli: z.enum(["claude-code", "codex", "antigravity", "custom"]),
+        name: z.string(),
         agentCommand: z.string().optional(),
         envVars: z.array(z.object({ key: z.string(), value: z.string() })).optional(),
         volumeMounts: volumeMountSchema.optional(),
         dockerfileContent: z.string().nullable().optional(),
+        // Egress was settable only in the database, and the service flags did
+        // not exist. Both decide whether an agent can reach the internet at
+        // all, so they belong on the form rather than in psql.
+        egressPolicy: z.enum(["none", "allowlist", "open"]).optional(),
+        egressAllowlist: z.array(z.string().min(1).max(253)).optional(),
+        enableIde: z.boolean().optional(),
+        enableBrowser: z.boolean().optional(),
       }),
     ),
     async (c) => {
       const id = c.req.param("id");
       const data = c.req.valid("json");
 
-      const values: Partial<typeof schema.agentConfigs.$inferInsert> = {
-        preset: data.preset,
-        displayName: data.displayName,
-        agentCommand: data.agentCommand ?? null,
-        envVars: data.envVars ?? null,
-        volumeMounts: data.volumeMounts ?? null,
-        dockerfileContent: data.dockerfileContent ?? null,
+      const values: Partial<typeof schema.agentBlueprints.$inferInsert> = {
+        cli: data.cli,
+        name: data.name,
+        // Omitted means "leave alone", not "clear".
+        //
+        // These used to be `?? null`, so a PUT that sent only the fields it
+        // meant to change wiped every field it did not. Demonstrated the hard
+        // way: updating a blueprint's egress policy nulled its `agentCommand`,
+        // and the next agent from it refused to start because the entrypoint
+        // had nothing to exec. An explicit `null` in the payload still clears
+        // the field — `!== undefined` distinguishes the two, where `??` cannot.
+        ...(data.agentCommand !== undefined && { agentCommand: data.agentCommand }),
+        ...(data.envVars !== undefined && { envVars: data.envVars }),
+        ...(data.volumeMounts !== undefined && { volumeMounts: data.volumeMounts }),
+        ...(data.dockerfileContent !== undefined && {
+          dockerfileContent: data.dockerfileContent,
+        }),
+        // `??` not `?? null`: these four have non-null column defaults, and
+        // omitting a field from the payload must leave the stored value alone
+        // rather than reset it. A form that only edits the name should not
+        // silently disable an agent's egress.
+        ...(data.egressPolicy !== undefined && { egressPolicy: data.egressPolicy }),
+        ...(data.egressAllowlist !== undefined && { egressAllowlist: data.egressAllowlist }),
+        ...(data.enableIde !== undefined && { enableIde: data.enableIde }),
+        ...(data.enableBrowser !== undefined && { enableBrowser: data.enableBrowser }),
         updatedAt: new Date(),
       };
 
       // Check if dockerfileContent changed - if so, reset build status
       const existing = await db
         .select()
-        .from(schema.agentConfigs)
-        .where(eq(schema.agentConfigs.id, id))
+        .from(schema.agentBlueprints)
+        .where(eq(schema.agentBlueprints.id, id))
         .limit(1);
 
       if (
@@ -204,9 +273,9 @@ const app = new Hono<AuthEnv>()
       }
 
       const updated = await db
-        .update(schema.agentConfigs)
+        .update(schema.agentBlueprints)
         .set(values)
-        .where(eq(schema.agentConfigs.id, id))
+        .where(eq(schema.agentBlueprints.id, id))
         .returning();
 
       if (updated.length === 0) return c.json({ error: "Agent config not found" }, 404);
@@ -214,22 +283,22 @@ const app = new Hono<AuthEnv>()
     },
   )
 
-  .delete("/agent-configs/:id", adminMiddleware, async (c) => {
+  .delete("/blueprints/:id", adminMiddleware, async (c) => {
     const id = c.req.param("id");
-    await db.delete(schema.agentConfigs).where(eq(schema.agentConfigs.id, id));
+    await db.delete(schema.agentBlueprints).where(eq(schema.agentBlueprints.id, id));
     return c.json({ success: true });
   })
 
   // ---------------------------------------------------------------------------
   // Build Agent Image (admin only)
   // ---------------------------------------------------------------------------
-  .post("/agent-configs/:id/build", adminMiddleware, async (c) => {
+  .post("/blueprints/:id/build", adminMiddleware, async (c) => {
     const configId = c.req.param("id");
 
     const rows = await db
       .select()
-      .from(schema.agentConfigs)
-      .where(eq(schema.agentConfigs.id, configId))
+      .from(schema.agentBlueprints)
+      .where(eq(schema.agentBlueprints.id, configId))
       .limit(1);
 
     if (rows.length === 0) return c.json({ error: "Agent config not found" }, 404);
@@ -241,11 +310,11 @@ const app = new Hono<AuthEnv>()
 
     // Mark as building
     await db
-      .update(schema.agentConfigs)
+      .update(schema.agentBlueprints)
       .set({ imageBuildStatus: "building", imageBuildLog: null, updatedAt: new Date() })
-      .where(eq(schema.agentConfigs.id, configId));
+      .where(eq(schema.agentBlueprints.id, configId));
 
-    const preset = agentConfig.preset;
+    const preset = agentConfig.cli;
     const dockerfileContent = agentConfig.dockerfileContent;
 
     // Start async build (don't await)
@@ -279,17 +348,35 @@ const app = new Hono<AuthEnv>()
         pack.entry({ name: "Dockerfile" }, dockerfile);
         pack.entry({ name: "agent/entrypoint.sh" }, entrypointScript);
 
-        // The shared Dockerfile block added in v-next (#13) references these
-        // additional build-context paths:
-        //   agent/browser-service/        (recursive — package.json + service.mjs)
-        //   agent/skills/blackhouse/browser-shim.sh
-        // Pack them so the Docker daemon can resolve the COPY directives.
-        // Skip node_modules — the Dockerfile re-runs `npm install --omit=dev`
-        // inside the image, and any host-installed modules would bloat the
-        // context and risk shipping host-platform native binaries.
-        addDirToTar(pack, "agent/browser-service", { skip: ["node_modules"] });
-        addFileToTar(pack, "agent/skills/blackhouse/browser-shim.sh", { mode: 0o755 });
-        addDirToTar(pack, "agent/code-server-config");
+        /**
+         * Pack the whole `agent/` tree, not a list of the paths we think the
+         * Dockerfile wants.
+         *
+         * This used to name four paths, and the comment explaining them cited
+         * the change that added them. It then went stale: the harness refactor
+         * introduced `agent/sidecar/` and `agent/egress-proxy/` and rewrote
+         * `agent/skills/blackhouse/`, and none of that reached this list. The
+         * blueprints kept building against a context missing the files their
+         * Dockerfiles copy, and failed with
+         *
+         *     COPY failed: ... stat agent/sidecar: file does not exist
+         *
+         * A hand-maintained mirror of another file's COPY directives has to be
+         * updated by whoever edits those directives, in a file they have no
+         * reason to open. Packing the directory removes the mirror. It costs a
+         * little context size, which is cheap next to a build that fails for a
+         * reason nobody can see from the Dockerfile.
+         *
+         * `node_modules` is still skipped: the Dockerfile re-runs
+         * `npm install --omit=dev` inside the image, and host-installed modules
+         * would bloat the upload and risk shipping host-platform binaries.
+         */
+        addDirToTar(pack, "agent", { skip: ["node_modules"] });
+
+        // The mock image builds the fake TUI from `tests/`, which is outside
+        // `agent/` and excluded from the server image by `.dockerignore`, so it
+        // is only packed when it is actually there.
+        addFileToTar(pack, "tests/fixtures/mock-agent-tui.sh", { mode: 0o755, optional: true });
 
         pack.finalize();
 
@@ -316,24 +403,31 @@ const app = new Hono<AuthEnv>()
         });
 
         await db
-          .update(schema.agentConfigs)
+          .update(schema.agentBlueprints)
           .set({
             imageBuildStatus: "built",
             lastBuiltAt: new Date(),
             imageBuildLog: output,
+            // Record what was built. The tag was computed above and then
+            // dropped, so a blueprint could report `built` while `image` stayed
+            // null — and `buildAgentSpec` resolves an agent's image as
+            // `agent.containerImage || blueprint.image || ""`, so every agent
+            // spawned from it failed on an empty image. A successful build that
+            // nothing can be launched from is not a successful build.
+            image: tag,
             updatedAt: new Date(),
           })
-          .where(eq(schema.agentConfigs.id, configId));
+          .where(eq(schema.agentBlueprints.id, configId));
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : String(err);
         await db
-          .update(schema.agentConfigs)
+          .update(schema.agentBlueprints)
           .set({
             imageBuildStatus: "failed",
             imageBuildLog: errorMessage,
             updatedAt: new Date(),
           })
-          .where(eq(schema.agentConfigs.id, configId));
+          .where(eq(schema.agentBlueprints.id, configId));
       }
     })();
 
@@ -343,17 +437,17 @@ const app = new Hono<AuthEnv>()
   // ---------------------------------------------------------------------------
   // Get Agent Build Status
   // ---------------------------------------------------------------------------
-  .get("/agent-configs/:id/build-status", authMiddleware, async (c) => {
+  .get("/blueprints/:id/build-status", authMiddleware, async (c) => {
     const id = c.req.param("id");
 
     const rows = await db
       .select({
-        imageBuildStatus: schema.agentConfigs.imageBuildStatus,
-        imageBuildLog: schema.agentConfigs.imageBuildLog,
-        lastBuiltAt: schema.agentConfigs.lastBuiltAt,
+        imageBuildStatus: schema.agentBlueprints.imageBuildStatus,
+        imageBuildLog: schema.agentBlueprints.imageBuildLog,
+        lastBuiltAt: schema.agentBlueprints.lastBuiltAt,
       })
-      .from(schema.agentConfigs)
-      .where(eq(schema.agentConfigs.id, id))
+      .from(schema.agentBlueprints)
+      .where(eq(schema.agentBlueprints.id, id))
       .limit(1);
 
     if (rows.length === 0) return c.json({ error: "Agent config not found" }, 404);
@@ -414,7 +508,24 @@ const app = new Hono<AuthEnv>()
   // ---------------------------------------------------------------------------
   .get("/docker", adminMiddleware, async (c) => {
     const rows = await db.select().from(schema.dockerConfigs).limit(1);
-    return c.json(rows[0] ?? null);
+    const row = rows[0];
+    if (!row) return c.json(null);
+
+    /**
+     * The client key never goes back out.
+     *
+     * A Docker daemon is root on its host, so `tlsKey` is the most dangerous
+     * value this app stores, and it was being sent to every admin's browser on
+     * every settings load — where it lands in memory, in devtools, and in any
+     * response cache along the way. Nothing rendered it; it was returned only
+     * because the row was returned whole.
+     *
+     * `hasTlsKey` is what the UI actually needs: whether one is configured.
+     * Writing a new key still works, because the PUT preserves what it is not
+     * given rather than requiring the old value to be echoed back.
+     */
+    const { tlsKey, ...safe } = row;
+    return c.json({ ...safe, hasTlsKey: tlsKey !== null && tlsKey !== "" });
   })
 
   .put(
@@ -429,19 +540,42 @@ const app = new Hono<AuthEnv>()
         tlsCa: z.string().optional(),
         tlsCert: z.string().optional(),
         tlsKey: z.string().optional(),
+        /**
+         * The switch that makes an egress policy binding rather than advisory.
+         *
+         * It has always been a column with no way to set it, so a blueprint
+         * could say `allowlist` while agents ran unrestricted — and, more
+         * sharply, the CONNECT proxy never stood up. Under gVisor that proxy is
+         * also the only working name resolution an agent has, so leaving this
+         * unsettable left agents unable to reach anything at all.
+         */
+        egressEnforce: z.boolean().optional(),
       }),
     ),
     async (c) => {
       const data = c.req.valid("json");
       const existing = await db.select().from(schema.dockerConfigs).limit(1);
 
+      /**
+       * Omitted means "leave alone", and `egressEnforce` is written.
+       *
+       * Both halves were wrong. `?? null` meant a payload that carried only the
+       * field it wanted to change silently cleared the daemon host and its TLS
+       * material — a settings page that saved one switch could take the
+       * workspace off its Docker daemon. And `egressEnforce` was validated,
+       * accepted, and then dropped on the floor: the write returned 200 while
+       * the column stayed false, so enforcement could not be turned on at all.
+       *
+       * An explicit `null` still clears a field. Only absence is preserving.
+       */
       const values = {
-        socketPath: data.socketPath ?? "/var/run/docker.sock",
-        host: data.host ?? null,
-        port: data.port ?? null,
-        tlsCa: data.tlsCa ?? null,
-        tlsCert: data.tlsCert ?? null,
-        tlsKey: data.tlsKey ?? null,
+        ...(data.socketPath !== undefined && { socketPath: data.socketPath }),
+        ...(data.host !== undefined && { host: data.host }),
+        ...(data.port !== undefined && { port: data.port }),
+        ...(data.tlsCa !== undefined && { tlsCa: data.tlsCa }),
+        ...(data.tlsCert !== undefined && { tlsCert: data.tlsCert }),
+        ...(data.tlsKey !== undefined && { tlsKey: data.tlsKey }),
+        ...(data.egressEnforce !== undefined && { egressEnforce: data.egressEnforce }),
         updatedAt: new Date(),
       };
 
@@ -456,7 +590,7 @@ const app = new Hono<AuthEnv>()
       } else {
         const inserted = await db
           .insert(schema.dockerConfigs)
-          .values({ id: 1, ...values })
+          .values({ id: 1, socketPath: "/var/run/docker.sock", ...values })
           .returning();
         result = inserted[0];
       }
@@ -513,34 +647,45 @@ const app = new Hono<AuthEnv>()
           filters: { label: ["blackhouse.managed=true"] },
         });
 
-        // Enrich with session info from DB
-        const sessionIds = containers
-          .map((ct) => ct.Labels?.["blackhouse.session_id"])
+        // Enrich with agent info from DB
+        const agentIds = containers
+          .map((ct) => ct.Labels?.["blackhouse.agent_id"])
           .filter(Boolean) as string[];
 
-        const sessionsMap = new Map<string, typeof schema.codingSessions.$inferSelect>();
+        // Explicit column list, not `select()`: the agents row carries
+        // `agentToken`, the bearer credential the container authenticates
+        // with. A `select *` here would publish it in an admin API response.
+        const agentsMap = new Map<string, AgentContainerInfo>();
 
-        if (sessionIds.length > 0) {
-          const sessions = await db
-            .select()
-            .from(schema.codingSessions)
-            .where(inArray(schema.codingSessions.id, sessionIds));
+        if (agentIds.length > 0) {
+          const rows = await db
+            .select({
+              id: schema.agents.id,
+              handle: schema.agents.handle,
+              displayName: schema.agents.displayName,
+              status: schema.agents.status,
+              activity: schema.agents.activity,
+              statusLine: schema.agents.statusLine,
+              runtimeUsed: schema.agents.runtimeUsed,
+            })
+            .from(schema.agents)
+            .where(inArray(schema.agents.id, agentIds));
 
-          for (const s of sessions) {
-            sessionsMap.set(s.id, s);
+          for (const row of rows) {
+            agentsMap.set(row.id, row);
           }
         }
 
         const allItems = containers.map((ct) => {
-          const sessionId = ct.Labels?.["blackhouse.session_id"];
+          const agentId = ct.Labels?.["blackhouse.agent_id"];
           return {
             containerId: ct.Id,
             image: ct.Image,
             state: ct.State,
             status: ct.Status,
             created: ct.Created,
-            sessionId,
-            session: sessionId ? (sessionsMap.get(sessionId) ?? null) : null,
+            agentId,
+            agent: agentId ? (agentsMap.get(agentId) ?? null) : null,
           };
         });
 
@@ -562,7 +707,7 @@ const app = new Hono<AuthEnv>()
   .get("/volumes", adminMiddleware, async (c) => {
     try {
       // Collect volume names referenced by agent configs
-      const configs = await db.select().from(schema.agentConfigs);
+      const configs = await db.select().from(schema.agentBlueprints);
       const managedNames = new Set<string>();
       for (const cfg of configs) {
         if (Array.isArray(cfg.volumeMounts)) {
@@ -572,23 +717,21 @@ const app = new Hono<AuthEnv>()
         }
       }
 
-      // Collect namespaced volume names from templates
-      const allTemplates = await db
+      // Per-agent workspace and state volumes. These are derived from the
+      // agent id rather than stored, so the naming here must stay in step with
+      // `workspaceVolumeName`/`stateVolumeName` in `server/agents/lifecycle.ts`
+      // — otherwise live volumes would show up as unmanaged and be offered for
+      // deletion while an agent is still using them.
+      const agentRows = await db
         .select({
-          volumeMounts: schema.templates.volumeMounts,
-          username: schema.user.username,
-          userId: schema.user.id,
+          workspaceVolume: schema.agents.workspaceVolume,
+          stateVolume: schema.agents.stateVolume,
         })
-        .from(schema.templates)
-        .leftJoin(schema.user, eq(schema.templates.userId, schema.user.id));
+        .from(schema.agents);
 
-      for (const t of allTemplates) {
-        if (Array.isArray(t.volumeMounts)) {
-          const prefix = t.username ?? t.userId ?? "unknown";
-          for (const m of t.volumeMounts as Array<{ name: string; mountPath: string }>) {
-            if (m.name) managedNames.add(`${prefix}-${m.name}`);
-          }
-        }
+      for (const a of agentRows) {
+        if (a.workspaceVolume) managedNames.add(a.workspaceVolume);
+        if (a.stateVolume) managedNames.add(a.stateVolume);
       }
 
       const docker = await getDockerClient();

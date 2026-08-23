@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<script src="icons.js"></script>
+<link rel="stylesheet" href="_ds/not-yet-dashboard-design-system-08a144c3-b949-4751-9eef-342d9527b153/_ds_bundle.css">
+<link rel="stylesheet" href="_ds/not-yet-dashboard-design-system-08a144c3-b949-4751-9eef-342d9527b153/styles.css">
+<script src="_ds/not-yet-dashboard-design-system-08a144c3-b949-4751-9eef-342d9527b153/_ds_bundle.js"></script>
+<style>
+  html,body{margin:0;height:100%}
+  *{box-sizing:border-box}
+  @keyframes nyPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.82)}}
+  @keyframes nyExpiry{from{width:62%}to{width:58%}}
+  a{color:var(--ny-accent-text)}
+  a:hover{color:var(--ny-accent)}
+</style>
+</helmet>
+<x-import component-from-global-scope="NotYetUI.ThemeProvider" theme="{{ theme }}" hint-size="100%,100%">
+<div style="min-height:100vh;width:100%;background:var(--ny-bg);color:var(--ny-text);font-family:var(--ny-font-sans);font-size:14px;padding:26px 30px 60px">
+
+  <!-- header -->
+  <div style="display:flex;align-items:flex-start;gap:16px;max-width:1160px;margin:0 auto 26px">
+    <div style="flex:1">
+      <div style="font-size:11px;font-family:var(--ny-font-mono);text-transform:uppercase;letter-spacing:.07em;color:var(--ny-text-subtle);margin-bottom:6px">Screen 2 · in-transcript component</div>
+      <div style="font-size:22px;font-weight:700;letter-spacing:-.01em">Agent dispatch approval</div>
+      <div style="font-size:13px;color:var(--ny-text-muted);margin-top:5px;max-width:640px;line-height:1.5">Every agent→agent dispatch pauses for a human. The card reads as a <strong>decision</strong>, not a notification — and collapses to a quiet one-liner once it resolves so channel history stays skimmable.</div>
+    </div>
+    <div onClick="{{ toggleTheme }}" role="button" title="Toggle theme" style="width:32px;height:32px;flex:none;border-radius:8px;display:grid;place-items:center;cursor:pointer;color:var(--ny-text-subtle);border:1px solid var(--ny-border)" style-hover="background:var(--ny-surface-hover);color:var(--ny-text)"><dc-import name="Icon" n="moon" sz="16" sw="2" hint-size="16px,16px"></dc-import></div>
+  </div>
+
+  <!-- LIVE (interactive) -->
+  <div style="max-width:1160px;margin:0 auto">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><span style="font-size:11px;font-family:var(--ny-font-mono);text-transform:uppercase;letter-spacing:.06em;color:var(--ny-text-subtle)">Live — try it</span><div style="flex:1;height:1px;background:var(--ny-border)"></div><span onClick="{{ reset }}" role="button" style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-family:var(--ny-font-mono);color:var(--ny-text-muted);cursor:pointer" style-hover="color:var(--ny-text)"><dc-import name="Icon" n="rotate-ccw" sz="12" sw="2" hint-size="12px,12px"></dc-import>reset</span></div>
+
+    <!-- transcript context wrapper -->
+    <div style="border:1px dashed var(--ny-border);border-radius:14px;padding:18px 18px;background:var(--ny-surface-sunken)">
+      <div style="display:flex;gap:12px">
+        <!-- caller avatar rail -->
+        <div style="width:40px;flex:none;display:flex;flex-direction:column;align-items:center;gap:6px">
+          <div style="width:40px;height:40px;border-radius:11px;background:var(--ny-surface-raised);border:1px solid var(--ny-accent-border);display:grid;place-items:center;font-family:var(--ny-font-mono);font-size:12px;font-weight:700;color:var(--ny-accent-text)">SC</div>
+          <div style="flex:1;width:2px;background:var(--ny-border);border-radius:2px"></div>
+        </div>
+
+        <!-- THE CARD -->
+        <div style="flex:1;min-width:0;border-radius:14px;overflow:hidden;{{ cardBorder }}">
+          <!-- status header -->
+          <div style="display:flex;align-items:center;gap:10px;padding:12px 15px 8px;{{ cardHeadBg }}">
+            <span style="width:26px;height:26px;flex:none;border-radius:50%;display:grid;place-items:center;{{ iconWrap }}">{{ statusIcon }}</span>
+            <span style="font-size:10.5px;font-family:var(--ny-font-mono);letter-spacing:.05em;text-transform:uppercase;font-weight:700;{{ eyebrowColor }}">{{ eyebrow }}</span>
+            <sc-if value="{{ isPending }}" hint-placeholder-val="{{ true }}">
+              <span style="margin-left:auto;display:flex;align-items:center;gap:6px;font-family:var(--ny-font-mono);font-size:11.5px;color:var(--ny-warning-text)"><dc-import name="Icon" n="clock" sz="13" sw="2" hint-size="13px,13px"></dc-import>expires in 4m 12s</span>
+            </sc-if>
+          </div>
+
+          <!-- body -->
+          <div style="padding:4px 15px 15px;background:var(--ny-surface)">
+            <div style="display:flex;align-items:center;gap:9px;font-family:var(--ny-font-mono);font-size:13px;margin:6px 0 11px">
+              <span style="font-weight:700;color:var(--ny-text)">@scout</span>
+              <dc-import name="Icon" n="arrow-right" sz="15" sw="2" style="color:var(--ny-text-subtle)" hint-size="15px,15px"></dc-import>
+              <span style="font-weight:700;color:var(--ny-text)">@reviewer</span>
+              <span style="color:var(--ny-text-subtle)">· delegate a task</span>
+              <span style="margin-left:auto;font-size:11px;color:var(--ny-text-subtle)">runs in @reviewer's sandbox</span>
+            </div>
+
+            <!-- prompt: editable in editing state -->
+            <sc-if value="{{ isEditing }}" hint-placeholder-val="{{ false }}">
+              <div>
+                <div style="font-size:10.5px;font-family:var(--ny-font-mono);text-transform:uppercase;letter-spacing:.05em;color:var(--ny-text-subtle);margin-bottom:5px">Edit prompt before dispatch</div>
+                <textarea onInput="{{ onEdit }}" value="{{ draft }}" style="width:100%;min-height:70px;border:1px solid var(--ny-accent-border);border-radius:9px;background:var(--ny-surface-sunken);color:var(--ny-text);font-family:var(--ny-font-mono);font-size:12.5px;line-height:1.55;padding:10px 12px;resize:vertical;outline:none"></textarea>
+                <div style="display:flex;gap:8px;margin-top:10px">
+                  <x-import component-from-global-scope="NotYetUI.Button" variant="primary" size="sm" onClick="{{ approve }}" hint-size="auto,28px">Approve edited</x-import>
+                  <x-import component-from-global-scope="NotYetUI.Button" variant="ghost" size="sm" onClick="{{ cancelEdit }}" hint-size="auto,28px">Cancel</x-import>
+                </div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ showPrompt }}" hint-placeholder-val="{{ true }}">
+              <div style="border:1px solid var(--ny-border);border-radius:9px;padding:10px 12px;font-family:var(--ny-font-mono);font-size:12.5px;line-height:1.55;color:var(--ny-text);background:var(--ny-surface-sunken)">{{ draft }}</div>
+            </sc-if>
+
+            <!-- pending actions -->
+            <sc-if value="{{ isPending }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;align-items:center;gap:8px;margin-top:13px;flex-wrap:wrap">
+                <x-import component-from-global-scope="NotYetUI.Button" variant="primary" size="sm" onClick="{{ approve }}" hint-size="auto,28px">Approve</x-import>
+                <x-import component-from-global-scope="NotYetUI.Button" variant="secondary" size="sm" onClick="{{ edit }}" hint-size="auto,28px">Edit &amp; approve</x-import>
+                <x-import component-from-global-scope="NotYetUI.Button" variant="danger" size="sm" onClick="{{ deny }}" hint-size="auto,28px">Deny</x-import>
+                <span onClick="{{ expire }}" role="button" style="margin-left:auto;font-size:11px;font-family:var(--ny-font-mono);color:var(--ny-text-subtle);cursor:pointer;text-decoration:underline;text-underline-offset:2px">simulate expiry</span>
+              </div>
+            </sc-if>
+
+            <!-- resolved lines -->
+            <sc-if value="{{ isApproved }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;align-items:center;gap:8px;margin-top:13px;font-family:var(--ny-font-mono);font-size:12px;color:var(--ny-success-text)"><dc-import name="Icon" n="check" sz="15" sw="2.5" hint-size="15px,15px"></dc-import>Approved by Dana · 10:24 · dispatched to @reviewer<span style="width:1px;height:12px;background:var(--ny-border-strong)"></span><a href="Agent Detail.dc.html" style="text-decoration:none">view run →</a></div>
+            </sc-if>
+            <sc-if value="{{ isDenied }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;align-items:center;gap:8px;margin-top:13px;font-family:var(--ny-font-mono);font-size:12px;color:var(--ny-danger-text)"><dc-import name="Icon" n="x" sz="15" sw="2.5" hint-size="15px,15px"></dc-import>Denied by Dana · 10:24 · @scout was notified</div>
+            </sc-if>
+            <sc-if value="{{ isExpired }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;align-items:center;gap:8px;margin-top:13px;font-family:var(--ny-font-mono);font-size:12px;color:var(--ny-text-subtle)"><dc-import name="Icon" n="clock" sz="15" sw="2" hint-size="15px,15px"></dc-import>Expired · no one responded in 5m · @scout may re-request<span style="width:1px;height:12px;background:var(--ny-border-strong)"></span><span onClick="{{ reset }}" role="button" style="color:var(--ny-accent-text);cursor:pointer">re-open</span></div>
+            </sc-if>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STATES GALLERY -->
+    <div style="display:flex;align-items:center;gap:8px;margin:34px 0 14px"><span style="font-size:11px;font-family:var(--ny-font-mono);text-transform:uppercase;letter-spacing:.06em;color:var(--ny-text-subtle)">All resolved states</span><div style="flex:1;height:1px;background:var(--ny-border)"></div></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px">
+      <sc-for list="{{ gallery }}" as="g" hint-placeholder-count="4">
+        <div style="border-radius:12px;overflow:hidden;{{ g.border }}">
+          <div style="display:flex;align-items:center;gap:8px;padding:9px 12px 7px;{{ g.headBg }}">
+            <span style="width:22px;height:22px;flex:none;border-radius:50%;display:grid;place-items:center;{{ g.iconWrap }}">{{ g.icon }}</span>
+            <span style="font-size:10px;font-family:var(--ny-font-mono);letter-spacing:.05em;text-transform:uppercase;font-weight:700;{{ g.eyebrowColor }}">{{ g.eyebrow }}</span>
+          </div>
+          <div style="padding:6px 12px 12px;background:var(--ny-surface)">
+            <div style="display:flex;align-items:center;gap:6px;font-family:var(--ny-font-mono);font-size:11.5px;color:var(--ny-text-muted);margin:4px 0 8px"><span style="color:var(--ny-text);font-weight:600">@scout</span>→<span style="color:var(--ny-text);font-weight:600">@reviewer</span></div>
+            <div style="font-family:var(--ny-font-mono);font-size:11px;line-height:1.4;{{ g.lineColor }}">{{ g.line }}</div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="margin-top:22px;font-size:12px;color:var(--ny-text-subtle);line-height:1.55;max-width:680px">
+      <strong style="color:var(--ny-text-muted)">Note on your structure:</strong> I kept <em>Edit &amp; approve</em> inline (no separate modal) so the reviewer edits and dispatches in one move. Expiry is both a visible countdown and a terminal state, so a stale dispatch never sits pending forever.
+    </div>
+  </div>
+</div>
+</x-import>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1200,&quot;height&quot;:900},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  state = {
+    theme: this.props.theme ?? 'dark',
+    status: 'pending',
+    draft: "Review the payments migration plan in checkout-flow-map.html and flag any call site I missed before we start editing.",
+  };
+
+  lucideEl(name, size, sw) {
+    const table = window.__bhIcons || {};
+    const kebab = String(name).replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+    const node = table[kebab] || table[name];
+    if (!Array.isArray(node)) return null;
+    const build = (arr) => arr.map((c, i) => {
+      const attrs = { key: i };
+      for (const [k, v] of Object.entries(c[1] || {})) attrs[k.replace(/-([a-z])/g, (_, x) => x.toUpperCase())] = v;
+      return React.createElement(c[0], attrs, c[2] ? build(c[2]) : null);
+    });
+    return React.createElement('svg', {
+      width: size, height: size, viewBox: '0 0 24 24', fill: 'none',
+      stroke: 'currentColor', strokeWidth: sw || 2, strokeLinecap: 'round', strokeLinejoin: 'round', style: { flex: 'none', display: 'block', verticalAlign: 'middle' },
+    }, build(node));
+  }
+
+  toneStyles(status) {
+    const map = {
+      pending:  { tone: 'warning', icon: 'triangle-alert', eyebrow: 'Approval required · agent dispatch' },
+      editing:  { tone: 'accent',  icon: 'square-pen',     eyebrow: 'Editing prompt · agent dispatch' },
+      approved: { tone: 'success', icon: 'check',          eyebrow: 'Approved · agent dispatch' },
+      denied:   { tone: 'danger',  icon: 'x',              eyebrow: 'Denied · agent dispatch' },
+      expired:  { tone: 'neutral', icon: 'clock',          eyebrow: 'Expired · agent dispatch' },
+    };
+    const m = map[status];
+    const t = m.tone;
+    return {
+      border: `border:1px solid var(--ny-${t}-border)`,
+      headBg: `background:var(--ny-${t}-subtle)`,
+      iconWrap: `background:var(--ny-${t}-subtle);color:var(--ny-${t}-text)` + (status === 'pending' ? ';animation:nyPulse 2.4s ease-in-out infinite' : ''),
+      eyebrowColor: `color:var(--ny-${t}-text)`,
+      icon: m.icon,
+      eyebrow: m.eyebrow,
+    };
+  }
+
+  renderVals() {
+    const status = this.state.status;
+    const s = this.toneStyles(status === 'editing' ? 'editing' : status);
+
+    const galleryDefs = [
+      { status: 'approved', line: 'Approved by Dana · 10:24 · dispatched · run complete (34s)' },
+      { status: 'denied',   line: 'Denied by Dana · @scout notified, will not retry' },
+      { status: 'expired',  line: 'Expired · no response in 5m · agent may re-request' },
+      { status: 'auto',     line: 'Auto-approved · channel in yolo mode · no hold' },
+    ];
+    const gallery = galleryDefs.map(g => {
+      const st = g.status === 'auto' ? 'info' : this.toneStyles(g.status).border && g.status;
+      const tone = g.status === 'auto' ? 'info' : this.toneStyles(g.status);
+      if (g.status === 'auto') {
+        return {
+          border: 'border:1px solid var(--ny-info-border)', headBg: 'background:var(--ny-info-subtle)',
+          iconWrap: 'background:var(--ny-info-subtle);color:var(--ny-info-text)',
+          eyebrowColor: 'color:var(--ny-info-text)', eyebrow: 'Auto-approved · agent dispatch',
+          icon: this.lucideEl('zap', 13, 2), lineColor: 'color:var(--ny-info-text)', line: g.line,
+        };
+      }
+      const ts = this.toneStyles(g.status);
+      return {
+        border: ts.border, headBg: ts.headBg, iconWrap: ts.iconWrap.replace(/;animation[^;]*/, ''),
+        eyebrowColor: ts.eyebrowColor, eyebrow: ts.eyebrow,
+        icon: this.lucideEl(ts.icon, 13, g.status === 'approved' || g.status === 'denied' ? 2.5 : 2),
+        lineColor: g.status === 'expired' ? 'color:var(--ny-text-subtle)' : `color:var(--ny-${this.toneStyles(g.status).eyebrowColor.match(/--ny-(\w+)-text/)[1]}-text)`,
+        line: g.line,
+      };
+    });
+
+    return {
+      theme: this.state.theme,
+      toggleTheme: () => this.setState(st => ({ theme: st.theme === 'dark' ? 'light' : 'dark' })),
+      draft: this.state.draft,
+      cardBorder: s.border, cardHeadBg: s.headBg, iconWrap: s.iconWrap, eyebrowColor: s.eyebrowColor, eyebrow: s.eyebrow,
+      statusIcon: this.lucideEl(s.icon, 14, status === 'approved' || status === 'denied' ? 2.5 : 2),
+      isPending: status === 'pending',
+      isEditing: status === 'editing',
+      isApproved: status === 'approved',
+      isDenied: status === 'denied',
+      isExpired: status === 'expired',
+      showPrompt: status !== 'editing',
+      approve: () => this.setState({ status: 'approved' }),
+      deny: () => this.setState({ status: 'denied' }),
+      edit: () => this.setState({ status: 'editing' }),
+      cancelEdit: () => this.setState({ status: 'pending' }),
+      expire: () => this.setState({ status: 'expired' }),
+      reset: () => this.setState({ status: 'pending' }),
+      onEdit: (e) => this.setState({ draft: e.target.value }),
+      gallery,
+    };
+  }
+}
+</script>
+</body>
+</html>

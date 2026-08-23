@@ -43,10 +43,18 @@ ENV BROWSER=/opt/blackhouse/browser-shim.sh
 # on first launch, with `cp -n` so a user-supplied override wins.
 COPY agent/code-server-config /opt/blackhouse/code-server-config
 
+# The event sidecar. Zero dependencies (node builtins + global fetch), so it is
+# a plain COPY with no install step. entrypoint.sh prefers a copy fetched from
+# the server at boot over this one — rebuilding a ~3GB image to change one line
+# of an adapter is not an iteration loop anybody can live with.
+COPY agent/sidecar /opt/blackhouse/sidecar
+
 # --- Agent-specific install ---------------------------------------------------
 
 # Install Codex CLI globally
-RUN npm install -g @openai/codex
+# Verified, so a partial install cannot ship as a working image.
+RUN npm install -g @openai/codex \
+    && command -v codex
 
 # Create non-root workspace user
 RUN groupadd --gid 1001 workspace \

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<script src="icons.js"></script>
+<link rel="stylesheet" href="_ds/not-yet-dashboard-design-system-08a144c3-b949-4751-9eef-342d9527b153/_ds_bundle.css">
+<link rel="stylesheet" href="_ds/not-yet-dashboard-design-system-08a144c3-b949-4751-9eef-342d9527b153/styles.css">
+<script src="_ds/not-yet-dashboard-design-system-08a144c3-b949-4751-9eef-342d9527b153/_ds_bundle.js"></script>
+<style>
+  html,body{margin:0;height:100%}
+  *{box-sizing:border-box}
+  a{text-decoration:none;color:inherit}
+</style>
+</helmet>
+<x-import component-from-global-scope="NotYetUI.ThemeProvider" theme="{{ theme }}" hint-size="100%,100%">
+<div style="min-height:100vh;width:100%;background:var(--ny-bg);color:var(--ny-text);font-family:var(--ny-font-sans);font-size:14px;padding:48px 30px 70px">
+  <div style="max-width:1080px;margin:0 auto">
+
+    <!-- masthead -->
+    <div style="display:flex;align-items:flex-start;gap:16px;margin-bottom:8px">
+      <div style="width:44px;height:44px;flex:none;border-radius:12px;background:var(--ny-accent);color:var(--ny-text-on-accent);display:grid;place-items:center;font-family:var(--ny-font-mono);font-weight:700;font-size:20px">B</div>
+      <div style="flex:1">
+        <div style="font-size:26px;font-weight:700;letter-spacing:-.015em">Blackhouse</div>
+        <div style="font-size:13.5px;color:var(--ny-text-muted);margin-top:3px;font-family:var(--ny-font-mono)">a Slack-like harness for coding agents · hi-fi mockups</div>
+      </div>
+      <div onClick="{{ toggleTheme }}" role="button" title="Toggle theme" style="width:34px;height:34px;flex:none;border-radius:9px;display:grid;place-items:center;cursor:pointer;color:var(--ny-text-subtle);border:1px solid var(--ny-border)" style-hover="background:var(--ny-surface-hover);color:var(--ny-text)"><dc-import name="Icon" n="moon" sz="17" sw="2" hint-size="17px,17px"></dc-import></div>
+    </div>
+    <p style="font-size:14px;line-height:1.6;color:var(--ny-text-muted);max-width:660px;margin:14px 0 34px">Five screens on the NotYet UI system, light &amp; dark, clickable. Persistent agents live as teammates in channels; each runs a real terminal, editor, and browser in a sandbox. Start with the channel.</p>
+
+    <!-- primary -->
+    <a href="Channel View.dc.html">
+      <div style="display:flex;gap:18px;align-items:center;border:1px solid var(--ny-accent-border);background:var(--ny-accent-subtle);border-radius:16px;padding:20px 22px;margin-bottom:16px" style-hover="border-color:var(--ny-accent)">
+        <span style="width:46px;height:46px;flex:none;border-radius:11px;background:var(--ny-accent);color:var(--ny-text-on-accent);display:grid;place-items:center"><dc-import name="Icon" n="messages-square" sz="22" sw="1.8" hint-size="22px,22px"></dc-import></span>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:9px"><span style="font-size:10px;font-family:var(--ny-font-mono);color:var(--ny-accent-text);border:1px solid var(--ny-accent-border);border-radius:5px;padding:1px 6px">01 · primary</span><span style="font-size:16.5px;font-weight:700">Channel view</span></div>
+          <div style="font-size:13px;color:var(--ny-text-muted);margin-top:5px;line-height:1.5">The transcript: human messages, agent replies, collapsible tool-call turns, inline artifacts &amp; dispatch cards, and the queue/interrupt composer.</div>
+        </div>
+        <span style="color:var(--ny-accent-text);flex:none"><dc-import name="Icon" n="arrow-right" sz="20" sw="2" hint-size="20px,20px"></dc-import></span>
+      </div>
+    </a>
+
+    <!-- grid -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px">
+      <sc-for list="{{ screens }}" as="s" hint-placeholder-count="4">
+        <a href="{{ s.href }}">
+          <div style="border:1px solid var(--ny-border);background:var(--ny-surface);border-radius:14px;padding:18px 18px;height:100%;display:flex;flex-direction:column;gap:11px" style-hover="border-color:var(--ny-border-strong)">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="width:38px;height:38px;flex:none;border-radius:10px;background:var(--ny-surface-sunken);border:1px solid var(--ny-border);display:grid;place-items:center;color:var(--ny-text-muted)"><dc-import name="Icon" n="{{ s.icon }}" sz="19" sw="1.8" hint-size="19px,19px"></dc-import></span>
+              <span style="font-size:10px;font-family:var(--ny-font-mono);color:var(--ny-text-subtle);border:1px solid var(--ny-border);border-radius:5px;padding:1px 6px">{{ s.tag }}</span>
+            </div>
+            <div style="font-size:15px;font-weight:700">{{ s.title }}</div>
+            <div style="font-size:12.5px;color:var(--ny-text-subtle);line-height:1.5;flex:1">{{ s.desc }}</div>
+            <div style="display:flex;align-items:center;gap:6px;font-family:var(--ny-font-mono);font-size:11.5px;color:var(--ny-text-muted)">open<dc-import name="Icon" n="arrow-right" sz="13" sw="2" hint-size="13px,13px"></dc-import></div>
+          </div>
+        </a>
+      </sc-for>
+    </div>
+
+    <div style="margin-top:30px;font-size:11.5px;font-family:var(--ny-font-mono);color:var(--ny-text-subtle);display:flex;align-items:center;gap:8px"><dc-import name="Icon" n="info" sz="13" sw="2" hint-size="13px,13px"></dc-import>Every screen has a theme toggle · the channel, agent detail &amp; settings cross-link.</div>
+  </div>
+</div>
+</x-import>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1080,&quot;height&quot;:820},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  state = { theme: this.props.theme ?? 'dark' };
+  renderVals() {
+    return {
+      theme: this.state.theme,
+      toggleTheme: () => this.setState(s => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
+      screens: [
+        { href:'Dispatch Card.dc.html', tag:'02', icon:'shield-check', title:'Dispatch approval', desc:'The agent→agent trust moment: approve, edit & approve, deny — and every resolved state.' },
+        { href:'Agent Detail.dc.html', tag:'03', icon:'terminal', title:'Agent detail', desc:'Terminal, IDE, browser, artifacts & settings — with a resizable split view of TUI + inspector.' },
+        { href:'Create Agent.dc.html', tag:'04', icon:'bot', title:'Create agent', desc:'Two-step wizard: pick a blueprint, then configure identity, sandbox runtime & egress.' },
+        { href:'Settings.dc.html', tag:'05', icon:'settings', title:'Workspace settings', desc:'Blueprints, detected host runtimes, egress allowlist, and members.' },
+        { href:'Create Blueprint.dc.html', tag:'06', icon:'layout-grid', title:'New blueprint', desc:'Author a reusable agent definition: CLI, image, prompt, skills, MCP servers, sandbox & egress defaults.' },
+        { href:'Login.dc.html', tag:'07', icon:'log-in', title:'Sign in', desc:'Self-hosted auth: password, SAML SSO or GitHub — with the error state. Members & invites live in Settings.' },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

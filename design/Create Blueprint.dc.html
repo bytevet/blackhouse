@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<script src="icons.js"></script>
+<link rel="stylesheet" href="_ds/not-yet-dashboard-design-system-08a144c3-b949-4751-9eef-342d9527b153/_ds_bundle.css">
+<link rel="stylesheet" href="_ds/not-yet-dashboard-design-system-08a144c3-b949-4751-9eef-342d9527b153/styles.css">
+<script src="_ds/not-yet-dashboard-design-system-08a144c3-b949-4751-9eef-342d9527b153/_ds_bundle.js"></script>
+<style>
+  html,body{margin:0;height:100%}
+  *{box-sizing:border-box}
+  a{color:var(--ny-accent-text);text-decoration:none}
+  .bh-scroll::-webkit-scrollbar{width:10px}
+  .bh-scroll::-webkit-scrollbar-thumb{background:var(--ny-border-strong);border-radius:8px;border:2px solid transparent;background-clip:content-box}
+</style>
+</helmet>
+<x-import component-from-global-scope="NotYetUI.ThemeProvider" theme="{{ theme }}" hint-size="100%,100%">
+<div style="height:100vh;width:100%;display:flex;flex-direction:column;background:var(--ny-bg);color:var(--ny-text);font-family:var(--ny-font-sans);font-size:14px;overflow:hidden">
+
+  <!-- top bar -->
+  <header style="flex:none;display:flex;align-items:center;gap:10px;padding:11px 20px;border-bottom:1px solid var(--ny-border);background:var(--ny-surface-sunken)">
+    <a href="Settings.dc.html" style="display:flex;align-items:center;gap:7px;color:var(--ny-text-subtle);font-family:var(--ny-font-mono);font-size:12.5px" style-hover="color:var(--ny-text)"><dc-import name="Icon" n="chevron-left" sz="15" sw="2" hint-size="15px,15px"></dc-import>Blueprints</a>
+    <span style="color:var(--ny-text-subtle)">/</span>
+    <span style="font-family:var(--ny-font-mono);font-size:12.5px;font-weight:600">new blueprint</span>
+    <div style="margin-left:auto"><div onClick="{{ toggleTheme }}" role="button" title="Toggle theme" style="width:30px;height:30px;border-radius:7px;display:grid;place-items:center;cursor:pointer;color:var(--ny-text-subtle);border:1px solid var(--ny-border)" style-hover="background:var(--ny-surface-hover);color:var(--ny-text)"><dc-import name="Icon" n="moon" sz="15" sw="2" hint-size="15px,15px"></dc-import></div></div>
+  </header>
+
+  <div style="flex:1;display:flex;min-height:0">
+    <!-- form -->
+    <main class="bh-scroll" style="flex:1;min-width:0;overflow-y:auto;padding:26px 30px 60px">
+      <div style="max-width:640px">
+        <div style="font-size:20px;font-weight:700;letter-spacing:-.01em">New blueprint</div>
+        <div style="font-size:13px;color:var(--ny-text-muted);margin-top:4px;line-height:1.5">A reusable agent definition. Agents spawned from it inherit everything here, and can override per-agent.</div>
+
+        <div style="display:flex;flex-direction:column;gap:18px;margin-top:24px">
+
+          <!-- identity -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div>
+              <label style="display:block;font-size:12px;font-weight:600;color:var(--ny-text-muted);margin-bottom:6px">Blueprint name</label>
+              <div style="border:1px solid var(--ny-border-strong);border-radius:9px;background:var(--ny-surface-sunken);padding:0 11px"><input value="migrator" style="width:100%;border:none;background:transparent;color:var(--ny-text);font-family:var(--ny-font-mono);font-size:13.5px;padding:9px 0;outline:none"></div>
+              <div style="font-size:11px;color:var(--ny-text-subtle);margin-top:5px;font-family:var(--ny-font-mono)">lowercase, no spaces</div>
+            </div>
+            <div>
+              <label style="display:block;font-size:12px;font-weight:600;color:var(--ny-text-muted);margin-bottom:6px">Coding CLI</label>
+              <div style="display:flex;gap:6px">
+                <sc-for list="{{ clis }}" as="c" hint-placeholder-count="2">
+                  <div onClick="{{ c.pick }}" role="button" style="{{ c.style }}">{{ c.label }}</div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label style="display:block;font-size:12px;font-weight:600;color:var(--ny-text-muted);margin-bottom:6px">Base image</label>
+            <div style="display:flex;align-items:center;border:1px solid var(--ny-border-strong);border-radius:9px;background:var(--ny-surface-sunken);padding:0 11px"><span style="color:var(--ny-text-subtle);margin-right:8px;display:inline-flex"><dc-import name="Icon" n="container" sz="14" sw="2" hint-size="14px,14px"></dc-import></span><input value="node:20-bookworm" style="flex:1;border:none;background:transparent;color:var(--ny-text);font-family:var(--ny-font-mono);font-size:13.5px;padding:9px 0;outline:none"></div>
+          </div>
+
+          <!-- system prompt -->
+          <div>
+            <label style="display:block;font-size:12px;font-weight:600;color:var(--ny-text-muted);margin-bottom:6px">System prompt</label>
+            <textarea style="width:100%;min-height:110px;border:1px solid var(--ny-border-strong);border-radius:9px;background:var(--ny-surface-sunken);color:var(--ny-text);font-family:var(--ny-font-mono);font-size:12.5px;line-height:1.55;padding:10px 12px;resize:vertical;outline:none">You write and run database migrations. Always produce a reversible down-migration. Never run a destructive statement without asking a human in the channel first.</textarea>
+          </div>
+
+          <!-- skills -->
+          <div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><label style="font-size:12px;font-weight:600;color:var(--ny-text-muted)">Skills</label><span style="font-size:11px;font-family:var(--ny-font-mono);color:var(--ny-text-subtle)">{{ skillCount }} enabled</span></div>
+            <div style="display:flex;flex-direction:column;gap:7px">
+              <sc-for list="{{ skills }}" as="s" hint-placeholder-count="4">
+                <div onClick="{{ s.toggle }}" role="button" style="{{ s.rowStyle }}">
+                  <span style="{{ s.boxStyle }}"><sc-if value="{{ s.on }}" hint-placeholder-val="{{ false }}"><dc-import name="Icon" n="check" sz="11" sw="3.5" hint-size="11px,11px"></dc-import></sc-if></span>
+                  <span style="font-family:var(--ny-font-mono);font-size:12.5px;{{ s.nameColor }}">{{ s.name }}</span>
+                  <span style="margin-left:auto;font-size:11px;color:var(--ny-text-subtle)">{{ s.desc }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <!-- MCP servers -->
+          <div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><label style="font-size:12px;font-weight:600;color:var(--ny-text-muted)">MCP servers</label><span role="button" style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-family:var(--ny-font-mono);color:var(--ny-accent-text);cursor:pointer"><dc-import name="Icon" n="plus" sz="13" sw="2.2" hint-size="13px,13px"></dc-import>add server</span></div>
+            <div style="border:1px solid var(--ny-border);border-radius:10px;overflow:hidden">
+              <sc-for list="{{ mcp }}" as="m" hint-placeholder-count="2">
+                <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--ny-border)">
+                  <span style="width:26px;height:26px;flex:none;border-radius:7px;background:var(--ny-surface-sunken);border:1px solid var(--ny-border);display:grid;place-items:center;color:var(--ny-text-muted)"><dc-import name="Icon" n="{{ m.icon }}" sz="14" sw="2" hint-size="14px,14px"></dc-import></span>
+                  <div style="flex:1;min-width:0"><div style="font-family:var(--ny-font-mono);font-size:12.5px;color:var(--ny-text)">{{ m.name }}</div><div style="font-family:var(--ny-font-mono);font-size:10.5px;color:var(--ny-text-subtle);margin-top:1px">{{ m.cmd }}</div></div>
+                  <span role="button" style="display:grid;place-items:center;color:var(--ny-text-subtle);cursor:pointer" style-hover="color:var(--ny-danger-text)"><dc-import name="Icon" n="trash-2" sz="14" sw="2" hint-size="14px,14px"></dc-import></span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <!-- defaults -->
+          <div style="border:1px solid var(--ny-border);border-radius:11px;padding:15px 16px;background:var(--ny-surface-sunken)">
+            <div style="font-size:12.5px;font-weight:700;color:var(--ny-text);margin-bottom:3px">Default sandbox &amp; egress</div>
+            <div style="font-size:11.5px;color:var(--ny-text-subtle);margin-bottom:12px">Requested at spawn time. If the host can't provide the runtime, Blackhouse falls back and says so.</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+              <div>
+                <div style="font-size:11px;font-family:var(--ny-font-mono);text-transform:uppercase;letter-spacing:.05em;color:var(--ny-text-subtle);margin-bottom:6px">Sandbox</div>
+                <div style="display:flex;flex-direction:column;gap:6px">
+                  <sc-for list="{{ sandboxes }}" as="b" hint-placeholder-count="2">
+                    <div onClick="{{ b.pick }}" role="button" style="{{ b.style }}"><span style="{{ b.radio }}"></span>{{ b.label }}</div>
+                  </sc-for>
+                </div>
+              </div>
+              <div>
+                <div style="font-size:11px;font-family:var(--ny-font-mono);text-transform:uppercase;letter-spacing:.05em;color:var(--ny-text-subtle);margin-bottom:6px">Egress</div>
+                <div style="display:flex;flex-direction:column;gap:6px">
+                  <sc-for list="{{ egress }}" as="e" hint-placeholder-count="3">
+                    <div onClick="{{ e.pick }}" role="button" style="{{ e.style }}"><span style="{{ e.radio }}"></span>{{ e.label }}</div>
+                  </sc-for>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- live summary rail -->
+    <aside class="bh-scroll" style="width:280px;flex:none;border-left:1px solid var(--ny-border);background:var(--ny-surface-sunken);overflow-y:auto;padding:22px 18px">
+      <div style="font-size:10.5px;font-family:var(--ny-font-mono);text-transform:uppercase;letter-spacing:.06em;color:var(--ny-text-subtle);margin-bottom:12px">Preview</div>
+      <div style="border:1px solid var(--ny-border);border-radius:12px;background:var(--ny-surface);padding:14px 15px">
+        <div style="display:flex;align-items:center;gap:9px">
+          <span style="width:34px;height:34px;flex:none;border-radius:9px;background:var(--ny-surface-sunken);border:1px solid var(--ny-border);display:grid;place-items:center;color:var(--ny-text-muted)"><dc-import name="Icon" n="database" sz="17" sw="1.8" hint-size="17px,17px"></dc-import></span>
+          <div><div style="font-family:var(--ny-font-mono);font-size:13.5px;font-weight:700">migrator</div><div style="font-family:var(--ny-font-mono);font-size:10.5px;color:var(--ny-info-text);margin-top:1px">{{ cli }}</div></div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;font-family:var(--ny-font-mono);font-size:10.5px;color:var(--ny-text-subtle)">
+          <span style="border:1px solid var(--ny-border);border-radius:5px;padding:1px 6px">node:20-bookworm</span>
+          <span style="border:1px solid var(--ny-border);border-radius:5px;padding:1px 6px">{{ sandbox }}</span>
+          <span style="border:1px solid var(--ny-border);border-radius:5px;padding:1px 6px">{{ egressLabel }}</span>
+          <span style="border:1px solid var(--ny-border);border-radius:5px;padding:1px 6px">{{ skillCount }} skills</span>
+          <span style="border:1px solid var(--ny-border);border-radius:5px;padding:1px 6px">{{ mcpCount }} MCP</span>
+        </div>
+      </div>
+      <div style="font-size:11.5px;color:var(--ny-text-subtle);line-height:1.5;margin-top:14px">Blueprints are versioned — saving creates <span style="font-family:var(--ny-font-mono);color:var(--ny-text-muted)">v2</span>. Running agents keep their current version until restarted.</div>
+    </aside>
+  </div>
+
+  <!-- footer -->
+  <div style="flex:none;display:flex;align-items:center;gap:10px;padding:13px 20px;border-top:1px solid var(--ny-border);background:var(--ny-surface-sunken)">
+    <span style="font-size:11.5px;font-family:var(--ny-font-mono);color:var(--ny-text-subtle)">unused by any agent yet</span>
+    <span style="margin-left:auto"></span>
+    <x-import component-from-global-scope="NotYetUI.Button" variant="ghost" size="md" onClick="{{ goBack }}" hint-size="auto,34px">Cancel</x-import>
+    <x-import component-from-global-scope="NotYetUI.Button" variant="primary" size="md" onClick="{{ goBack }}" hint-size="auto,34px">Save blueprint</x-import>
+  </div>
+</div>
+</x-import>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1280,&quot;height&quot;:880},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  state = {
+    theme: this.props.theme ?? 'dark',
+    cli: 'claude-code',
+    sandbox: 'gVisor',
+    egress: 'allowlist',
+    skills: { 'sql-migrations': true, 'schema-diff': true, 'test-runner': true, 'browser-automation': false },
+  };
+
+  chip(active) {
+    return 'flex:1;text-align:center;padding:9px 10px;border-radius:9px;cursor:pointer;font-family:var(--ny-font-mono);font-size:12.5px;transition:all .12s;border:1px solid var(--ny-'
+      + (active ? 'accent);background:var(--ny-accent-subtle);color:var(--ny-accent-text);font-weight:600' : 'border-strong);background:var(--ny-surface-sunken);color:var(--ny-text-muted)');
+  }
+  radioRow(active) {
+    return 'display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;cursor:pointer;font-family:var(--ny-font-mono);font-size:12px;border:1px solid var(--ny-'
+      + (active ? 'accent);background:var(--ny-accent-subtle);color:var(--ny-accent-text)' : 'border);background:var(--ny-surface);color:var(--ny-text-muted)');
+  }
+  radioDot(active) {
+    return 'width:12px;height:12px;flex:none;border-radius:50%;border:2px solid var(--ny-' + (active ? 'accent);background:var(--ny-accent)' : 'border-strong)');
+  }
+
+  renderVals() {
+    const st = this.state;
+    const clis = ['claude-code', 'codex'].map(c => ({
+      label: c, pick: () => this.setState({ cli: c }), style: this.chip(st.cli === c),
+    }));
+    const sandboxes = ['gVisor', 'runc'].map(s => ({
+      label: s, pick: () => this.setState({ sandbox: s }), style: this.radioRow(st.sandbox === s), radio: this.radioDot(st.sandbox === s),
+    }));
+    const egressDefs = [{ id:'allowlist', label:'allowlist' }, { id:'open', label:'open' }, { id:'none', label:'no network' }];
+    const egress = egressDefs.map(e => ({
+      label: e.label, pick: () => this.setState({ egress: e.id }), style: this.radioRow(st.egress === e.id), radio: this.radioDot(st.egress === e.id),
+    }));
+
+    const skillDefs = [
+      { id:'sql-migrations', name:'sql-migrations', desc:'write & run migrations' },
+      { id:'schema-diff', name:'schema-diff', desc:'compare schemas' },
+      { id:'test-runner', name:'test-runner', desc:'run the suite' },
+      { id:'browser-automation', name:'browser-automation', desc:'drive headless chrome' },
+    ];
+    const skills = skillDefs.map(s => {
+      const on = !!st.skills[s.id];
+      return {
+        name: s.name, desc: s.desc, on,
+        toggle: () => this.setState(p => ({ skills: { ...p.skills, [s.id]: !p.skills[s.id] } })),
+        rowStyle: 'display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:9px;cursor:pointer;border:1px solid var(--ny-'
+          + (on ? 'accent-border);background:var(--ny-accent-subtle)' : 'border);background:var(--ny-surface)'),
+        boxStyle: 'width:17px;height:17px;flex:none;border-radius:5px;display:grid;place-items:center;border:1.5px solid var(--ny-'
+          + (on ? 'accent);background:var(--ny-accent);color:var(--ny-text-on-accent)' : 'border-strong);color:transparent'),
+        nameColor: on ? 'color:var(--ny-text);font-weight:600' : 'color:var(--ny-text-muted)',
+      };
+    });
+
+    const mcp = [
+      { name:'postgres', cmd:'npx @mcp/postgres --url $DATABASE_URL', icon:'database' },
+      { name:'filesystem', cmd:'npx @mcp/fs /workspace', icon:'folder' },
+    ];
+
+    return {
+      theme: st.theme,
+      toggleTheme: () => this.setState(s => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
+      clis, sandboxes, egress, skills, mcp,
+      cli: st.cli, sandbox: st.sandbox,
+      egressLabel: egressDefs.find(e => e.id === st.egress).label,
+      skillCount: Object.values(st.skills).filter(Boolean).length,
+      mcpCount: mcp.length,
+      goBack: () => { window.location.href = 'Settings.dc.html'; },
+    };
+  }
+}
+</script>
+</body>
+</html>

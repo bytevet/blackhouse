@@ -22,12 +22,36 @@ services:
       - BLACKHOUSE_NETWORK=${BLACKHOUSE_NETWORK:-blackhouse}
       - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
       - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+      # Egress enforcement (Phase 6). Unset by default, in which case the
+      # `docker_configs.egress_enforce` row decides — and that column also
+      # ships false. Set to `1` here to enforce without touching the DB.
+      #
+      # When enforcement is ON, agents are moved off the `blackhouse` bridge
+      # below onto a per-policy `internal: true` network with no gateway, and
+      # their only route out is the harness-run CONNECT proxy. This container
+      # attaches itself to each of those networks at runtime (see the
+      # `blackhouse.role=app` label) so the IDE and browser tabs keep working.
+      #
+      # Two hard preconditions, checked in `server/egress/attach.ts` and
+      # refused loudly rather than faked: BLACKHOUSE_NETWORK must be set (host
+      # mode publishes agent ports to 127.0.0.1, which an internal network
+      # cannot serve), and BLACKHOUSE_CONTAINER_URL must be a Docker-resolvable
+      # name — `host.docker.internal` is a route to the host gateway, and an
+      # internal network has no gateway.
+      - BLACKHOUSE_EGRESS_ENFORCE=${BLACKHOUSE_EGRESS_ENFORCE:-}
     volumes:
       - ${DOCKER_HOST_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
     security_opt:
       - label=disable
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    labels:
+      # How `server/egress/proxy-manager.ts#ensureAppOnNetwork` finds this
+      # container so it can attach the harness to each policy-scoped internal
+      # network at runtime. Without the label it falls back to $HOSTNAME, which
+      # only works while nothing overrides the container hostname — so the
+      # label is the supported path, not an optimisation.
+      - "blackhouse.role=app"
     depends_on:
       db:
         condition: service_healthy
@@ -51,7 +75,13 @@ services:
         max-size: "10m"
         max-file: "3"
     networks:
+      # Dual-homed on purpose. `blackhouse` is the ordinary bridge that carries
+      # the DB connection and the agent traffic when enforcement is off;
+      # `blackhouse-internal` is joined so that a fresh install has a working
+      # internal leg before any policy network exists. Per-policy networks are
+      # attached at runtime by the app itself.
       - blackhouse
+      - blackhouse-internal
 
   db:
     image: postgres:17-alpine
@@ -94,3 +124,20 @@ networks:
     # which would never match.
     name: blackhouse
     driver: bridge
+
+  # The harness's internal leg. Declared here rather than created through the
+  # API so that a fresh install is dual-homed from first boot and `docker
+  # compose down` reaps it. Agents whose policy is `open` stay on the
+  # `blackhouse` bridge above; the proxies use that bridge as their route out.
+  #
+  # Per-policy internal networks are NOT declared here: their names contain a
+  # hash of the allowlist, so they are created on demand by
+  # `ensureEgressNetwork(policyKey)` and shared by every agent with an
+  # identical policy.
+  blackhouse-internal:
+    name: blackhouse-internal
+    driver: bridge
+    # No gateway, no NAT: a container with only this interface cannot reach
+    # anything outside Docker. This flag is the enforcement mechanism — the
+    # allowlist is only the policy applied at the one door left open.
+    internal: true

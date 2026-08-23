@@ -63,36 +63,107 @@ export async function runSeed() {
     }
   }
 
-  // Seed default agent configs
-  const existingConfigs = await db.select().from(schema.agentConfigs).limit(1);
+  // Seed default non-admin user for e2e + dev convenience. Known
+  // credential (`user` / `test1234`) so qa's cross-user 403 test has a
+  // deterministic non-admin identity to sign in as. Created only when
+  // missing — re-running the seed never overwrites an existing user's
+  // password, so an operator who renames/recustomizes this account
+  // keeps their changes. Blast radius is low: role=user means no admin
+  // surface; the account has no sessions or templates until they're
+  // explicitly created.
+  const existingTestUser = await db
+    .select()
+    .from(schema.user)
+    .where(eq(schema.user.username, "user"))
+    .limit(1);
 
-  if (existingConfigs.length === 0) {
-    await db.insert(schema.agentConfigs).values([
+  if (existingTestUser.length === 0) {
+    const userId = crypto.randomUUID();
+    const hashedPassword = await hashPassword("test1234");
+    await db
+      .insert(schema.user)
+      .values({
+        id: userId,
+        name: "Test User",
+        email: "user@blackhouse.local",
+        emailVerified: true,
+        role: "user",
+        username: "user",
+      })
+      .onConflictDoNothing({ target: schema.user.email });
+
+    await db
+      .insert(schema.account)
+      .values({
+        id: crypto.randomUUID(),
+        accountId: userId,
+        providerId: "credential",
+        userId,
+        password: hashedPassword,
+      })
+      .onConflictDoNothing();
+
+    console.log("[blackhouse] Default non-admin user created (username: user, password: test1234)");
+  }
+
+  // Seed default agent blueprints.
+  //
+  // Note what is deliberately NOT here: a shared `claude-config` volume mounted
+  // at `~/.claude`. Every agent gets its own state volume (see
+  // `server/agents/lifecycle.ts`), because the sidecar tails
+  // `~/.claude/projects` for the channel transcript — one shared volume would
+  // let every agent read every other agent's conversation.
+  //
+  // `*-auth` volumes ARE shared: they hold provider credentials, which is the
+  // one thing agents legitimately have in common.
+  const existingBlueprints = await db.select().from(schema.agentBlueprints).limit(1);
+
+  if (existingBlueprints.length === 0) {
+    await db.insert(schema.agentBlueprints).values([
       {
-        preset: "claude-code",
-        displayName: "Claude Code",
-        agentCommand: "claude --dangerously-skip-permissions",
-        volumeMounts: [
-          { name: "claude-config", mountPath: "/home/workspace/.claude" },
-          { name: "claude-auth", mountPath: "/home/workspace/.config/claude-auth" },
-        ],
+        cli: "claude-code",
+        name: "Claude Code",
+        description: "Anthropic's CLI. Rich structured transcripts via session JSONL.",
+        // The flag is spelled out here, not just applied by the entrypoint, so
+        // that an operator editing this blueprint in the UI can SEE that a
+        // system prompt is being passed and can change or remove it. The
+        // entrypoint's identical fallback is guarded by a `contains` check on
+        // this exact variable name, so the two cannot double-apply.
+        agentCommand:
+          'claude --dangerously-skip-permissions --append-system-prompt "$(cat "$BLACKHOUSE_SYSTEM_PROMPT_FILE")"',
+        stateMountPath: "/home/workspace",
+        volumeMounts: [{ name: "claude-auth", mountPath: "/home/workspace/.config/claude-auth" }],
       },
       {
-        preset: "antigravity",
-        displayName: "Antigravity",
+        cli: "antigravity",
+        name: "Antigravity",
+        description: "Transcript is PTY-scraped server-side; no in-container adapter.",
         agentCommand: "agy --dangerously-skip-permissions",
-        // `agy` writes config to `~/.gemini` (inherits Gemini's layout) —
-        // see agent-presets.ts comment and 0004 migration.
-        volumeMounts: [{ name: "antigravity-config", mountPath: "/home/workspace/.gemini" }],
+        stateMountPath: "/home/workspace",
+        // `agy` writes config to `~/.gemini` (it inherits Gemini's layout).
+        volumeMounts: [{ name: "antigravity-auth", mountPath: "/home/workspace/.gemini-auth" }],
       },
       {
-        preset: "codex",
-        displayName: "Codex",
+        cli: "codex",
+        name: "Codex",
+        description: "Transcript is PTY-scraped server-side; no in-container adapter.",
         agentCommand: "codex --sandbox workspace-write --ask-for-approval on-request",
-        volumeMounts: [{ name: "codex-config", mountPath: "/home/workspace/.codex" }],
+        stateMountPath: "/home/workspace",
+        volumeMounts: [{ name: "codex-auth", mountPath: "/home/workspace/.codex-auth" }],
       },
     ]);
-    console.log("[blackhouse] Default agent configs created.");
+    console.log("[blackhouse] Default agent blueprints created.");
+  }
+
+  // Seed a default channel so a fresh install has somewhere to talk.
+  const existingChannels = await db.select().from(schema.channels).limit(1);
+  if (existingChannels.length === 0) {
+    await db.insert(schema.channels).values({
+      slug: "general",
+      name: "general",
+      topic: "Everything, until it needs its own room.",
+    });
+    console.log("[blackhouse] Default #general channel created.");
   }
 
   // Seed default docker config

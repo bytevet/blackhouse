@@ -2,10 +2,11 @@ import { useEffect, useRef, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Terminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
+import type { AgentStatus } from "@/db/schema";
 
 interface TerminalPanelProps {
-  sessionId: string;
-  status: string;
+  agentId: string;
+  status: AgentStatus;
   /**
    * Called when the user clicks a URL in terminal output. If provided, the
    * default xterm WebLinks behavior (`window.open` in a new tab) is bypassed
@@ -17,9 +18,12 @@ interface TerminalPanelProps {
 
 // Resize message prefix byte (0x01) — distinguishes from terminal input
 const RESIZE_PREFIX = 0x01;
+// System notice (0x02) — JSON payload, server → client only. Today it carries
+// the injection lifecycle so the UI can say "someone else is typing into this".
+const SYSTEM_PREFIX = 0x02;
 
 function RunningCat() {
-  return <img src="/nyancat.svg" alt="" className="h-4" draggable={false} />;
+  return <img src="/nyancat.svg" alt="" style={{ height: 16 }} draggable={false} />;
 }
 
 function encodeResize(cols: number, rows: number): ArrayBuffer {
@@ -30,7 +34,7 @@ function encodeResize(cols: number, rows: number): ArrayBuffer {
   return buf.buffer as ArrayBuffer;
 }
 
-export function TerminalPanel({ sessionId, status, onLinkClick }: TerminalPanelProps) {
+export function TerminalPanel({ agentId, status, onLinkClick }: TerminalPanelProps) {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -44,6 +48,10 @@ export function TerminalPanel({ sessionId, status, onLinkClick }: TerminalPanelP
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const [connected, setConnected] = useState(false);
   const [focused, setFocused] = useState(false);
+  // The harness writes injected prompts into the same stdin the user types on.
+  // Without this banner a multi-KB paste appearing under your cursor is
+  // indistinguishable from the agent having gone haywire.
+  const [injecting, setInjecting] = useState(false);
 
   const sendResize = useCallback((cols: number, rows: number, immediate = false) => {
     if (immediate) {
@@ -70,7 +78,7 @@ export function TerminalPanel({ sessionId, status, onLinkClick }: TerminalPanelP
     const tokenMatch = document.cookie.match(/better-auth\.session_token=([^;]+)/);
     const tokenParam = tokenMatch ? `?token=${encodeURIComponent(tokenMatch[1])}` : "";
     const ws = new WebSocket(
-      `${protocol}//${window.location.host}/api/terminal/${sessionId}${tokenParam}`,
+      `${protocol}//${window.location.host}/api/terminal/${agentId}${tokenParam}`,
     );
     wsRef.current = ws;
 
@@ -102,8 +110,17 @@ export function TerminalPanel({ sessionId, status, onLinkClick }: TerminalPanelP
         const payload = bytes.subarray(1);
         if (type === 0x00) {
           terminal.write(payload);
+        } else if (type === SYSTEM_PREFIX) {
+          // `{ event: "inject_start" | "inject_end", ... }`. Unknown events are
+          // ignored rather than surfaced — the server is free to add more.
+          try {
+            const notice = JSON.parse(new TextDecoder().decode(payload)) as { event?: string };
+            if (notice.event === "inject_start") setInjecting(true);
+            else if (notice.event === "inject_end") setInjecting(false);
+          } catch {
+            // Malformed notice — the terminal itself is unaffected, so drop it.
+          }
         }
-        // 0x02 = system info — ignore
         // Other types — ignore
       } else {
         // Plain text fallback
@@ -113,14 +130,16 @@ export function TerminalPanel({ sessionId, status, onLinkClick }: TerminalPanelP
 
     ws.onclose = () => {
       setConnected(false);
+      setInjecting(false);
       terminalRef.current?.write("\r\n\x1b[33m[Connection closed]\x1b[0m\r\n");
     };
 
     ws.onerror = () => {
       setConnected(false);
+      setInjecting(false);
       terminalRef.current?.write("\r\n\x1b[31m[Connection error]\x1b[0m\r\n");
     };
-  }, [sessionId, status, sendResize]);
+  }, [agentId, status, sendResize]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -152,9 +171,10 @@ export function TerminalPanel({ sessionId, status, onLinkClick }: TerminalPanelP
 
       if (disposed || !containerRef.current) return;
 
+      // `--ny-ink-0` is theme-invariant: a light xterm is not a thing anyone
+      // wants, so the terminal stays dark in both themes.
       const termBg =
-        getComputedStyle(containerRef.current).getPropertyValue("--color-terminal").trim() ||
-        "#0a0a0a";
+        getComputedStyle(containerRef.current).getPropertyValue("--ny-ink-0").trim() || "#0a0a0a";
 
       terminal = new Terminal({
         fontFamily: "'Source Code Pro Variable', 'Source Code Pro', monospace",
@@ -275,36 +295,98 @@ export function TerminalPanel({ sessionId, status, onLinkClick }: TerminalPanelP
       wsRef.current = null;
       setConnected(false);
       setFocused(false);
+      setInjecting(false);
       terminal?.dispose();
     };
   }, [connect, sendResize]);
 
   if (status !== "running") {
     return (
-      <div className="flex h-full items-center justify-center bg-terminal text-sm text-muted-foreground">
+      <div
+        style={{
+          height: "100%",
+          display: "grid",
+          placeItems: "center",
+          background: "var(--ny-ink-0)",
+          color: "var(--ny-ink-6)",
+          fontFamily: "var(--ny-font-mono)",
+          fontSize: 12,
+        }}
+      >
         {t("terminal.notRunning", { status })}
       </div>
     );
   }
 
   return (
-    <div className="relative h-full w-full bg-terminal">
-      <div ref={containerRef} className="absolute inset-0 bottom-6" />
+    <div
+      style={{ position: "relative", height: "100%", width: "100%", background: "var(--ny-ink-0)" }}
+    >
+      <div ref={containerRef} style={{ position: "absolute", inset: 0, bottom: 24 }} />
+
+      {injecting && (
+        <div
+          role="status"
+          style={{
+            position: "absolute",
+            top: 8,
+            left: "50%",
+            transform: "translateX(-50%)",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "5px 11px",
+            borderRadius: 999,
+            border: "1px solid var(--ny-info-border)",
+            background: "var(--ny-info-subtle)",
+            color: "var(--ny-info-text)",
+            fontFamily: "var(--ny-font-mono)",
+            fontSize: 11,
+            pointerEvents: "none",
+          }}
+        >
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              background: "var(--ny-info)",
+              animation: "nyPulse 1.1s ease-in-out infinite",
+            }}
+          />
+          {t("terminal.injecting")}
+        </div>
+      )}
+
       <div
-        className="absolute inset-x-0 bottom-0 flex h-6 items-center justify-between border-t border-white/10 px-2 font-mono text-xs"
         onClick={() => terminalRef.current?.focus()}
+        style={{
+          position: "absolute",
+          insetInline: 0,
+          bottom: 0,
+          height: 24,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "0 8px",
+          borderTop: "1px solid rgb(255 255 255 / 0.1)",
+          fontFamily: "var(--ny-font-mono)",
+          fontSize: 11,
+          color: "var(--ny-ink-6)",
+        }}
       >
-        <span className="flex items-center gap-1.5">
-          <span className={`size-1.5 rounded-full ${connected ? "bg-success" : "bg-error"}`} />
-          <span className="text-muted-foreground">
-            {connected ? t("terminal.connected") : t("terminal.disconnected")}
-          </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              background: connected ? "var(--ny-success)" : "var(--ny-danger)",
+            }}
+          />
+          {connected ? t("terminal.connected") : t("terminal.disconnected")}
         </span>
-        {focused ? (
-          <RunningCat />
-        ) : (
-          <span className="text-muted-foreground/50">{t("terminal.clickToFocus")}</span>
-        )}
+        {focused ? <RunningCat /> : <span>{t("terminal.clickToFocus")}</span>}
       </div>
     </div>
   );

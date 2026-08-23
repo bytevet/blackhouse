@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<script src="icons.js"></script>
+<link rel="stylesheet" href="_ds/not-yet-dashboard-design-system-08a144c3-b949-4751-9eef-342d9527b153/_ds_bundle.css">
+<link rel="stylesheet" href="_ds/not-yet-dashboard-design-system-08a144c3-b949-4751-9eef-342d9527b153/styles.css">
+<script src="_ds/not-yet-dashboard-design-system-08a144c3-b949-4751-9eef-342d9527b153/_ds_bundle.js"></script>
+<style>
+  html,body{margin:0;height:100%}
+  *{box-sizing:border-box}
+  @keyframes nyPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.82)}}
+  @keyframes nyRing{0%{box-shadow:0 0 0 0 var(--ring-c)}70%{box-shadow:0 0 0 5px transparent}100%{box-shadow:0 0 0 0 transparent}}
+  @keyframes nyBlink{0%,49%{opacity:1}50%,100%{opacity:0}}
+  a{color:var(--ny-accent-text)}
+  a:hover{color:var(--ny-accent)}
+  .bh-scroll::-webkit-scrollbar{width:10px;height:10px}
+  .bh-scroll::-webkit-scrollbar-thumb{background:var(--ny-border-strong);border-radius:8px;border:2px solid transparent;background-clip:content-box}
+  .bh-scroll::-webkit-scrollbar-track{background:transparent}
+  .term::-webkit-scrollbar{width:10px}
+  .term::-webkit-scrollbar-thumb{background:var(--ny-ink-5);border-radius:8px;border:2px solid transparent;background-clip:content-box}
+</style>
+</helmet>
+<x-import component-from-global-scope="NotYetUI.ThemeProvider" theme="{{ theme }}" hint-size="100%,100%">
+<div style="height:100vh;width:100%;display:flex;flex-direction:column;background:var(--ny-bg);color:var(--ny-text);font-family:var(--ny-font-sans);font-size:14px;overflow:hidden">
+
+  <!-- STOP CONFIRM DIALOG -->
+  <x-import component-from-global-scope="NotYetUI.Dialog" open="{{ stopOpen }}" onClose="{{ closeStop }}" title="Stop @scout?" description="The sandbox keeps its filesystem, but the running terminal session ends and any in-flight task is cancelled." size="sm" hint-size="0,0">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;gap:10px;align-items:flex-start;border:1px solid var(--ny-warning-border);background:var(--ny-warning-subtle);border-radius:9px;padding:10px 12px">
+        <dc-import name="Icon" n="triangle-alert" sz="16" sw="2" style="color:var(--ny-warning-text)" hint-size="16px,16px"></dc-import>
+        <span style="font-size:12.5px;line-height:1.5;color:var(--ny-warning-text)">@scout is <strong>busy</strong> — it's mid-way through reading the schema. Stopping now discards that turn.</span>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <x-import component-from-global-scope="NotYetUI.Button" variant="ghost" size="md" onClick="{{ closeStop }}" hint-size="auto,34px">Keep running</x-import>
+        <x-import component-from-global-scope="NotYetUI.Button" variant="danger" size="md" onClick="{{ closeStop }}" hint-size="auto,34px">Stop agent</x-import>
+      </div>
+    </div>
+  </x-import>
+
+  <!-- TOP BAR -->
+  <header style="flex:none;display:flex;align-items:center;gap:12px;padding:10px 18px;border-bottom:1px solid var(--ny-border);background:var(--ny-surface-sunken)">
+    <a href="Channel View.dc.html" style="display:flex;align-items:center;gap:7px;text-decoration:none;color:var(--ny-text-subtle);font-size:12.5px;font-family:var(--ny-font-mono)" style-hover="color:var(--ny-text)"><dc-import name="Icon" n="chevron-left" sz="15" sw="2" hint-size="15px,15px"></dc-import>#backend</a>
+    <span style="color:var(--ny-text-subtle)">/</span>
+    <span style="font-family:var(--ny-font-mono);font-size:12.5px;color:var(--ny-text)">agents</span>
+    <span style="color:var(--ny-text-subtle)">/</span>
+    <span style="font-family:var(--ny-font-mono);font-size:12.5px;font-weight:600;color:var(--ny-text)">@scout</span>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+      <div onClick="{{ toggleTheme }}" role="button" title="Toggle theme" style="width:30px;height:30px;border-radius:7px;display:grid;place-items:center;cursor:pointer;color:var(--ny-text-subtle);border:1px solid var(--ny-border)" style-hover="background:var(--ny-surface-hover);color:var(--ny-text)"><dc-import name="Icon" n="moon" sz="15" sw="2" hint-size="15px,15px"></dc-import></div>
+    </div>
+  </header>
+
+  <!-- AGENT HEADER -->
+  <div style="flex:none;display:flex;align-items:center;gap:18px;padding:16px 20px;border-bottom:1px solid var(--ny-border);flex-wrap:wrap">
+    <div style="position:relative;flex:none">
+      <div style="width:52px;height:52px;border-radius:13px;background:var(--ny-surface-raised);border:1.5px solid var(--ny-accent-border);display:grid;place-items:center;font-family:var(--ny-font-mono);font-size:18px;font-weight:700;color:var(--ny-accent-text)">SC</div>
+      <span style="position:absolute;right:-3px;bottom:-3px;width:15px;height:15px;border-radius:50%;background:var(--ny-success);border:3px solid var(--ny-bg);--ring-c:var(--ny-success);animation:nyRing 1.8s ease-out infinite"></span>
+    </div>
+    <div style="min-width:0">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font-size:19px;font-weight:700;color:var(--ny-text)">Scout</span><span style="font-family:var(--ny-font-mono);font-size:14px;color:var(--ny-text-subtle)">@scout</span></div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:7px;flex-wrap:wrap">
+        <span style="display:inline-flex;align-items:center;gap:6px;font-family:var(--ny-font-mono);font-size:11px;color:var(--ny-success-text);background:var(--ny-success-subtle);border:1px solid var(--ny-success-border);border-radius:20px;padding:2px 9px"><span style="width:6px;height:6px;border-radius:50%;background:var(--ny-success)"></span>running</span>
+        <span style="display:inline-flex;align-items:center;gap:6px;font-family:var(--ny-font-mono);font-size:11px;color:var(--ny-info-text);background:var(--ny-info-subtle);border:1px solid var(--ny-info-border);border-radius:20px;padding:2px 9px">busy · reading schema.ts</span>
+      </div>
+    </div>
+
+    <!-- badges -->
+    <div style="display:flex;align-items:center;gap:20px;margin-left:8px;flex-wrap:wrap">
+      <div><div style="font-size:10px;font-family:var(--ny-font-mono);text-transform:uppercase;letter-spacing:.05em;color:var(--ny-text-subtle);margin-bottom:4px">Blueprint</div><span style="font-family:var(--ny-font-mono);font-size:12px;color:var(--ny-text);display:inline-flex;align-items:center;gap:6px"><dc-import name="Icon" n="layout-grid" sz="12" sw="2" hint-size="12px,12px"></dc-import>repo-summariser</span></div>
+      <div><div style="font-size:10px;font-family:var(--ny-font-mono);text-transform:uppercase;letter-spacing:.05em;color:var(--ny-text-subtle);margin-bottom:4px">Sandbox</div><x-import component-from-global-scope="NotYetUI.Badge" tone="info" variant="subtle" size="sm" hint-size="auto,20px">gVisor</x-import></div>
+      <div><div style="font-size:10px;font-family:var(--ny-font-mono);text-transform:uppercase;letter-spacing:.05em;color:var(--ny-text-subtle);margin-bottom:4px">Egress</div><x-import component-from-global-scope="NotYetUI.Badge" tone="success" variant="subtle" size="sm" hint-size="auto,20px">allowlist · 4</x-import></div>
+      <div style="min-width:150px"><div style="display:flex;justify-content:space-between;font-size:10px;font-family:var(--ny-font-mono);text-transform:uppercase;letter-spacing:.05em;color:var(--ny-text-subtle);margin-bottom:5px"><span>Budget</span><span style="color:var(--ny-text-muted);text-transform:none;letter-spacing:0">$4.20 / $10.00</span></div><div style="height:6px;border-radius:20px;background:var(--ny-surface-active);overflow:hidden"><div style="width:42%;height:100%;background:var(--ny-success);border-radius:20px"></div></div><div style="font-size:10px;color:var(--ny-text-subtle);margin-top:4px;font-family:var(--ny-font-mono)">resets daily · 00:00 UTC</div></div>
+    </div>
+
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+      <x-import component-from-global-scope="NotYetUI.Button" variant="secondary" size="sm" hint-size="auto,28px">Restart</x-import>
+      <x-import component-from-global-scope="NotYetUI.Button" variant="danger" size="sm" onClick="{{ openStop }}" hint-size="auto,28px">Stop</x-import>
+    </div>
+  </div>
+
+  <!-- TAB BAR (single-pane mode) -->
+  <!-- VIEW BAR: tabs + split switch (height follows the tab bar) -->
+  <div style="flex:none;display:flex;gap:16px;padding:0 20px;border-bottom:1px solid var(--ny-border)">
+    <div style="flex:1;min-width:0;padding-top:6px"><x-import component-from-global-scope="NotYetUI.Tabs" items="{{ barTabItems }}" value="{{ barTabValue }}" onChange="{{ barTabChange }}" label="Agent view" hint-size="100%,44px"></x-import></div>
+    <div style="display:flex;align-items:center;gap:10px;align-self:stretch">
+      <x-import component-from-global-scope="NotYetUI.Switch" size="sm" checked="{{ split }}" onChange="{{ setSplit }}" label="Split" hint-size="86px,20px"></x-import>
+    </div>
+  </div>
+
+  <!-- TAB CONTENT -->
+  <div style="flex:1;min-height:0;display:flex;flex-direction:row">
+
+    <!-- ===== TERMINAL (left pane) ===== -->
+    <sc-if value="{{ showLeft }}" hint-placeholder-val="{{ true }}">
+      <div style="{{ leftPaneStyle }}">
+        <div style="{{ termFrameStyle }}">
+          <!-- terminal toolbar -->
+          <sc-if value="{{ splitOff }}" hint-placeholder-val="{{ true }}">
+          <div style="flex:none;display:flex;align-items:center;gap:10px;padding:9px 14px;background:var(--ny-ink-1);border-bottom:1px solid var(--ny-ink-4)">
+            <div style="display:flex;gap:7px">
+              <span onClick="{{ openStop }}" role="button" title="Stop · detach session" style="width:12px;height:12px;border-radius:50%;background:#ff5f57;cursor:pointer;transition:filter .12s" style-hover="filter:brightness(1.25)"></span>
+              <span title="Minimize — unavailable" style="width:12px;height:12px;border-radius:50%;background:#febc2e;opacity:.32;cursor:not-allowed"></span>
+              <span role="button" title="Fullscreen" style="width:12px;height:12px;border-radius:50%;background:#28c840;cursor:pointer;transition:filter .12s" style-hover="filter:brightness(1.25)"></span>
+            </div>
+            <span style="font-family:var(--ny-font-mono);font-size:12px;color:var(--ny-ink-7);margin-left:6px">agent-scout-7f3a · zsh · claude-code</span>
+            <span style="display:inline-flex;align-items:center;gap:5px;font-family:var(--ny-font-mono);font-size:11px;color:#28c840;margin-left:4px"><span style="width:6px;height:6px;border-radius:50%;background:#28c840;animation:nyPulse 1.8s ease-in-out infinite"></span>attached</span>
+          </div>
+          </sc-if>
+          <!-- terminal body -->
+          <div class="term" style="flex:1;min-height:0;overflow-y:auto;padding:14px 16px;font-family:var(--ny-font-mono);font-size:13px;line-height:1.7;color:var(--ny-ink-8);background:var(--ny-ink-0)">
+            <div style="color:var(--ny-ink-6)">✷ claude-code v1.9.2 · model claude-sonnet · cwd /workspace/storefront</div>
+            <div style="color:var(--ny-ink-6);margin-bottom:10px">✷ sandbox gVisor · egress allowlist [github.com, registry.npmjs.org, api.stripe.com, +1]</div>
+
+            <!-- injected prompt from channel -->
+            <div style="border:1px solid var(--ny-ink-4);border-left:2px solid var(--ny-accent);border-radius:8px;background:var(--ny-ink-1);padding:8px 12px;margin:2px 0 12px">
+              <div style="color:var(--ny-ink-7);font-size:11px">▶ injected from <span style="color:var(--ny-accent)">#backend</span> by <span style="color:var(--ny-ink-8)">@dana</span> · 10:24 · delivery: queue</div>
+              <div style="color:var(--ny-ink-8);margin-top:4px">summarise everything the checkout flow touches — we're about to refactor the payments module and I don't want to miss a call site.</div>
+            </div>
+
+            <div style="color:#7aa2f7">❯ scout is thinking…</div>
+            <div style="margin:6px 0"><span style="color:#28c840">⏺</span> <span style="color:var(--ny-ink-8)">Read</span>(<span style="color:#e0af68">src/app/checkout/page.tsx</span>) <span style="color:var(--ny-ink-6)">→ 118 lines</span></div>
+            <div style="margin:6px 0"><span style="color:#28c840">⏺</span> <span style="color:var(--ny-ink-8)">Read</span>(<span style="color:#e0af68">src/lib/payments/stripe.ts</span>) <span style="color:var(--ny-ink-6)">→ 204 lines</span></div>
+            <div style="margin:6px 0"><span style="color:#28c840">⏺</span> <span style="color:var(--ny-ink-8)">Grep</span>(<span style="color:#e0af68">"stripe"</span>) <span style="color:var(--ny-ink-6)">→ 42 matches in 11 files</span></div>
+            <div style="margin:6px 0;color:var(--ny-ink-7);padding-left:16px;border-left:1px solid var(--ny-ink-4)">src/app/api/webhooks/stripe/route.ts:14  const stripe = new Stripe(process.env.STRIPE_KEY!)</div>
+            <div style="margin:6px 0"><span style="color:#f7768e">⏺</span> <span style="color:var(--ny-ink-8)">Read</span>(<span style="color:#e0af68">src/db/schema.ts</span>) <span style="color:var(--ny-ink-6)">→ 340 lines</span></div>
+            <div style="margin:10px 0 4px;color:var(--ny-ink-8)">The checkout flow touches <span style="color:#28c840">4 modules</span>. Key payments call sites:</div>
+            <div style="color:var(--ny-ink-7);padding-left:16px">• stripe.ts (7 exports) · checkout/actions.ts (3 server actions) · db/schema.ts (orders FK) · webhooks/stripe (⚠ constructs its own client)</div>
+
+            <!-- live status line -->
+            <div style="margin-top:12px;display:flex;align-items:center;gap:8px;color:#7aa2f7"><span style="width:7px;height:7px;border-radius:50%;background:#7aa2f7;animation:nyPulse 1.4s ease-in-out infinite"></span>running · rendering checkout-flow-map.html</div>
+            <div style="margin-top:8px;color:var(--ny-ink-8)">❯ <span style="display:inline-block;width:8px;height:15px;background:var(--ny-ink-8);vertical-align:middle;animation:nyBlink 1.1s step-end infinite"></span></div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- resize handle -->
+    <sc-if value="{{ split }}" hint-placeholder-val="{{ false }}">
+      <div onMouseDown="{{ startDrag }}" title="Drag to resize" style="flex:none;width:7px;cursor:col-resize;background:var(--ny-border);display:flex;align-items:center;justify-content:center" style-hover="background:var(--ny-accent)"><span style="width:2px;height:26px;border-radius:2px;background:var(--ny-text-subtle)"></span></div>
+    </sc-if>
+
+    <!-- ===== RIGHT PANE (IDE / Browser / Artifacts / Settings) ===== -->
+    <sc-if value="{{ showRight }}" hint-placeholder-val="{{ false }}">
+    <div style="{{ rightPaneStyle }}">
+
+    <!-- ===== IDE ===== -->
+    <sc-if value="{{ rIde }}" hint-placeholder-val="{{ false }}">
+      <div style="flex:1;min-height:0;padding:{{ panePad }}">
+        <div style="{{ ideFrameStyle }}">
+          <!-- file tree -->
+          <div style="width:230px;flex:none;background:var(--ny-ink-1);border-right:1px solid var(--ny-ink-4);padding:10px 8px;color:var(--ny-ink-7);overflow-y:auto">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--ny-ink-6);padding:2px 8px 8px">storefront</div>
+            <div style="padding:3px 8px;color:var(--ny-ink-7)">▾ src</div>
+            <div style="padding:3px 8px 3px 20px;color:var(--ny-ink-7)">▾ app / checkout</div>
+            <div style="padding:3px 8px 3px 32px">page.tsx</div>
+            <div style="padding:3px 8px 3px 32px">actions.ts</div>
+            <div style="padding:3px 8px 3px 20px;color:var(--ny-ink-7)">▾ lib / payments</div>
+            <div style="padding:3px 8px 3px 32px;background:var(--ny-ink-3);color:var(--ny-ink-8);border-radius:5px">stripe.ts</div>
+            <div style="padding:3px 8px 3px 20px">db / schema.ts</div>
+          </div>
+          <!-- editor -->
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+            <div style="flex:none;display:flex;background:var(--ny-ink-1);border-bottom:1px solid var(--ny-ink-4)"><span style="padding:8px 14px;background:var(--ny-ink-0);color:var(--ny-ink-8);border-right:1px solid var(--ny-ink-4);border-top:2px solid var(--ny-accent)">stripe.ts</span><span style="padding:8px 14px;color:var(--ny-ink-6)">schema.ts</span></div>
+            <div style="flex:1;min-height:0;overflow:auto;display:flex;color:var(--ny-ink-8);line-height:1.7">
+              <div style="flex:none;padding:12px 12px;text-align:right;color:var(--ny-ink-6);user-select:none;background:var(--ny-ink-0)"><div>1</div><div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div><div>8</div><div>9</div><div>10</div></div>
+              <div style="padding:12px 14px">
+                <div><span style="color:var(--ny-ink-6)">// src/lib/payments/stripe.ts</span></div>
+                <div><span style="color:#bb9af7">import</span> Stripe <span style="color:#bb9af7">from</span> <span style="color:#9ece6a">'stripe'</span></div>
+                <div>&nbsp;</div>
+                <div><span style="color:#bb9af7">const</span> key = process.env.<span style="color:#7dcfff">STRIPE_SECRET_KEY</span></div>
+                <div><span style="color:#bb9af7">if</span> (!key) <span style="color:#bb9af7">throw new</span> <span style="color:#7dcfff">Error</span>(<span style="color:#9ece6a">'missing key'</span>)</div>
+                <div>&nbsp;</div>
+                <div><span style="color:#bb9af7">export const</span> <span style="color:#7aa2f7">stripe</span> = <span style="color:#bb9af7">new</span> <span style="color:#7dcfff">Stripe</span>(key, {</div>
+                <div>&nbsp;&nbsp;apiVersion: <span style="color:#9ece6a">'2024-06-20'</span>,</div>
+                <div>&nbsp;&nbsp;typescript: <span style="color:#ff9e64">true</span>,</div>
+                <div>})</div>
+              </div>
+            </div>
+            <div style="flex:none;display:flex;align-items:center;gap:16px;padding:5px 14px;background:var(--ny-accent);color:var(--ny-text-on-accent);font-size:11px"><span>⎇ main</span><span>TypeScript</span><span>LSP ✓</span><span style="margin-left:auto">Ln 8, Col 24 · read-only (agent workspace)</span></div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ===== BROWSER ===== -->
+    <sc-if value="{{ rBrowser }}" hint-placeholder-val="{{ false }}">
+      <div style="flex:1;min-height:0;padding:{{ panePad }};display:flex;flex-direction:column;gap:12px">
+        <div style="{{ browserFrameStyle }}">
+          <div style="flex:none;display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--ny-surface-sunken);border-bottom:1px solid var(--ny-border)">
+            <div style="display:flex;gap:5px"><dc-import name="Icon" n="chevron-left" sz="15" sw="2" style="color:var(--ny-text-subtle)" hint-size="15px,15px"></dc-import><dc-import name="Icon" n="chevron-right" sz="15" sw="2" style="color:var(--ny-text-subtle)" hint-size="15px,15px"></dc-import><dc-import name="Icon" n="rotate-cw" sz="15" sw="2" style="color:var(--ny-text-subtle)" hint-size="15px,15px"></dc-import></div>
+            <div style="flex:1;display:flex;align-items:center;gap:8px;background:var(--ny-surface);border:1px solid var(--ny-border);border-radius:7px;padding:5px 11px;font-family:var(--ny-font-mono);font-size:12px;color:var(--ny-text-muted)"><dc-import name="Icon" n="lock" sz="12" sw="2" style="color:var(--ny-success-text)" hint-size="12px,12px"></dc-import>localhost:3000/checkout</div>
+            <span style="font-family:var(--ny-font-mono);font-size:11px;color:var(--ny-text-subtle)">headless · 1280×800</span>
+          </div>
+          <div style="flex:1;min-height:0;display:grid;place-items:center;background:var(--ny-bg);color:var(--ny-text-subtle)">
+            <div style="width:420px;max-width:80%;border:1px solid var(--ny-border);border-radius:12px;background:var(--ny-surface);padding:22px;box-shadow:var(--ny-shadow-md)">
+              <div style="font-size:15px;font-weight:700;color:var(--ny-text)">Checkout</div>
+              <div style="height:1px;background:var(--ny-border);margin:12px 0"></div>
+              <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--ny-text-muted);margin-bottom:8px"><span>Standard tee × 2</span><span style="font-family:var(--ny-font-mono)">$48.00</span></div>
+              <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--ny-text-muted);margin-bottom:14px"><span>Shipping</span><span style="font-family:var(--ny-font-mono)">$6.00</span></div>
+              <div style="height:38px;border-radius:8px;background:var(--ny-accent);color:var(--ny-text-on-accent);display:grid;place-items:center;font-size:13px;font-weight:600">Pay $54.00</div>
+            </div>
+          </div>
+        </div>
+        <!-- console/log panel -->
+        <div style="{{ consoleFrameStyle }}">
+          <div style="flex:none;display:flex;align-items:center;gap:14px;padding:6px 12px;background:var(--ny-ink-1);border-bottom:1px solid var(--ny-ink-4);font-family:var(--ny-font-mono);font-size:11px"><span style="color:var(--ny-ink-8);border-bottom:2px solid var(--ny-accent);padding-bottom:4px">Console</span><span style="color:var(--ny-ink-6)">Network</span><span style="margin-left:auto;color:var(--ny-ink-6)">3 logs · 1 warning</span></div>
+          <div class="term" style="flex:1;overflow-y:auto;padding:8px 12px;font-family:var(--ny-font-mono);font-size:12px;line-height:1.7">
+            <div style="color:var(--ny-ink-7)"><span style="color:#7aa2f7">[log]</span> checkout mounted · cart 2 items</div>
+            <div style="color:var(--ny-ink-7)"><span style="color:#7aa2f7">[log]</span> POST /api/checkout/intent → 200 (142ms)</div>
+            <div style="color:#e0af68"><span>[warn]</span> stripe.js loaded twice — see webhooks/stripe/route.ts</div>
+            <div style="color:var(--ny-ink-7)"><span style="color:#7aa2f7">[log]</span> payment_intent pi_3Q…created</div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ===== ARTIFACTS ===== -->
+    <sc-if value="{{ rArtifacts }}" hint-placeholder-val="{{ false }}">
+      <div class="bh-scroll" style="flex:1;min-height:0;overflow-y:auto;padding:{{ panePad2 }}">
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px;max-width:1100px">
+          <sc-for list="{{ artifacts }}" as="a" hint-placeholder-count="4">
+            <div style="border:1px solid var(--ny-border);border-radius:12px;overflow:hidden;background:var(--ny-surface)" style-hover="border-color:var(--ny-border-strong)">
+              <div style="height:130px;background:var(--ny-surface-sunken);display:grid;place-items:center;border-bottom:1px solid var(--ny-border);color:var(--ny-text-subtle)"><span style="{{ a.iconStyle }}"><dc-import name="Icon" n="app-window" sz="22" sw="1.8" hint-size="22px,22px"></dc-import></span></div>
+              <div style="padding:11px 13px">
+                <div style="font-size:13px;font-weight:600;color:var(--ny-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ a.name }}</div>
+                <div style="font-size:11px;color:var(--ny-text-subtle);font-family:var(--ny-font-mono);margin-top:3px">{{ a.meta }}</div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ===== SETTINGS ===== -->
+    <sc-if value="{{ rSettings }}" hint-placeholder-val="{{ false }}">
+      <div class="bh-scroll" style="flex:1;min-height:0;overflow-y:auto;padding:{{ panePad2 }}">
+        <div style="max-width:720px;display:flex;flex-direction:column;gap:14px">
+          <div style="border:1px solid var(--ny-border);border-radius:12px;background:var(--ny-surface);padding:16px 18px">
+            <div style="font-size:13px;font-weight:700;color:var(--ny-text);margin-bottom:3px">System prompt override</div>
+            <div style="font-size:11.5px;color:var(--ny-text-subtle);margin-bottom:10px">Appended to the blueprint's base prompt. Leave empty to inherit.</div>
+            <textarea style="width:100%;min-height:88px;border:1px solid var(--ny-border-strong);border-radius:9px;background:var(--ny-surface-sunken);color:var(--ny-text);font-family:var(--ny-font-mono);font-size:12.5px;line-height:1.55;padding:10px 12px;resize:vertical;outline:none">You are Scout. Always cite exact file:line for every claim. Never edit files — you are read-only reconnaissance for the team.</textarea>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+            <div style="border:1px solid var(--ny-border);border-radius:12px;background:var(--ny-surface);padding:16px 18px">
+              <div style="font-size:13px;font-weight:700;color:var(--ny-text);margin-bottom:10px">Repo &amp; branch</div>
+              <div style="display:flex;align-items:center;gap:8px;border:1px solid var(--ny-border-strong);border-radius:9px;background:var(--ny-surface-sunken);padding:8px 11px;font-family:var(--ny-font-mono);font-size:12.5px;color:var(--ny-text)">acme/storefront <span style="color:var(--ny-text-subtle)">@</span> main</div>
+            </div>
+            <div style="border:1px solid var(--ny-border);border-radius:12px;background:var(--ny-surface);padding:16px 18px">
+              <div style="font-size:13px;font-weight:700;color:var(--ny-text);margin-bottom:10px">Resources</div>
+              <div style="display:flex;gap:8px;font-family:var(--ny-font-mono);font-size:12px;color:var(--ny-text-muted)"><span style="flex:1;border:1px solid var(--ny-border-strong);border-radius:8px;background:var(--ny-surface-sunken);padding:8px 10px">2 vCPU</span><span style="flex:1;border:1px solid var(--ny-border-strong);border-radius:8px;background:var(--ny-surface-sunken);padding:8px 10px">4 GB RAM</span></div>
+            </div>
+          </div>
+          <div style="border:1px solid var(--ny-border);border-radius:12px;background:var(--ny-surface);padding:16px 18px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><div style="font-size:13px;font-weight:700;color:var(--ny-text)">Egress allowlist</div><x-import component-from-global-scope="NotYetUI.Badge" tone="success" variant="subtle" size="sm" hint-size="auto,20px">allowlist mode</x-import></div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;font-family:var(--ny-font-mono);font-size:12px">
+              <span style="border:1px solid var(--ny-border);border-radius:20px;padding:3px 10px;color:var(--ny-text-muted)">github.com</span>
+              <span style="border:1px solid var(--ny-border);border-radius:20px;padding:3px 10px;color:var(--ny-text-muted)">registry.npmjs.org</span>
+              <span style="border:1px solid var(--ny-border);border-radius:20px;padding:3px 10px;color:var(--ny-text-muted)">api.stripe.com</span>
+              <span style="border:1px solid var(--ny-border);border-radius:20px;padding:3px 10px;color:var(--ny-text-muted)">*.sentry.io</span>
+              <span style="border:1px dashed var(--ny-border-strong);border-radius:20px;padding:3px 10px;color:var(--ny-text-subtle);cursor:pointer">+ add host</span>
+            </div>
+          </div>
+          <div style="border:1px solid var(--ny-danger-border);border-radius:12px;background:var(--ny-danger-subtle);padding:16px 18px;display:flex;align-items:center;gap:14px">
+            <div style="flex:1"><div style="font-size:13px;font-weight:700;color:var(--ny-danger-text)">Destroy agent</div><div style="font-size:11.5px;color:var(--ny-text-muted);margin-top:2px">Deletes the sandbox and its filesystem permanently. Artifacts already posted to channels are kept.</div></div>
+            <x-import component-from-global-scope="NotYetUI.Button" variant="danger" size="sm" hint-size="auto,28px">Destroy…</x-import>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+    </div>
+    </sc-if>
+
+  </div>
+</div>
+</x-import>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;tab&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;terminal&quot;,&quot;ide&quot;,&quot;browser&quot;,&quot;artifacts&quot;,&quot;settings&quot;],&quot;default&quot;:&quot;terminal&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  state = {
+    theme: this.props.theme ?? 'dark',
+    tab: this.props.tab ?? 'terminal',
+    stopOpen: false,
+    split: false,
+    rightTab: 'ide',
+    leftPct: 50,
+  };
+
+  startDrag = (e) => {
+    const row = e.currentTarget.parentElement;
+    const rect = row.getBoundingClientRect();
+    const move = (ev) => {
+      let pct = ((ev.clientX - rect.left) / rect.width) * 100;
+      pct = Math.max(26, Math.min(74, pct));
+      this.setState({ leftPct: pct });
+    };
+    const up = () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      document.body.style.userSelect = '';
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    document.body.style.userSelect = 'none';
+  };
+
+  lucideEl(name, size) {
+    const table = window.__bhIcons || {};
+    const kebab = String(name).replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+    const node = table[kebab] || table[name];
+    if (!Array.isArray(node)) return null;
+    const build = (arr) => arr.map((c, i) => {
+      const attrs = { key: i };
+      for (const [k, v] of Object.entries(c[1] || {})) attrs[k.replace(/-([a-z])/g, (_, x) => x.toUpperCase())] = v;
+      return React.createElement(c[0], attrs, c[2] ? build(c[2]) : null);
+    });
+    return React.createElement('svg', {
+      width: size, height: size, viewBox: '0 0 24 24', fill: 'none',
+      stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round',
+      style: { opacity: 0.75, flex: 'none', display: 'block', verticalAlign: 'middle' },
+    }, build(node));
+  }
+
+  renderVals() {
+    const tab = this.state.tab;
+    const pinnedLabel = React.createElement('span',
+      { style: { display: 'inline-flex', alignItems: 'center', gap: '6px' } },
+      this.lucideEl('Pin', 12), 'Terminal');
+    const split = this.state.split;
+    const rt = split ? this.state.rightTab : tab;
+    const rightTabItems = [
+      { value:'ide', label:'IDE' },
+      { value:'browser', label:'Browser' },
+      { value:'artifacts', label:'Artifacts' },
+      { value:'settings', label:'Settings' },
+    ];
+    const tabItems = [{ value:'terminal', label:'Terminal' }, ...rightTabItems];
+    const artifacts = [
+      { name:'checkout-flow-map.html', meta:'today 10:24 · 24 KB', tone:'info' },
+      { name:'test-report.html', meta:'today 09:58 · 61 KB', tone:'success' },
+      { name:'coverage-summary.html', meta:'yesterday · 18 KB', tone:'neutral' },
+      { name:'schema-erd.html', meta:'2d ago · 44 KB', tone:'accent' },
+    ].map(a => ({ ...a, iconStyle: `color:var(--ny-${a.tone}-text)` }));
+
+    return {
+      theme: this.state.theme,
+      toggleTheme: () => this.setState(s => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
+      tab,
+      setTab: (v) => this.setState({ tab: v }),
+      tabItems,
+      barTabItems: split ? tabItems.map(t => t.value === 'terminal' ? { ...t, label: pinnedLabel, disabled: true } : t) : tabItems,
+      tabTerminal: tab === 'terminal',
+      tabIde: tab === 'ide',
+      tabBrowser: tab === 'browser',
+      tabArtifacts: tab === 'artifacts',
+      tabSettings: tab === 'settings',
+      split,
+      splitOff: !split,
+      toggleSplit: () => this.setState(s => ({ split: !s.split, rightTab: (!s.split && s.tab !== 'terminal') ? s.tab : s.rightTab })),
+      splitBtnStyle: 'display:inline-flex;align-items:center;justify-content:center;gap:6px;height:30px;line-height:1;padding:0 12px;border-radius:8px;cursor:pointer;font-family:var(--ny-font-sans);font-size:12.5px;font-weight:600;transition:all .12s;border:1px solid var(--ny-'
+        + (split ? 'accent);background:var(--ny-accent);color:var(--ny-text-on-accent)' : 'border);background:transparent;color:var(--ny-text-muted)'),
+      showLeft: split || tab === 'terminal',
+      showRight: split || tab !== 'terminal',
+      startDrag: this.startDrag,
+      panePad: split ? '0' : '16px 20px',
+      panePad2: split ? '16px 18px' : '20px',
+      termFrameStyle: 'flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;background:var(--ny-ink-0)'
+        + (split ? '' : ';border:1px solid var(--ny-ink-4);border-radius:12px'),
+      ideFrameStyle: 'height:100%;display:flex;overflow:hidden;background:var(--ny-ink-0);font-family:var(--ny-font-mono);font-size:12.5px'
+        + (split ? '' : ';border:1px solid var(--ny-ink-4);border-radius:12px'),
+      browserFrameStyle: 'flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;background:var(--ny-surface)'
+        + (split ? '' : ';border:1px solid var(--ny-border);border-radius:12px'),
+      consoleFrameStyle: 'flex:none;height:150px;overflow:hidden;background:var(--ny-ink-0);display:flex;flex-direction:column'
+        + (split ? ';border-top:1px solid var(--ny-ink-4)' : ';border:1px solid var(--ny-ink-4);border-radius:10px'),
+      leftPaneStyle: split
+        ? 'flex:none;width:' + this.state.leftPct + '%;min-width:0;min-height:0;display:flex;flex-direction:column'
+        : 'flex:1;min-height:0;display:flex;flex-direction:column;padding:16px 20px',
+      rightPaneStyle: 'flex:1;min-width:0;min-height:0;display:flex;flex-direction:column',
+      rightTabItems,
+      rightTab: rt,
+      setRightTab: (v) => this.setState({ rightTab: v }),
+      barTabValue: split ? rt : tab,
+      barTabChange: (v) => this.setState(split ? (v === 'terminal' ? {} : { rightTab: v }) : { tab: v }),
+      setSplit: (checked) => this.setState(s => ({ split: checked, rightTab: (checked && s.tab !== 'terminal') ? s.tab : s.rightTab })),
+      rIde: rt === 'ide',
+      rBrowser: rt === 'browser',
+      rArtifacts: rt === 'artifacts',
+      rSettings: rt === 'settings',
+      artifacts,
+      stopOpen: this.state.stopOpen,
+      openStop: () => this.setState({ stopOpen: true }),
+      closeStop: () => this.setState({ stopOpen: false }),
+    };
+  }
+}
+</script>
+</body>
+</html>

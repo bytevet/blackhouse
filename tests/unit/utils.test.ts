@@ -1,32 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { cn } from "@/lib/utils";
 import { timeAgo } from "@/lib/time";
-
-describe("cn()", () => {
-  it("should merge class names", () => {
-    expect(cn("px-2", "py-1")).toBe("px-2 py-1");
-  });
-
-  it("should handle conditional classes", () => {
-    expect(cn("base", false && "hidden", "visible")).toBe("base visible");
-  });
-
-  it("should merge conflicting tailwind classes (last wins)", () => {
-    expect(cn("px-2", "px-4")).toBe("px-4");
-  });
-
-  it("should handle empty inputs", () => {
-    expect(cn()).toBe("");
-  });
-
-  it("should handle undefined and null inputs", () => {
-    expect(cn("base", undefined, null)).toBe("base");
-  });
-
-  it("should handle arrays of classes", () => {
-    expect(cn(["px-2", "py-1"])).toBe("px-2 py-1");
-  });
-});
 
 describe("timeAgo()", () => {
   // #55: `timeAgo` migrated from hardcoded abbreviations ("5m ago") to
