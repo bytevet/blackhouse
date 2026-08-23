@@ -28,7 +28,15 @@ export const AGENT_PRESETS: Record<PresetId, AgentPreset> = {
   "claude-code": {
     id: "claude-code",
     displayName: "Claude Code",
-    agentCommand: "claude --dangerously-skip-permissions",
+    // `--append-system-prompt` carries the Blackhouse harness prompt (see
+    // `server/agents/system-prompt.ts`). It is written into the preset rather
+    // than left to the entrypoint alone so that it stays visible — and
+    // editable — in the blueprint form. `agent/entrypoint.sh` appends the same
+    // flag only when AGENT_COMMAND does not already mention
+    // BLACKHOUSE_SYSTEM_PROMPT_FILE, which is what rescues the blueprints of
+    // installs that were seeded before this existed.
+    agentCommand:
+      'claude --dangerously-skip-permissions --append-system-prompt "$(cat "$BLACKHOUSE_SYSTEM_PROMPT_FILE")"',
     stateMountPath: "/home/workspace/.claude",
     // `claude-auth` holds credentials only and is deliberately shared; the
     // entrypoint symlinks `~/.claude.json` out of it.
@@ -38,6 +46,8 @@ export const AGENT_PRESETS: Record<PresetId, AgentPreset> = {
   antigravity: {
     id: "antigravity",
     displayName: "Antigravity",
+    // No system-prompt flag exists on `agy`; the entrypoint delivers the
+    // harness prompt as `~/.gemini/GEMINI.md` instead.
     agentCommand: "agy --dangerously-skip-permissions",
     // `agy` (Antigravity CLI) writes config + auth to `~/.gemini`, not
     // `~/.antigravity` — it inherits Gemini's config layout.
@@ -48,6 +58,7 @@ export const AGENT_PRESETS: Record<PresetId, AgentPreset> = {
   codex: {
     id: "codex",
     displayName: "Codex",
+    // Likewise no flag; the entrypoint writes `~/.codex/AGENTS.md`.
     agentCommand: "codex --sandbox workspace-write --ask-for-approval on-request",
     stateMountPath: "/home/workspace/.codex",
     volumeMounts: [],

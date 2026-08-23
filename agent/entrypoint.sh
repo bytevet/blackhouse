@@ -22,23 +22,51 @@ if [ -n "$GIT_REPO_URL" ]; then
   cd "$REPO_DIR" || true
 fi
 
-# 2a) Start the in-container browser service in the background.
+# 2a) Start the in-container browser service in the background — opt-in.
 # Listens on 127.0.0.1:9223. The Blackhouse server proxies its screencast WS
 # and REST control endpoints to the React Browser tab. If this exits the
 # Browser tab shows "unavailable" — the agent keeps working.
-if [ -f /opt/blackhouse/browser-service/service.mjs ]; then
-  mkdir -p "$HOME/.cache"
-  (
-    cd /opt/blackhouse/browser-service && node service.mjs >>"$HOME/.cache/browser-service.log" 2>&1
-  ) &
-  BROWSER_SERVICE_PID=$!
-  export BROWSER_SERVICE_PID
+#
+# node + Playwright + Chromium is the heaviest resident thing in this container
+# and most agents never open the Browser tab, so it starts only when the server
+# asks for it. Anything other than an explicit 1 — including the variable being
+# absent — means off. That direction matters: an older server that has never
+# heard of this variable then produces a light container instead of the heavy
+# one that drove a 2-CPU host to load 27 and stopped it answering the Docker
+# API. Failing safe here means failing light.
+if [ "$BLACKHOUSE_ENABLE_BROWSER" = "1" ]; then
+  if [ -f /opt/blackhouse/browser-service/service.mjs ]; then
+    echo "[blackhouse] Starting browser service (BLACKHOUSE_ENABLE_BROWSER=1)."
+    mkdir -p "$HOME/.cache"
+    (
+      cd /opt/blackhouse/browser-service && node service.mjs >>"$HOME/.cache/browser-service.log" 2>&1
+    ) &
+    BROWSER_SERVICE_PID=$!
+    export BROWSER_SERVICE_PID
+  else
+    # Asked for, but not built into this image — say so, because from the SPA
+    # this is indistinguishable from the service having crashed.
+    echo "[blackhouse] BLACKHOUSE_ENABLE_BROWSER=1 but no browser service in this image; Browser tab unavailable." >&2
+  fi
+else
+  echo "[blackhouse] Browser service not started: BLACKHOUSE_ENABLE_BROWSER is '${BLACKHOUSE_ENABLE_BROWSER:-unset}', not 1. Browser tab unavailable."
 fi
 
-# 2b) Start code-server in the background. Listens on 127.0.0.1:8443; the
-# Blackhouse server proxies it to the IDE tab in the SPA. Auth-disabled
+# 2b) Start code-server in the background — opt-in. Listens on 127.0.0.1:8443;
+# the Blackhouse server proxies it to the IDE tab in the SPA. Auth-disabled
 # because the proxy is the only path in and is itself auth-gated.
-if command -v code-server >/dev/null 2>&1; then
+#
+# A whole VS Code server resident behind a tab nobody opened is the other half
+# of the footprint described in 2a, and it is gated the same way and for the
+# same reason: only an explicit 1 starts it.
+if [ "$BLACKHOUSE_ENABLE_IDE" != "1" ]; then
+  echo "[blackhouse] code-server not started: BLACKHOUSE_ENABLE_IDE is '${BLACKHOUSE_ENABLE_IDE:-unset}', not 1. IDE tab unavailable."
+elif ! command -v code-server >/dev/null 2>&1; then
+  # Asked for, but not installed in this image. Same reasoning as 2a: without
+  # this line an absent IDE tab is a support question rather than a log entry.
+  echo "[blackhouse] BLACKHOUSE_ENABLE_IDE=1 but code-server is not installed in this image; IDE tab unavailable." >&2
+else
+  echo "[blackhouse] Starting code-server (BLACKHOUSE_ENABLE_IDE=1)."
   mkdir -p "$HOME/.cache"
   # Seed the user settings if a baseline file is shipped in the image (#33).
   # `cp -n` (no-clobber) means an existing user-mounted settings.json wins
@@ -137,14 +165,77 @@ fi
 # only afterwards, only if the direct fetch failed, and under a hard timeout.
 # Both paths keep their output — a skills install that quietly did nothing is
 # how this stayed invisible.
+# Fetch every file the harness lists, not just the documentation.
+#
+# This used to pull `SKILL.md` alone and then report "Skills installed". SKILL.md
+# is the file that *describes* `post.sh`, `mention.sh`, `submit-result.sh` and
+# the rest — so the agent read a manual for seven scripts that were never
+# downloaded. Observed on the deployment: an agent finished a report and said it
+# "couldn't submit this as a channel card" because the scripts named in its own
+# instructions did not exist. Posting back to a channel is the product; it had
+# been silently impossible, behind a success message.
+#
+# The file list comes from the harness index rather than being repeated here,
+# for the same reason the index is now read off disk: a third copy of the list
+# is a third thing to drift.
+fetch_skill_files() {
+  index=$(curl -sf --max-time 15 "$BLACKHOUSE_URL/.well-known/agent-skills/index.json") || return 1
+  [ -n "$index" ] || return 1
+
+  # Minimal JSON walk: emit "<skill> <file>" per line. Tracks the current skill
+  # name and whether it is inside that skill's "files" array, so it does not
+  # confuse a skill's `name`/`description` strings for file names.
+  pairs=$(printf '%s' "$index" | tr -d '\n' | awk '
+    { gsub(/[{}]/, "\n&\n"); print }
+  ' | awk '
+    /"name"[[:space:]]*:/ {
+      line = $0
+      sub(/.*"name"[[:space:]]*:[[:space:]]*"/, "", line)
+      sub(/".*/, "", line)
+      skill = line
+    }
+    /"files"[[:space:]]*:/ {
+      line = $0
+      sub(/.*"files"[[:space:]]*:[[:space:]]*\[/, "", line)
+      sub(/\].*/, "", line)
+      n = split(line, parts, ",")
+      for (i = 1; i <= n; i++) {
+        f = parts[i]
+        gsub(/[^A-Za-z0-9._-]/, "", f)
+        if (f != "" && skill != "") print skill " " f
+      }
+    }
+  ')
+  [ -n "$pairs" ] || return 1
+
+  got=0
+  printf '%s\n' "$pairs" | while read -r skill file; do
+    [ -n "$skill" ] && [ -n "$file" ] || continue
+    dest="$HOME/.claude/skills/$skill"
+    mkdir -p "$dest"
+    if curl -sf --max-time 15 \
+        "$BLACKHOUSE_URL/.well-known/agent-skills/$skill/$file" -o "$dest/$file"; then
+      # The scripts are invoked directly by the agent, so they have to be
+      # runnable. Checking out a repo preserves the mode bit; an HTTP body has
+      # no mode to preserve.
+      case "$file" in *.sh) chmod +x "$dest/$file" ;; esac
+    else
+      echo "[blackhouse] WARNING: skill file $skill/$file could not be fetched" >&2
+    fi
+  done
+
+  # The subshell above cannot set `got`, so count what actually landed.
+  count=$(find "$HOME/.claude/skills" -type f -name '*.sh' 2>/dev/null | wc -l | tr -d ' ')
+  [ "${count:-0}" -gt 0 ]
+}
+
 install_skills() {
   mkdir -p "$HOME/.claude/skills/blackhouse"
-  if curl -sf --max-time 15 \
-      "$BLACKHOUSE_URL/.well-known/agent-skills/blackhouse/SKILL.md" \
-      -o "$HOME/.claude/skills/blackhouse/SKILL.md"; then
+  if fetch_skill_files; then
     echo "[blackhouse] Skills installed from $BLACKHOUSE_URL"
     return 0
   fi
+  echo "[blackhouse] WARNING: skill index fetch failed or yielded no scripts" >&2
 
   if command -v npx >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
     echo "[blackhouse] Direct skills fetch failed; trying npx (60s cap)..."
@@ -191,12 +282,77 @@ if [ -n "$AGENT_COMMAND" ]; then
   # mentions are written to. A CLI started that way can never receive an
   # injected prompt. Blueprints reference the file from AGENT_COMMAND instead,
   # e.g. `claude --append-system-prompt "$(cat "$BLACKHOUSE_SYSTEM_PROMPT_FILE")"`.
+  #
+  # THE FILE IS ALWAYS CREATED, empty if the server sent nothing. It used to be
+  # written only when $SYSTEM_PROMPT was non-empty, which left the variable
+  # unset — and a blueprint containing `$(cat "$BLACKHOUSE_SYSTEM_PROMPT_FILE")`
+  # then expands to `$(cat "")`, `cat` fails, and the `exec` below hands the PTY
+  # to a command line missing an argument. The container dies with no CLI in it
+  # at all: the same class of failure the refusal at the bottom of this file
+  # exists to prevent, arrived at by a different road.
   mkdir -p "$HOME/.cache"
-  if [ -n "$SYSTEM_PROMPT" ]; then
-    BLACKHOUSE_SYSTEM_PROMPT_FILE="$HOME/.cache/system-prompt.txt"
-    printf '%s\n' "$SYSTEM_PROMPT" >"$BLACKHOUSE_SYSTEM_PROMPT_FILE"
-    export BLACKHOUSE_SYSTEM_PROMPT_FILE
-  fi
+  BLACKHOUSE_SYSTEM_PROMPT_FILE="$HOME/.cache/system-prompt.txt"
+  printf '%s\n' "$SYSTEM_PROMPT" >"$BLACKHOUSE_SYSTEM_PROMPT_FILE"
+  export BLACKHOUSE_SYSTEM_PROMPT_FILE
+
+  # 3a) Deliver that file to the CLI. Only one of the three takes it on the
+  # command line; the others read a fixed path in their config directory.
+  #
+  # Those config directories sit inside the per-agent STATE VOLUME, which
+  # survives restart, so every copy below is unconditional — `cp`, never
+  # `cp -n`. A no-clobber copy would mean an operator edits the prompt, restarts
+  # the agent, and is silently outlived by the copy written on first boot.
+  case "$BLACKHOUSE_ADAPTER" in
+  claude-code)
+    # `--append-system-prompt <prompt>` is real: verified against the installed
+    # @anthropic-ai/claude-code's own `--help`. "Append" is the point — the
+    # harness facts are added to Claude Code's default system prompt rather
+    # than replacing it.
+    #
+    # This is a FALLBACK for blueprints written before the flag existed, and it
+    # is why changing `server/db/seed.ts` alone would have fixed nothing: seed
+    # inserts blueprints only into an empty table, so every install that has
+    # ever booted keeps `claude --dangerously-skip-permissions` forever. The
+    # `contains` guard is what makes the two mechanisms safe side by side — a
+    # command that already names the file (the new seed default, or an
+    # operator's own edit) is left exactly as written, so the flag can never be
+    # applied twice.
+    case "$AGENT_COMMAND" in
+    *BLACKHOUSE_SYSTEM_PROMPT_FILE*) ;;
+    *)
+      AGENT_COMMAND="$AGENT_COMMAND --append-system-prompt \"\$(cat \"\$BLACKHOUSE_SYSTEM_PROMPT_FILE\")\""
+      echo "[blackhouse] AGENT_COMMAND predates the system prompt; appending --append-system-prompt."
+      ;;
+    esac
+    ;;
+  codex)
+    # Codex exposes no system-prompt flag, so the prompt is delivered as its
+    # user-global instructions file. `$HOME/.codex/AGENTS.md` is the path a
+    # Codex install creates for itself; that it is loaded into every session is
+    # (unverified) here, in the same sense as the timings in
+    # `server/agents/adapters/profiles.ts`.
+    mkdir -p "$HOME/.codex"
+    cp "$BLACKHOUSE_SYSTEM_PROMPT_FILE" "$HOME/.codex/AGENTS.md" ||
+      echo "[blackhouse] WARNING: could not write \$HOME/.codex/AGENTS.md; agent starts without the harness prompt." >&2
+    ;;
+  antigravity)
+    # Same shape. `agy --help` lists no system-prompt flag (verified), and the
+    # CLI inherits Gemini's config layout — its global context file is
+    # `$HOME/.gemini/GEMINI.md`. (unverified: the binary carries the string but
+    # we have not watched it load the global copy.)
+    mkdir -p "$HOME/.gemini"
+    cp "$BLACKHOUSE_SYSTEM_PROMPT_FILE" "$HOME/.gemini/GEMINI.md" ||
+      echo "[blackhouse] WARNING: could not write \$HOME/.gemini/GEMINI.md; agent starts without the harness prompt." >&2
+    ;;
+  *)
+    # `custom`, or an adapter newer than this image. Guessing another CLI's
+    # flags is how you get an `exec` that fails on an unknown option, so we do
+    # not: the file is written and exported above, and a custom blueprint can
+    # reference it from AGENT_COMMAND like the claude-code default does.
+    echo "[blackhouse] Adapter '${BLACKHOUSE_ADAPTER:-unset}' has no known system-prompt mechanism;" \
+      "the prompt is in \$BLACKHOUSE_SYSTEM_PROMPT_FILE for AGENT_COMMAND to use."
+    ;;
+  esac
 
   echo "[blackhouse] Starting agent: $AGENT_COMMAND"
   # `bash -c "exec ..."` rather than bare `exec $AGENT_COMMAND`: AGENT_COMMAND

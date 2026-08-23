@@ -124,7 +124,13 @@ export async function runSeed() {
         cli: "claude-code",
         name: "Claude Code",
         description: "Anthropic's CLI. Rich structured transcripts via session JSONL.",
-        agentCommand: "claude --dangerously-skip-permissions",
+        // The flag is spelled out here, not just applied by the entrypoint, so
+        // that an operator editing this blueprint in the UI can SEE that a
+        // system prompt is being passed and can change or remove it. The
+        // entrypoint's identical fallback is guarded by a `contains` check on
+        // this exact variable name, so the two cannot double-apply.
+        agentCommand:
+          'claude --dangerously-skip-permissions --append-system-prompt "$(cat "$BLACKHOUSE_SYSTEM_PROMPT_FILE")"',
         stateMountPath: "/home/workspace",
         volumeMounts: [{ name: "claude-auth", mountPath: "/home/workspace/.config/claude-auth" }],
       },
