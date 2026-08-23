@@ -148,17 +148,36 @@ export interface EgressFact {
   detail: string;
   /** Whether the header should draw attention to it. */
   permissive: boolean;
+  /** A restrictive policy is configured but nothing is applying it. */
+  unenforced: boolean;
 }
 
 /**
+ * Describe the policy an agent **actually gets**.
+ *
+ * Feed this the resolved mode from `GET /api/egress/agents/:id/effective`, not
+ * `agents.egressPolicy`: that column is nullable and null means "inherit the
+ * blueprint", so it cannot answer the only question this badge is asked.
+ *
  * `open` is the permissive setting, so it is the one the badge argues with.
  * `allowlist` carries its host count inline — "allowlist" with an empty list
  * and "allowlist" with forty entries are very different postures.
+ *
+ * `enforced` is the instance-wide switch. A restrictive policy that nothing
+ * applies is the network twin of a silent sandbox fallback: the badge would
+ * claim a boundary the agent does not have, which is precisely the failure
+ * this whole surface exists to prevent. Unenforced `open` is still open, so
+ * only the restrictive modes change.
  */
 export function describeEgress(
   policy: EgressPolicy | null | undefined,
   allowlistCount: number,
+  enforced = true,
 ): EgressFact {
+  const unenforced = !enforced && (policy === "allowlist" || policy === "none");
+  const unenforcedNote =
+    " Egress enforcement is off for this instance, so the policy is recorded but not applied — the agent can currently reach any host.";
+
   switch (policy) {
     case "open":
       return {
@@ -166,31 +185,83 @@ export function describeEgress(
         tone: "warning",
         detail: "No egress restriction — this agent can reach any host on the internet.",
         permissive: true,
+        unenforced: false,
       };
     case "none":
       return {
         label: "no network",
-        tone: "neutral",
-        detail: "No outbound network. Package installs and API calls will fail by design.",
-        permissive: false,
+        tone: unenforced ? "warning" : "neutral",
+        detail:
+          "No outbound network. Package installs and API calls will fail by design." +
+          (unenforced ? unenforcedNote : ""),
+        permissive: unenforced,
+        unenforced,
       };
     case "allowlist":
       return {
         label: `allowlist · ${allowlistCount}`,
-        tone: "success",
-        detail: `Outbound traffic is proxied and limited to ${allowlistCount} allowed host${
-          allowlistCount === 1 ? "" : "s"
-        }.`,
-        permissive: false,
+        tone: unenforced ? "warning" : "success",
+        detail:
+          `Outbound traffic is proxied and limited to ${allowlistCount} allowed host${
+            allowlistCount === 1 ? "" : "s"
+          }.` + (unenforced ? unenforcedNote : ""),
+        permissive: unenforced,
+        unenforced,
       };
     default:
+      // Only reachable if a caller passes the raw, unresolved column. Kept as
+      // a defensive branch rather than a state the UI is expected to render.
       return {
         label: "inherited",
         tone: "neutral",
         detail: "No per-agent override — the blueprint's egress policy applies.",
         permissive: false,
+        unenforced: false,
       };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Blueprint resource caps
+// ---------------------------------------------------------------------------
+
+export interface ResourceCaps {
+  /** `"2 vCPU"`, or null when `agent_blueprints.nano_cpus` is unset. */
+  cpu: string | null;
+  /** `"4 GiB"`, or null when `agent_blueprints.memory_bytes` is unset. */
+  memory: string | null;
+}
+
+/**
+ * Blueprint container caps, with an absent cap reported as absent.
+ *
+ * Null is **not** a default to fill in. An unset `memory_bytes` means the
+ * container gets whatever the daemon allows, which on a single-host install is
+ * the whole machine — the opposite of the reassuring "4 GB RAM" the mock
+ * blueprint printed for every agent regardless of its row. So a missing cap
+ * renders as nothing at all rather than as a plausible number.
+ */
+export function describeResourceCaps(caps: {
+  nanoCpus: number | null;
+  memoryBytes: number | null;
+}): ResourceCaps {
+  return {
+    cpu: caps.nanoCpus && caps.nanoCpus > 0 ? `${trimNumber(caps.nanoCpus / 1e9)} vCPU` : null,
+    memory: formatBytes(caps.memoryBytes),
+  };
+}
+
+/** Binary units, because that is what Docker means by `Memory`. */
+function formatBytes(bytes: number | null): string | null {
+  if (!bytes || bytes <= 0) return null;
+  const gib = bytes / 1024 ** 3;
+  if (gib >= 1) return `${trimNumber(gib)} GiB`;
+  return `${trimNumber(bytes / 1024 ** 2)} MiB`;
+}
+
+/** `2` stays `2`, `1.5` stays `1.5`, and `3.9999999` becomes `4`. */
+function trimNumber(value: number): string {
+  return String(Math.round(value * 100) / 100);
 }
 
 // ---------------------------------------------------------------------------

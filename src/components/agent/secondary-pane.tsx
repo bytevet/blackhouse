@@ -1,11 +1,10 @@
 import type { ReactNode } from "react";
 import { BrowserViewer } from "@/components/browser-viewer";
 import { IdeViewer } from "@/components/ide-viewer";
-import type { AgentDetail } from "./agent-data";
+import type { AgentBlueprint, AgentDetail, EffectiveEgress } from "./agent-data";
 import type { SecondaryTab } from "./agent-view-bar";
 import { AgentSettingsPane } from "./agent-settings-pane";
 import { ArtifactsPane } from "./artifacts-pane";
-import type { MockBlueprint } from "./mock-data";
 
 /**
  * Everything that is not the terminal: the IDE, the headless browser, the
@@ -21,8 +20,10 @@ import type { MockBlueprint } from "./mock-data";
 export interface SecondaryPaneProps {
   tab: SecondaryTab;
   agent: AgentDetail;
-  /** ⚠️ mock — see `mock-data.ts`. */
-  blueprint: MockBlueprint;
+  /** `GET /api/agents/:id/blueprint`, or null while it loads / if it fails. */
+  blueprint: AgentBlueprint | null;
+  /** The resolved egress policy, or null while it loads / if it fails. */
+  egress: EffectiveEgress | null;
   /** Split mode: no outer inset, no rounded frame. */
   compact?: boolean;
   onDestroy: () => void;
@@ -71,10 +72,46 @@ function Frame({
   );
 }
 
+/**
+ * The blueprint does not start this service, so there is nothing to attach to.
+ *
+ * `enableIde` and `enableBrowser` are real blueprint columns and both default
+ * to false: a full VS Code server plus node + Playwright + Chromium alongside
+ * the CLI took a 2-CPU host to load average 27. With the flag off the
+ * entrypoint never starts the service, so the viewer would sit forever on a
+ * connection that cannot be made and read as a bug. Naming the switch turns
+ * "broken" into "off".
+ *
+ * Only rendered when the blueprint has actually loaded and says false — a
+ * failed fetch must not hide a tab that works.
+ */
+function ServiceOff({ compact, service }: { compact: boolean; service: "IDE" | "Browser" }) {
+  return (
+    <Frame compact={compact} dark={false}>
+      <div style={{ height: "100%", display: "grid", placeItems: "center", padding: 24 }}>
+        <div
+          style={{
+            maxWidth: 380,
+            textAlign: "center",
+            fontSize: 12.5,
+            lineHeight: 1.6,
+            color: "var(--ny-text-muted)",
+          }}
+        >
+          <strong style={{ color: "var(--ny-text)" }}>{service} is off for this blueprint.</strong>{" "}
+          Its container never starts the service, so there is nothing to connect to. Turn it on in
+          Settings → Blueprints and restart the agent.
+        </div>
+      </div>
+    </Frame>
+  );
+}
+
 export function SecondaryPane({
   tab,
   agent,
   blueprint,
+  egress,
   compact = false,
   onDestroy,
   navigateTo,
@@ -82,12 +119,15 @@ export function SecondaryPane({
 }: SecondaryPaneProps) {
   switch (tab) {
     case "ide":
+      if (blueprint && !blueprint.enableIde) return <ServiceOff compact={compact} service="IDE" />;
       return (
         <Frame compact={compact} dark>
           <IdeViewer agentId={agent.id} status={agent.status} />
         </Frame>
       );
     case "browser":
+      if (blueprint && !blueprint.enableBrowser)
+        return <ServiceOff compact={compact} service="Browser" />;
       return (
         <Frame compact={compact} dark={false}>
           <BrowserViewer
@@ -105,6 +145,7 @@ export function SecondaryPane({
         <AgentSettingsPane
           agent={agent}
           blueprint={blueprint}
+          egress={egress}
           compact={compact}
           onDestroy={onDestroy}
         />

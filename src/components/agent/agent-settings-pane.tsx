@@ -2,9 +2,8 @@ import { useState } from "react";
 import { Badge, Button, Field, Input, Select, Textarea } from "@notyet.im/ui";
 import { Info } from "lucide-react";
 import type { EgressPolicy } from "@/db/schema";
-import type { AgentDetail } from "./agent-data";
-import { describeBudget, describeEgress, formatCents } from "./agent-facts";
-import { MOCK_EGRESS_ALLOWLIST, MOCK_NOTICE, type MockBlueprint } from "./mock-data";
+import type { AgentBlueprint, AgentDetail, EffectiveEgress } from "./agent-data";
+import { describeBudget, describeEgress, describeResourceCaps, formatCents } from "./agent-facts";
 import { toneBorderVar, toneSubtleVar } from "./status-pill";
 
 /**
@@ -20,8 +19,15 @@ import { toneBorderVar, toneSubtleVar } from "./status-pill";
  */
 export interface AgentSettingsPaneProps {
   agent: AgentDetail;
-  /** ⚠️ mock — resource caps live on the blueprint, which has no route yet. */
-  blueprint: MockBlueprint;
+  /** `GET /api/agents/:id/blueprint`, or null while it loads / if it fails. */
+  blueprint: AgentBlueprint | null;
+  /**
+   * The **resolved** egress policy, or null while it loads / if it fails.
+   *
+   * The Select below is a local, unsaved control; this is what the agent
+   * actually gets. They are shown together, and said to differ when they do.
+   */
+  egress: EffectiveEgress | null;
   compact?: boolean;
   onDestroy: () => void;
 }
@@ -79,6 +85,7 @@ function Card({
 export function AgentSettingsPane({
   agent,
   blueprint,
+  egress: effectiveEgress,
   compact = false,
   onDestroy,
 }: AgentSettingsPaneProps) {
@@ -90,7 +97,14 @@ export function AgentSettingsPane({
     agent.dailyBudgetCents == null ? "" : (agent.dailyBudgetCents / 100).toFixed(2),
   );
 
-  const egress = describeEgress(egressPolicy, MOCK_EGRESS_ALLOWLIST.length);
+  // The badge and the host list describe the **resolved** policy, never the
+  // local Select: nothing on this tab saves, so rendering the selection as if
+  // it were in force is the same class of lie as the four hardcoded hosts this
+  // replaces. The divergence is stated below instead.
+  const egress = effectiveEgress
+    ? describeEgress(effectiveEgress.mode, effectiveEgress.rules.length, effectiveEgress.enforced)
+    : null;
+  const caps = blueprint ? describeResourceCaps(blueprint) : null;
   const budget = describeBudget(agent);
   const padding = compact ? "16px 18px" : "20px";
 
@@ -122,9 +136,19 @@ export function AgentSettingsPane({
           </span>
         </div>
 
+        {/*
+          Three layers, and only two of them are editable here. The subtitle
+          says so because the old one ("appended to the blueprint's base
+          prompt") described neither: this field REPLACES the blueprint's
+          prompt, and both sit beneath Blackhouse's own instructions, which
+          `server/agents/system-prompt.ts` always prepends and no override can
+          drop. Someone who believes they are appending will write half a
+          prompt; someone who does not know the harness layer exists may try to
+          re-explain the channels in here.
+        */}
         <Card
           title="System prompt override"
-          subtitle="Appended to the blueprint's base prompt. Leave empty to inherit."
+          subtitle="Replaces the blueprint's prompt. Blackhouse's own instructions are always prepended."
         >
           <Textarea
             value={systemPrompt}
@@ -132,7 +156,9 @@ export function AgentSettingsPane({
             rows={4}
             size="sm"
             aria-label="System prompt override"
-            placeholder={`Inherit ${blueprint.name}'s prompt`}
+            placeholder={
+              blueprint ? `Inherit ${blueprint.name}'s prompt` : "Inherit the blueprint's prompt"
+            }
           />
         </Card>
 
@@ -159,9 +185,13 @@ export function AgentSettingsPane({
             </div>
           </Card>
 
+          {/* An unset cap is rendered as absent, not as a default. A null
+              `memory_bytes` means the container gets whatever the daemon
+              allows — the opposite of the reassuring "4 GB RAM" this card
+              used to print for every agent regardless of its blueprint. */}
           <Card
             title="Resources"
-            subtitle={`${MOCK_NOTICE} Caps come from the blueprint.`}
+            subtitle="Caps come from the blueprint."
             action={
               <Badge tone="neutral" variant="outline" size="sm">
                 blueprint
@@ -177,8 +207,13 @@ export function AgentSettingsPane({
                 color: "var(--ny-text-muted)",
               }}
             >
-              <span style={readOnlyChip}>{blueprint.vcpus} vCPU</span>
-              <span style={readOnlyChip}>{blueprint.memoryGb} GB RAM</span>
+              {caps?.cpu && <span style={readOnlyChip}>{caps.cpu}</span>}
+              {caps?.memory && <span style={readOnlyChip}>{caps.memory} RAM</span>}
+              {caps && !caps.cpu && !caps.memory && (
+                <span style={{ ...readOnlyChip, fontFamily: "var(--ny-font-sans)" }}>
+                  No CPU or memory cap — this blueprint takes whatever the Docker daemon allows.
+                </span>
+              )}
             </div>
           </Card>
         </div>
@@ -186,9 +221,18 @@ export function AgentSettingsPane({
         <Card
           title="Egress policy"
           action={
-            <Badge tone={egress.tone} variant="subtle" size="sm">
-              {egress.label}
-            </Badge>
+            egress ? (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <Badge tone={egress.tone} variant="subtle" size="sm">
+                  {egress.label}
+                </Badge>
+                {egress.unenforced && (
+                  <Badge tone="warning" variant="solid" size="sm">
+                    not enforced
+                  </Badge>
+                )}
+              </span>
+            ) : undefined
           }
         >
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -198,10 +242,18 @@ export function AgentSettingsPane({
               onChange={setEgressPolicy}
               label="Egress policy"
             />
-            <p style={{ fontSize: 11.5, color: "var(--ny-text-subtle)", margin: 0 }}>
-              {egress.detail}
-            </p>
-            {egressPolicy === "allowlist" && (
+            {egress && (
+              <p style={{ fontSize: 11.5, color: "var(--ny-text-subtle)", margin: 0 }}>
+                {egress.detail}
+              </p>
+            )}
+            {effectiveEgress && egressPolicy !== effectiveEgress.mode && (
+              <p style={{ fontSize: 11.5, color: "var(--ny-warning-text)", margin: 0 }}>
+                The badge is what this agent is on right now; the selection above is not applied and
+                will not be until there is a PATCH route.
+              </p>
+            )}
+            {effectiveEgress?.mode === "allowlist" && (
               <div
                 style={{
                   display: "flex",
@@ -211,7 +263,7 @@ export function AgentSettingsPane({
                   fontSize: 12,
                 }}
               >
-                {MOCK_EGRESS_ALLOWLIST.map((host) => (
+                {effectiveEgress.rules.map((host) => (
                   <span
                     key={host}
                     style={{
@@ -224,17 +276,16 @@ export function AgentSettingsPane({
                     {host}
                   </span>
                 ))}
-                <span
-                  title={`${MOCK_NOTICE} Hosts come from the egress-rules table.`}
-                  style={{
-                    border: "1px dashed var(--ny-border-strong)",
-                    borderRadius: 20,
-                    padding: "3px 10px",
-                    color: "var(--ny-text-subtle)",
-                  }}
-                >
-                  placeholder list
-                </span>
+                {/* Zero rules is a legitimate, maximally restrictive policy —
+                    deny everything outbound — and not a failed load, so it
+                    says so rather than rendering an empty row. */}
+                {effectiveEgress.rules.length === 0 && (
+                  <span
+                    style={{ fontFamily: "var(--ny-font-sans)", color: "var(--ny-text-subtle)" }}
+                  >
+                    No hosts allowed. Everything outbound is denied except the harness itself.
+                  </span>
+                )}
               </div>
             )}
           </div>

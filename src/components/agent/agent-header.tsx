@@ -7,7 +7,12 @@ import {
   toneVar,
   type StatusTone,
 } from "@/lib/agent-status";
-import type { AgentDetail, RuntimeAvailability } from "./agent-data";
+import type {
+  AgentBlueprint,
+  AgentDetail,
+  EffectiveEgress,
+  RuntimeAvailability,
+} from "./agent-data";
 import {
   describeBudget,
   describeEgress,
@@ -15,7 +20,6 @@ import {
   formatCents,
   initialsOf,
 } from "./agent-facts";
-import { MOCK_NOTICE, type MockBlueprint } from "./mock-data";
 import { StatusPill, toneBorderVar, toneSubtleVar } from "./status-pill";
 
 /**
@@ -27,12 +31,18 @@ import { StatusPill, toneBorderVar, toneSubtleVar } from "./status-pill";
  */
 export interface AgentHeaderProps {
   agent: AgentDetail;
-  /** ⚠️ mock — see `mock-data.ts`. */
-  blueprint: MockBlueprint;
+  /** `GET /api/agents/:id/blueprint`, or null while it loads / if it fails. */
+  blueprint: AgentBlueprint | null;
   /** `GET /api/agents/runtimes`, or null while it loads / if it fails. */
   runtimes: RuntimeAvailability | null;
-  /** ⚠️ mock — number of hosts on the effective allowlist. */
-  allowlistCount: number;
+  /**
+   * The **resolved** egress policy, or null while it loads / if it fails.
+   *
+   * Resolved, not `agent.egressPolicy`: that column is nullable and null means
+   * "inherit the blueprint", so it is wrong for exactly the agents whose
+   * posture is least obvious.
+   */
+  egress: EffectiveEgress | null;
   /** A lifecycle call is in flight; the action buttons lock. */
   busy?: boolean;
   onStart: () => void;
@@ -107,11 +117,36 @@ function MetaBlock({
   );
 }
 
+/**
+ * An empty slot where a fact has not arrived.
+ *
+ * Both of the facts beside it used to be hardcoded — the header reported
+ * blueprint `ui-explorer` and `allowlist · 4` for an agent that was neither —
+ * so a fallback value is the exact bug this replaces. Deliberately static and
+ * not a shimmer: it is "no answer yet", including when the fetch failed, and
+ * an animation would promise one that is never coming. It keeps the row's
+ * width so the header does not reflow when the real value lands.
+ */
+function MetaEmpty({ width }: { width: number }) {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        display: "inline-block",
+        width,
+        height: 14,
+        borderRadius: 4,
+        background: "var(--ny-surface-active)",
+      }}
+    />
+  );
+}
+
 export function AgentHeader({
   agent,
   blueprint,
   runtimes,
-  allowlistCount,
+  egress: effectiveEgress,
   busy = false,
   onStart,
   onRestart,
@@ -120,7 +155,9 @@ export function AgentHeader({
   const statusEntry = agentStatusConfig[agent.status];
   const activityEntry = agentActivityConfig[agent.activity];
   const runtime = describeRuntime(agent.sandboxRuntime, agent.runtimeUsed, runtimes);
-  const egress = describeEgress(agent.egressPolicy, allowlistCount);
+  const egress = effectiveEgress
+    ? describeEgress(effectiveEgress.mode, effectiveEgress.rules.length, effectiveEgress.enforced)
+    : null;
   const budget = describeBudget(agent);
   const running = agent.status === "running";
   const dotTone: StatusTone = statusEntry.tone;
@@ -258,9 +295,7 @@ export function AgentHeader({
             flexWrap: "wrap",
           }}
         >
-          {/* The *name* is mock. The badge beside it is not: `containerImage`
-              is a real column, copied from the blueprint at creation. */}
-          <MetaBlock label="Blueprint" title={`${MOCK_NOTICE} (GET /api/blueprints/:id)`}>
+          <MetaBlock label="Blueprint">
             <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
               <span
                 style={{
@@ -273,7 +308,7 @@ export function AgentHeader({
                 }}
               >
                 <LayoutGrid size={12} strokeWidth={2} aria-hidden="true" />
-                {blueprint.name}
+                {blueprint ? blueprint.name : <MetaEmpty width={88} />}
               </span>
               {missingImage && (
                 <Tooltip content="No image was recorded for this agent — its blueprint had not been built when the agent was created. Build it in Settings → Blueprints.">
@@ -306,13 +341,31 @@ export function AgentHeader({
           </MetaBlock>
 
           <MetaBlock label="Egress">
-            <Tooltip content={egress.detail}>
-              <span style={{ display: "inline-flex" }} tabIndex={0}>
-                <Badge tone={egress.tone} variant="subtle" size="sm">
-                  {egress.label}
-                </Badge>
+            {egress ? (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                <Tooltip content={egress.detail}>
+                  <span style={{ display: "inline-flex" }} tabIndex={0}>
+                    <Badge tone={egress.tone} variant="subtle" size="sm">
+                      {egress.label}
+                    </Badge>
+                  </span>
+                </Tooltip>
+                {/* A configured allowlist that nothing applies is the network
+                    twin of a silent sandbox fallback, so it gets its own badge
+                    rather than living only in the tooltip above. */}
+                {egress.unenforced && (
+                  <Tooltip content="Egress enforcement is off for this instance — no proxy is applied, so this agent can reach any host regardless of the policy above.">
+                    <span style={{ display: "inline-flex" }} tabIndex={0}>
+                      <Badge tone="warning" variant="solid" size="sm">
+                        not enforced
+                      </Badge>
+                    </span>
+                  </Tooltip>
+                )}
               </span>
-            </Tooltip>
+            ) : (
+              <MetaEmpty width={72} />
+            )}
           </MetaBlock>
 
           <MetaBlock label="Budget" minWidth={168} title={budget.detail}>

@@ -22,6 +22,8 @@ import { getPtyHub } from "../agents/pty-hub.js";
 import { planInjection } from "../agents/injector.js";
 import { getProfile } from "../agents/adapters/profiles.js";
 import { detectRuntimes } from "../sandbox/registry.js";
+import { artifactBodyHeaders } from "../lib/artifact-csp.js";
+import { channelAccess } from "./channels.js";
 
 /**
  * Agent handles are the `@name` in a channel. Lowercase-only so that mention
@@ -143,8 +145,56 @@ const app = new Hono<AuthEnv>()
     return c.json(toAgentSummary(agent));
   })
 
+  /**
+   * The blueprint behind one agent, for the Agent Detail header.
+   *
+   * `GET /api/settings/blueprints` already returns this, but it is
+   * `adminMiddleware`-gated and hands back the whole row — `dockerfileContent`,
+   * `envVars`, the lot. The header needs a name, a CLI and the resource caps,
+   * and every user who can open an agent needs to see them, so this is the
+   * narrow, `requireAgentAccess`-gated projection rather than a loosening of
+   * the admin route.
+   *
+   * Replaces the hardcoded `mockBlueprint()` the header used to render, which
+   * hashed the blueprint id into one of three invented names and reported
+   * `ui-explorer` for a Claude Code agent.
+   */
+  .get("/:id/blueprint", authMiddleware, async (c) => {
+    const agent = await requireAgentAccess(c.req.param("id")!, c.get("session").user);
+
+    const [blueprint] = await db
+      .select({
+        id: schema.agentBlueprints.id,
+        name: schema.agentBlueprints.name,
+        cli: schema.agentBlueprints.cli,
+        image: schema.agentBlueprints.image,
+        // Nullable columns, passed through as null rather than defaulted: the
+        // caps are "whatever the daemon allows" when unset, and inventing a
+        // number here would be the bug this endpoint exists to remove.
+        memoryBytes: schema.agentBlueprints.memoryBytes,
+        nanoCpus: schema.agentBlueprints.nanoCpus,
+        enableIde: schema.agentBlueprints.enableIde,
+        enableBrowser: schema.agentBlueprints.enableBrowser,
+      })
+      .from(schema.agentBlueprints)
+      .where(eq(schema.agentBlueprints.id, agent.blueprintId))
+      .limit(1);
+
+    if (!blueprint) return c.json({ error: "Blueprint not found" }, 404);
+    return c.json(blueprint);
+  })
+
+  /**
+   * What this agent has produced.
+   *
+   * Filtered by channel, for the same reason `/:id/results/latest` below is:
+   * the agent gate is workspace-wide by design, artifacts are not, and a title
+   * is enough to leak what is happening in a private room. One `channelAccess`
+   * call per distinct channel, not per row.
+   */
   .get("/:id/artifacts", authMiddleware, async (c) => {
     const agent = await requireAgentAccess(c.req.param("id")!, c.get("session").user);
+    const user = c.get("session").user;
     const rows = await db
       .select({
         id: schema.artifacts.id,
@@ -160,7 +210,19 @@ const app = new Hono<AuthEnv>()
       .where(eq(schema.artifacts.agentId, agent.id))
       .orderBy(desc(schema.artifacts.createdAt))
       .limit(50);
-    return c.json(rows);
+
+    const channelIds = [...new Set(rows.map((row) => row.channelId))];
+    const readable = new Set<string>();
+    for (const channelId of channelIds) {
+      const [channel] = await db
+        .select()
+        .from(schema.channels)
+        .where(eq(schema.channels.id, channelId))
+        .limit(1);
+      if (channel && (await channelAccess(channel, user)).canRead) readable.add(channelId);
+    }
+
+    return c.json(rows.filter((row) => readable.has(row.channelId)));
   })
 
   /**
@@ -169,31 +231,64 @@ const app = new Hono<AuthEnv>()
    * Returned as raw HTML rather than JSON because the result viewer renders it
    * in a sandboxed iframe — the body is agent-authored and therefore untrusted,
    * so it is served with a restrictive CSP and never interpolated into the SPA.
+   *
+   * Two things were wrong here and both are fixed above.
+   *
+   * `requireAgentAccess` alone was the whole gate, and it takes the user only
+   * to ignore it (`server/lib/agent-access.ts`, note the `_user` parameter) —
+   * agents are workspace-shared on purpose. Artifacts are not: this route
+   * served an agent's newest HTML, including one submitted into a **private
+   * channel**, to any signed-in account. So the newest readable artifact is now
+   * chosen by walking recent candidates and asking `channelAccess` about each,
+   * rather than taking row one and trusting the agent gate.
+   *
+   * The CSP was also its own, looser copy — `script-src 'unsafe-inline' https:`
+   * and `img-src https:` let the document reach any host on the internet. It
+   * now shares the single constant with the artifact routes; see
+   * `server/lib/artifact-csp.ts` for why there is no `https:` in it.
    */
   .get("/:id/results/latest", authMiddleware, async (c) => {
     const agent = await requireAgentAccess(c.req.param("id")!, c.get("session").user);
-    const [artifact] = await db
+    const user = c.get("session").user;
+
+    // A small window rather than one row: the newest artifact may be in a room
+    // this user cannot see, and "the newest one you are allowed to read" is the
+    // honest answer. Bounded so an agent with thousands of artifacts cannot
+    // turn this into a scan.
+    const candidates = await db
       .select()
       .from(schema.artifacts)
       .where(and(eq(schema.artifacts.agentId, agent.id), eq(schema.artifacts.kind, "html")))
       .orderBy(desc(schema.artifacts.createdAt))
-      .limit(1);
+      .limit(20);
+
+    let artifact: (typeof candidates)[number] | undefined;
+    for (const row of candidates) {
+      if (!row.body) continue;
+      const [channel] = await db
+        .select()
+        .from(schema.channels)
+        .where(eq(schema.channels.id, row.channelId))
+        .limit(1);
+      if (!channel) continue;
+      const access = await channelAccess(channel, user);
+      if (access.canRead) {
+        artifact = row;
+        break;
+      }
+    }
 
     if (!artifact?.body) return c.json({ error: "No result yet" }, 404);
 
-    return c.body(artifact.body, 200, {
-      "Content-Type": "text/html; charset=utf-8",
-      "Content-Security-Policy":
-        "default-src 'none'; img-src data: https:; style-src 'unsafe-inline' https:; " +
-        "script-src 'unsafe-inline' https:; font-src https: data:; connect-src 'none'",
-      "X-Content-Type-Options": "nosniff",
-    });
+    return c.body(artifact.body, 200, artifactBodyHeaders("text/html; charset=utf-8"));
   })
 
   .post("/:id/start", authMiddleware, async (c) => {
     const agent = await requireAgentAccess(c.req.param("id")!, c.get("session").user);
-    if (agent.status === "running") return c.json(toAgentSummary(agent));
     try {
+      // No `status === "running"` short-circuit here: the row can outlive the
+      // container it describes. `startAgent` asks the runtime and returns early
+      // itself when there is genuinely something alive to return to.
       const started = await startAgent(agent.id);
       // Lifecycle writes were invisible to the rail: only the sidecar's own
       // `/state` heartbeat used to broadcast, so a container coming up or going
@@ -271,15 +366,12 @@ const app = new Hono<AuthEnv>()
 
     const hub = getPtyHub();
     await hub.ensureAttached(agent.id);
-    for (const step of steps) {
-      await hub.write(agent.id, step.bytes, { source: "inject" });
-      // The inter-chunk gaps are not cosmetic: a PTY line discipline drops
-      // oversized single writes, and a `\r` that races the TUI's paste
-      // coalescing window submits a half-received prompt.
-      if (step.delayAfterMs > 0) {
-        await new Promise((resolve) => setTimeout(resolve, step.delayAfterMs));
-      }
-    }
+    // `inject` owns the inter-chunk gaps, and they are not cosmetic: a PTY line
+    // discipline drops oversized single writes, and a `\r` racing the TUI's
+    // paste-coalescing window submits a half-received prompt. Looping `write`
+    // here re-acquired the mutex per chunk and let peer keystrokes interleave —
+    // see the note in `agents/queue.ts`.
+    await hub.inject(agent.id, steps);
 
     return c.json({ queued: false, steps: steps.length });
   });

@@ -6,22 +6,26 @@ import { ApiError } from "@/lib/api";
 import {
   destroyAgent as destroyAgentRequest,
   fetchAgent,
+  fetchAgentBlueprint,
+  fetchEffectiveEgress,
   fetchRuntimes,
   startAgent as startAgentRequest,
   stopAgent as stopAgentRequest,
+  type AgentBlueprint,
   type AgentDetail,
+  type EffectiveEgress,
   type RuntimeAvailability,
 } from "@/components/agent/agent-data";
 import { AgentHeader, isAwaitingStart, isMissingImage } from "@/components/agent/agent-header";
 import { AgentPageStyles } from "@/components/agent/agent-styles";
 import { AgentViewBar, type AgentTab, type SecondaryTab } from "@/components/agent/agent-view-bar";
 import { ConfirmDialog } from "@/components/agent/confirm-dialog";
-import { MOCK_EGRESS_ALLOWLIST, mockBlueprint } from "@/components/agent/mock-data";
 import { SecondaryPane } from "@/components/agent/secondary-pane";
 import { SplitPane } from "@/components/agent/split-pane";
 import { toneBorderVar, toneSubtleVar } from "@/components/agent/status-pill";
 import { TerminalPane } from "@/components/agent/terminal-pane";
 import { usePersistedLeftPct, useSplitAvailable } from "@/components/agent/use-split-layout";
+import { useResource } from "@/hooks/use-resource";
 import { toneTextVar, type StatusTone } from "@/lib/agent-status";
 
 /**
@@ -79,6 +83,26 @@ function AgentPaneView() {
   const [navigateTo, setNavigateTo] = useState<string | null>(null);
   const [leftPct, setLeftPct] = usePersistedLeftPct(agentId);
   const splitAvailable = useSplitAvailable();
+
+  /**
+   * The two facts the header used to invent.
+   *
+   * Fetched once rather than polled: a blueprint's name and caps, and an
+   * agent's resolved egress, only change through Settings, which reloads this
+   * pane anyway. `useResource` is the same read hook every settings screen
+   * uses, and both stay `null` while loading and after a failure — the header
+   * renders an empty slot for a null, which is the whole point. Showing
+   * `ui-explorer` and `allowlist · 4` for an agent that is neither is what
+   * this replaces, and a fallback value would be that bug again.
+   */
+  const blueprintResource = useResource<AgentBlueprint | null>(
+    (signal) => (agentId ? fetchAgentBlueprint(agentId, signal) : Promise.resolve(null)),
+    [agentId],
+  );
+  const egressResource = useResource<EffectiveEgress | null>(
+    (signal) => (agentId ? fetchEffectiveEgress(agentId, signal) : Promise.resolve(null)),
+    [agentId],
+  );
 
   // Initial load, then a poll: `status` and `activity` are written by the
   // lifecycle code and the sidecar, not by this page, so nothing else would
@@ -230,13 +254,8 @@ function AgentPaneView() {
     );
   }
 
-  // ⚠️ Invented name, CLI and resource caps: the pane fetches no blueprint, so
-  // nothing in here reflects the real row. (`GET /api/settings/blueprints`
-  // lists them, but it is a settings-shaped list route, not the per-id fetch
-  // this page would want.) The one blueprint fact the pane genuinely holds is
-  // `agent.containerImage`, copied from `blueprint.image` by `POST /api/agents`
-  // at creation — which is what the startup notice below reads.
-  const blueprint = mockBlueprint(agent.blueprintId);
+  const blueprint = blueprintResource.data;
+  const egress = egressResource.data;
   const terminal = (
     <TerminalPane
       agent={agent}
@@ -254,6 +273,7 @@ function AgentPaneView() {
       tab={secondaryTab}
       agent={agent}
       blueprint={blueprint}
+      egress={egress}
       compact={effectiveSplit}
       onDestroy={() => setPending("destroy")}
       navigateTo={navigateTo}
@@ -267,7 +287,7 @@ function AgentPaneView() {
         agent={agent}
         blueprint={blueprint}
         runtimes={runtimes}
-        allowlistCount={MOCK_EGRESS_ALLOWLIST.length}
+        egress={egress}
         busy={actionBusy}
         onStart={handleStart}
         onRestart={() => setPending("restart")}

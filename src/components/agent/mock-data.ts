@@ -1,61 +1,23 @@
 /**
- * ⚠️ MOCK DATA — the single place Agent Detail invents anything.
+ * ⚠️ MOCK DATA — the last place Agent Detail invents anything.
  *
- * Everything here is a placeholder for an endpoint that does not exist yet.
- * `server/api/` currently ships `agents`, `auth`, `settings` and `skills`
- * only: there is no blueprints route, no artifacts route, and no egress-rules
- * route. Rather than scatter plausible-looking constants through the header
- * and the panes — where the next person would have no way to tell real fields
- * from invented ones — every fabricated value lives here behind a `MOCK_`
- * prefix, with the endpoint that should replace it named in a comment.
+ * What is left is the artifacts grid. There is still no artifact-history
+ * endpoint, so every card except "Latest result" is a placeholder with no
+ * bytes behind it — kept here, behind a `MOCK_` prefix, so the next person can
+ * tell a fabricated value from a real field without reading three components.
  *
- * Nothing in this module is derived from the agent's real row except the id,
- * which is used only to keep the placeholders stable per agent.
+ * The blueprint and egress placeholders that used to live here are gone. They
+ * were the worst kind: `mockBlueprint()` hashed the blueprint id into one of
+ * three invented names and reported `ui-explorer` for a Claude Code agent, and
+ * a hardcoded four-host `MOCK_EGRESS_ALLOWLIST` made the header read
+ * `allowlist · 4` for an agent whose resolved policy was `open`. Egress is a
+ * safety surface: that badge claimed an isolation boundary that did not exist.
+ * Both now come from `GET /api/agents/:id/blueprint` and
+ * `GET /api/egress/agents/:id/effective` — see `agent-data.ts`.
  */
-
-import type { AgentCli } from "@/db/schema";
 
 /** Human-facing note attached to any UI that renders mock values. */
 export const MOCK_NOTICE = "Placeholder data — this endpoint is not implemented yet.";
-
-// ---------------------------------------------------------------------------
-// Blueprint — replace with GET /api/blueprints/:id
-// ---------------------------------------------------------------------------
-
-export interface MockBlueprint {
-  name: string;
-  cli: AgentCli;
-  /** Container resource caps, from `agent_blueprints.nano_cpus` / `memory_bytes`. */
-  vcpus: number;
-  memoryGb: number;
-  /** Shell the CLI runs under, for the terminal chrome's title. */
-  shell: string;
-}
-
-const MOCK_BLUEPRINTS: MockBlueprint[] = [
-  { name: "repo-summariser", cli: "claude-code", vcpus: 2, memoryGb: 4, shell: "zsh" },
-  { name: "test-runner", cli: "codex", vcpus: 4, memoryGb: 8, shell: "bash" },
-  { name: "ui-explorer", cli: "antigravity", vcpus: 2, memoryGb: 4, shell: "bash" },
-];
-
-/** Deterministic per blueprint id, so the header does not reshuffle on re-render. */
-export function mockBlueprint(blueprintId: string | null | undefined): MockBlueprint {
-  const key = blueprintId ?? "";
-  let hash = 0;
-  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
-  return MOCK_BLUEPRINTS[hash % MOCK_BLUEPRINTS.length]!;
-}
-
-// ---------------------------------------------------------------------------
-// Egress allowlist — replace with GET /api/settings/egress?scope=agent:<id>
-// ---------------------------------------------------------------------------
-
-export const MOCK_EGRESS_ALLOWLIST: string[] = [
-  "github.com",
-  "registry.npmjs.org",
-  "api.anthropic.com",
-  "*.sentry.io",
-];
 
 // ---------------------------------------------------------------------------
 // Artifacts — replace with GET /api/agents/:id/artifacts

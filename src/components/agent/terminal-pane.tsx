@@ -1,7 +1,6 @@
 import { useRef, useState } from "react";
 import { TerminalPanel } from "@/components/terminal";
-import type { AgentDetail } from "./agent-data";
-import type { MockBlueprint } from "./mock-data";
+import type { AgentBlueprint, AgentDetail } from "./agent-data";
 
 /**
  * The terminal, in its window chrome.
@@ -16,8 +15,13 @@ import type { MockBlueprint } from "./mock-data";
  */
 export interface TerminalPaneProps {
   agent: AgentDetail;
-  /** ⚠️ mock — supplies the shell and CLI names in the title. */
-  blueprint: MockBlueprint;
+  /**
+   * Supplies the CLI name in the title bar. Null while it loads or if the
+   * fetch fails, in which case the title is simply shorter — it used to carry
+   * an invented shell name (`zsh`/`bash` picked by hashing the blueprint id)
+   * alongside an invented CLI, and a missing word beats a wrong one.
+   */
+  blueprint: AgentBlueprint | null;
   /** Split mode: drop the chrome and the frame inset. */
   compact?: boolean;
   /** The red light is a real stop — it routes to the same confirmation. */
@@ -126,11 +130,9 @@ export function TerminalPane({
                 whiteSpace: "nowrap",
               }}
             >
-              {[
-                shortContainerId(agent.containerId) ?? `agent-${agent.handle}`,
-                blueprint.shell,
-                blueprint.cli,
-              ].join(" · ")}
+              {[shortContainerId(agent.containerId) ?? `agent-${agent.handle}`, blueprint?.cli]
+                .filter(Boolean)
+                .join(" · ")}
             </span>
             <span
               style={{
