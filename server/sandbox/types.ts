@@ -103,9 +103,10 @@ export interface SandboxNetwork {
    *
    * Note what this does *not* buy on a user-defined network: Docker keeps
    * 127.0.0.11 in resolv.conf and uses these merely as its own upstreams, so a
-   * gVisor agent still cannot resolve ordinary hostnames. See
-   * `server/agents/container-dns.ts` for the measurements and the open design
-   * question.
+   * gVisor agent still cannot resolve ordinary hostnames — which is why
+   * `startAgent` sets this only on the host-mode path, and carries a real
+   * resolv.conf in as a mount otherwise. See `server/agents/agent-resolv-conf.ts`
+   * for the measurements.
    */
   dns?: string[];
 }

@@ -120,6 +120,57 @@ Claude Code's binding; others differ. Prompts are sent as bracketed paste, chunk
 discipline drops oversized single writes and a `\r` racing the TUI's paste-coalescing window submits
 half a prompt.
 
+**Multi-chunk injections must go through `hub.inject`, never a loop of `hub.write`.**
+`write({source:"inject"})` forwards to `inject` with a single step, so looping it takes and releases the
+mutex _per chunk_ and leaves `injecting` false in every inter-chunk gap — peer keystrokes are written
+straight through mid-paste, which is the interleaving the mutex exists to prevent, and the "injecting"
+banner strobes once per chunk. It looks correct and passes every behavioural test.
+`tests/unit/agent-runtime-channel.test.ts` greps for the loop shape, because that is how it regresses.
+
+### An agent is told which channel it is answering in — and that line is a hint, not an authority
+
+The PTY used to carry the human's message body and nothing else, while `post.sh` and `submit-result.sh`
+both required a `#channel`. So the scripts asked the agent for a fact it had never been given, and with
+membership in more than one room the destination was a guess. Asked for an HTML report, an agent
+published it to an external service instead — the only delivery path it could actually complete.
+
+Two halves fix it, and both are needed. `agents/prompt-preamble.ts` prepends one line naming the channel
+**inside** the bracketed paste (outside it the bytes are keystrokes, where a leading `/`, `#`, `!` or `@`
+trips slash-command, memory, bash or file-mention modes; and a second write is a second mutex
+acquisition). Profiles without bracketed paste get a one-line, no-LF variant, because a raw newline is
+Enter on most TUIs and a two-line preamble would submit itself. Server-side,
+`resolveTargetChannel` in `api/agent-runtime.ts` makes the channel argument optional and resolves it from
+the run in flight.
+
+**The server is the authority.** The agent reads one flat stream of text, so a human whose message opens
+with a line imitating the preamble is indistinguishable from the harness. An explicitly-named _private_
+channel is therefore gated on membership and answers a non-member with "not found"; public channels stay
+open, because `db/seed.ts` creates `#general` with no members and hard enforcement would lock every
+existing deployment out on upgrade.
+
+### Agent-authored HTML is untrusted, and `allow-same-origin` un-sandboxes it
+
+Artifacts are documents a model wrote. They render in an iframe with **`sandbox="allow-scripts"` and no
+`allow-same-origin`** — granting both together hands the document this origin's cookies, storage and
+`parent.document`, which is not a weaker sandbox but no sandbox at all. Bodies are served under
+`lib/artifact-csp.ts`, which also sets `sandbox allow-scripts` as a _header_ so the guarantee survives
+the URL being opened top-level, and which deliberately allows no `https:` sources — an artifact that
+pulls a CDN library now renders blank rather than being able to exfiltrate anywhere. `SKILL.md` already
+promises agents that external resources may not load.
+
+Access is gated by `channelAccess` on the artifact's channel, never by `requireAgentAccess` — that helper
+takes a user and ignores it, so it cannot answer "may _this_ person read this".
+
+### Agents get a system prompt, and existing blueprints cannot receive it
+
+`db/seed.ts` inserts blueprints only when the table is empty, so a seeded prompt reaches zero existing
+installs and every wording change becomes a migration. The prompt is a constant in
+`agents/system-prompt.ts` composed at container start instead, layered as base + blueprint + per-agent
+override, where the base is harness _facts_ and is not droppable. Reaching the CLI is a second problem:
+`entrypoint.sh` writes `$BLACKHOUSE_SYSTEM_PROMPT_FILE` but the stored `agentCommand` must read it, so
+the entrypoint appends `--append-system-prompt` when the command predates the feature — guarded by a
+`contains` check so it cannot double-apply.
+
 ### The sandbox fallback must stay visible
 
 `agents.sandboxRuntime` is what was **requested**; `agents.runtimeUsed` is what actually **ran**.
@@ -131,6 +182,18 @@ exists to prevent.
 No Docker daemon exists in CI or in dev containers, so **sandbox tests must be pure or mock dockerode**
 (`toCreateOptions` and `resolveDriver` are pure for this reason). gVisor and Kata need manual
 verification on a real Linux host.
+
+### A gVisor agent's DNS is a bind mount, not `HostConfig.Dns`
+
+Docker's embedded resolver (127.0.0.11) is a loopback listener a `runsc` sandbox cannot reach, and on a
+user-defined network Docker writes it into `/etc/resolv.conf` regardless — demoting `HostConfig.Dns` to
+mere upstreams of that stub. Measured on a live host: with `--dns 1.1.1.1` a runsc agent still could not
+resolve anything, the CLI died on `api.anthropic.com: ETIMEOUT`, and since `entrypoint.sh` execs the
+CLI, the container died with it. So `Dns` is set **only** on the host-mode path (default bridge), where
+Docker writes it verbatim, and real resolution comes from bind-mounting a resolv.conf off the Docker
+host (`server/agents/agent-resolv-conf.ts`). That file is seeded by a one-shot helper container because
+bind sources are resolved **by the daemon, on the daemon's filesystem** — the app container cannot write
+there, and the daemon may not even be local. Failure warns loudly and still starts the agent.
 
 ### Transcript hierarchy
 
@@ -194,6 +257,8 @@ drizzle-kit cannot express (partial indexes, CHECK constraints) and verify the g
 | `DATABASE_URL`                              | PostgreSQL connection string                  | —                                  |
 | `BLACKHOUSE_CONTAINER_URL`                  | URL agent containers use to reach the server  | `http://host.docker.internal:3000` |
 | `BLACKHOUSE_NETWORK`                        | Docker network to attach agents to            | —                                  |
+| `BLACKHOUSE_AGENT_DNS`                      | Nameservers for agents (`""` opts out)        | `1.1.1.1,8.8.8.8`                  |
+| `BLACKHOUSE_AGENT_RESOLV_CONF`              | Host path of a resolv.conf to mount in agents | seeded on the Docker host          |
 | `DOCKER_HOST_SOCKET`                        | Docker/Podman socket path                     | `/var/run/docker.sock`             |
 | `BLACKHOUSE_MIGRATE_LENIENT`                | Warn instead of throwing on migration failure | unset                              |
 | `BLACKHOUSE_DEBUG_SHELL`                    | Drop to a shell after the agent CLI exits     | unset                              |

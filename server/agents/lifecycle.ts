@@ -12,6 +12,12 @@ import {
   mergeHostAliases,
   resolveHostAlias,
 } from "./container-dns.js";
+import {
+  ensureAgentResolvConf,
+  needsResolvConfMount,
+  resolvConfMount,
+} from "./agent-resolv-conf.js";
+import { composeSystemPrompt } from "./system-prompt.js";
 
 type AgentRow = typeof schema.agents.$inferSelect;
 type BlueprintRow = typeof schema.agentBlueprints.$inferSelect;
@@ -33,6 +39,18 @@ export function workspaceVolumeName(agentId: string): string {
 
 export function stateVolumeName(agentId: string): string {
   return `bh-state-${agentId}`;
+}
+
+/**
+ * The image an agent runs.
+ *
+ * Pinned per agent when one was built for it, else the blueprint's. Exported
+ * because `startAgent` needs the same answer *before* the spec exists — the
+ * resolv.conf helper runs that image, and re-deriving the expression there is
+ * how the two silently drift apart.
+ */
+export function agentImage(agent: AgentRow, blueprint: BlueprintRow): string {
+  return agent.containerImage || blueprint.image || "";
 }
 
 /**
@@ -71,6 +89,13 @@ export function buildAgentSpec(
     hostAliases?: Array<{ host: string; ip: string }>;
     /** Explicit nameservers; only set where the embedded resolver is unreachable. */
     dns?: string[];
+    /**
+     * Host path of a resolv.conf to bind over the container's, for runtimes
+     * that cannot reach Docker's embedded resolver. Established by the caller
+     * because it means talking to the daemon; see
+     * `server/agents/agent-resolv-conf.ts` for why it cannot be a local write.
+     */
+    resolvConfSource?: string;
   } = { blackhouseUrl: "" },
 ): SandboxSpec {
   const stateMountPath = blueprint.stateMountPath || DEFAULT_STATE_MOUNT_PATH;
@@ -84,8 +109,41 @@ export function buildAgentSpec(
   if (agent.agentToken) env.push(`AGENT_TOKEN=${agent.agentToken}`);
   if (blueprint.agentCommand) env.push(`AGENT_COMMAND=${blueprint.agentCommand}`);
 
-  const systemPrompt = agent.systemPromptOverride ?? blueprint.systemPrompt;
-  if (systemPrompt) env.push(`SYSTEM_PROMPT=${systemPrompt}`);
+  /**
+   * The two heavyweight in-container services, off unless the blueprint asks.
+   *
+   * Always written, never omitted: `entrypoint.sh` treats an absent flag as
+   * "do not start", so an explicit `0` and a missing variable mean the same
+   * thing — but sending it explicitly is what keeps an older image talking to a
+   * newer server from guessing.
+   *
+   * code-server is a full VS Code server and the browser service is node plus
+   * Playwright plus Chromium, both inside a gVisor sandbox. One agent running
+   * both took a 2-CPU host to load average 27.
+   */
+  env.push(`BLACKHOUSE_ENABLE_IDE=${blueprint.enableIde ? "1" : "0"}`);
+  env.push(`BLACKHOUSE_ENABLE_BROWSER=${blueprint.enableBrowser ? "1" : "0"}`);
+
+  /**
+   * Always sent, never conditional.
+   *
+   * This used to be `agent.systemPromptOverride ?? blueprint.systemPrompt`,
+   * pushed only when truthy — and since nothing seeds either column, no agent
+   * that has ever run received a system prompt at all. An agent asked for an
+   * HTML report duly built one and published it to an external artifact service
+   * its CLI ships with, because nothing had told it Blackhouse has channels or
+   * that `submit-result.sh` is how a human sees anything.
+   *
+   * `composeSystemPrompt` prepends the harness facts, so the variable is now
+   * always non-empty; the entrypoint writes it to a file regardless.
+   */
+  env.push(
+    `SYSTEM_PROMPT=${composeSystemPrompt({
+      handle: agent.handle,
+      blueprintPrompt: blueprint.systemPrompt,
+      agentOverride: agent.systemPromptOverride,
+    })}`,
+  );
   if (agent.gitRepoUrl) env.push(`GIT_REPO_URL=${agent.gitRepoUrl}`);
   if (agent.gitBranch) env.push(`GIT_BRANCH=${agent.gitBranch}`);
 
@@ -106,10 +164,15 @@ export function buildAgentSpec(
     mounts.push({ source: mount.name, target: mount.mountPath });
   }
 
+  // Set only for runtimes that cannot reach Docker's embedded resolver: a
+  // real resolv.conf from the Docker host, bind-mounted over the one Docker
+  // generates. It is the whole of DNS for a gVisor agent.
+  if (opts.resolvConfSource) mounts.push(resolvConfMount(opts.resolvConfSource));
+
   const egressPolicy = agent.egressPolicy ?? blueprint.egressPolicy;
 
   return {
-    image: agent.containerImage || blueprint.image || "",
+    image: agentImage(agent, blueprint),
     env,
     labels: {
       "blackhouse.managed": "true",
@@ -159,6 +222,46 @@ export async function startAgent(agentId: string): Promise<AgentRow> {
   const [agent] = await db.select().from(schema.agents).where(eq(schema.agents.id, agentId));
   if (!agent) throw new Error("Agent not found");
 
+  /**
+   * Whether an agent is running is a question for the runtime, not the row.
+   *
+   * `agents.status` is only ever written by an action that goes through here,
+   * so a container that dies on its own — the CLI exiting because it cannot
+   * reach its API, an OOM kill, a daemon restart — leaves the row saying
+   * `running` with nothing behind it. The start route trusted that and returned
+   * early, which meant the single action that would have recovered the agent
+   * was the one action it refused to take. Observed on the deployment: a
+   * container in `Exited (1)`, a row reading `running`, and a start button that
+   * did nothing at all, twice, silently.
+   *
+   * A container also binds its image and environment at creation, so the dead
+   * one cannot simply be started again — it would come back with exactly the
+   * configuration that killed it. It gets removed and rebuilt instead.
+   */
+  const existing = handleFor(agent);
+  if (existing) {
+    const inspected = await getDriver(existing.driver)
+      .inspect(existing)
+      .catch(() => null);
+
+    if (inspected?.running) {
+      if (agent.status === "running") return agent;
+      const [corrected] = await db
+        .update(schema.agents)
+        .set({ status: "running", updatedAt: new Date() })
+        .where(eq(schema.agents.id, agent.id))
+        .returning();
+      return corrected;
+    }
+
+    // Gone or dead. Clear the carcass before building its replacement, so the
+    // old container's name does not collide with the new one.
+    await getDriver(existing.driver)
+      .destroy(existing, { force: true })
+      .catch(() => {});
+    invalidateContainerEndpointCache(agent.id);
+  }
+
   const [blueprint] = await db
     .select()
     .from(schema.agentBlueprints)
@@ -186,9 +289,47 @@ export async function startAgent(agentId: string): Promise<AgentRow> {
 
   // Name resolution, decided per effective runtime. Under gVisor the embedded
   // resolver is unreachable, so the names the agent depends on are pinned into
-  // /etc/hosts and an upstream nameserver is supplied for everything else.
+  // /etc/hosts and everything else is served by the resolv.conf mounted below.
   const hostAliases = mergeHostAliases(egress.hostAliases, [await resolveHostAlias(blackhouseUrl)]);
-  const dns = hasEmbeddedDns(resolution.effective) ? undefined : agentDnsServers();
+
+  /**
+   * General name resolution, for runtimes where 127.0.0.11 is unreachable.
+   *
+   * Pinned `/etc/hosts` entries above cover the names Blackhouse controls; this
+   * covers every other name the agent needs, starting with the one that made
+   * the bug fatal — the CLI could not reach `api.anthropic.com`, exited, and
+   * took the container with it.
+   *
+   * The mount is applied even under egress enforcement, where the agent sits on
+   * an `internal: true` network and reaches the world only through the CONNECT
+   * proxy (which resolves on its own side). It changes nothing there — an
+   * unreachable 1.1.1.1 fails no worse than an unreachable 127.0.0.11 — and
+   * keeping one code path means the enforced case is not a second thing to get
+   * right later.
+   */
+  const resolv = await ensureAgentResolvConf({
+    runtime: resolution.effective,
+    image: agentImage(agent, blueprint),
+  });
+  if (resolv.warning) console.warn(`${resolv.warning} (agent ${agent.handle})`);
+
+  /**
+   * `HostConfig.Dns` is kept for exactly one case, and it is not the gVisor one.
+   *
+   * Measured: on a *user-defined* network Docker writes `nameserver 127.0.0.11`
+   * regardless and keeps these merely as its own upstreams, so setting it there
+   * did nothing at all for a runsc agent — a mitigation that looked like a fix
+   * for as long as nobody read the generated resolv.conf. On the host-mode path
+   * (no `BLACKHOUSE_NETWORK`, default bridge) Docker does write them verbatim,
+   * which is the one place it works, so it is passed there and nowhere else.
+   * The user-defined-network case is what the bind mount above is for.
+   */
+  const onUserDefinedNetwork = Boolean(egress.networkName ?? networkName);
+  const dns =
+    needsResolvConfMount(resolution.effective) && !resolv.mount && !onUserDefinedNetwork
+      ? agentDnsServers()
+      : undefined;
+
   if (!hasEmbeddedDns(resolution.effective) && hostAliases.length === 0) {
     console.warn(
       `[blackhouse] agent ${agent.handle}: running under ${resolution.effective}, where Docker's ` +
@@ -203,6 +344,7 @@ export async function startAgent(agentId: string): Promise<AgentRow> {
     egress,
     hostAliases,
     dns,
+    resolvConfSource: resolv.mount?.source,
   });
 
   const handle = await driver.create(spec);

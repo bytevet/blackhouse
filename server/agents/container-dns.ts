@@ -29,20 +29,17 @@ import { isIP } from "node:net";
  * container is on a user-defined network — Docker keeps 127.0.0.11 as the stub
  * and uses them only as its own upstreams, which is visible in the generated
  * file as `ExtServers: [1.1.1.1 8.8.8.8]`. Since the stub is exactly what the
- * sandbox cannot reach, the setting is inert there. It is kept because it is
- * still the correct field for the host-network path, and because losing it
- * would make the eventual fix harder to find — not because it currently helps
- * a gVisor agent.
+ * sandbox cannot reach, the setting is inert there, i.e. inert in every
+ * deployment that sets `BLACKHOUSE_NETWORK`. So it is no longer passed there:
+ * `startAgent` supplies it only on the host-mode path (default bridge), where
+ * Docker does write it verbatim and it genuinely works.
  *
  * The sandbox itself is not the obstacle: from inside runsc, a UDP query
  * straight to `1.1.1.1:53` gets a reply and `https://1.1.1.1` returns 301. The
- * obstacle is purely that resolv.conf points at a loopback stub. Getting a
- * real nameserver into that file on a user-defined network means either
- * writing it from the entrypoint (which runs unprivileged) or leaving the
- * network as the container's secondary — and that second option reintroduces
- * the default bridge, which is the route out that egress enforcement exists to
- * remove. That trade-off is a design decision, not a bug fix, so it is
- * documented in the plan rather than made here.
+ * obstacle is purely that resolv.conf points at a loopback stub — so the fix is
+ * to replace that file, by bind-mounting a real one from the Docker host over
+ * it. That lives in `agent-resolv-conf.ts`, which also records why the file has
+ * to be written by a container rather than by this process.
  */
 
 /** Runtimes whose sandbox can reach Docker's embedded resolver at 127.0.0.11. */
@@ -61,9 +58,10 @@ const DEFAULT_AGENT_DNS = ["1.1.1.1", "8.8.8.8"];
  * point of view and no more reachable than 127.0.0.11. Operators who want
  * their own resolver set `BLACKHOUSE_AGENT_DNS`; an empty string opts out.
  *
- * See the module comment for the measured caveat: on a user-defined network
- * Docker treats these as upstreams for its own stub rather than writing them
- * into resolv.conf, so today they do not restore resolution inside gVisor.
+ * Two consumers, and the first is the one that actually restores resolution
+ * under gVisor: these servers are the *contents* of the resolv.conf that
+ * `agent-resolv-conf.ts` seeds and bind-mounts. `HostConfig.Dns` is the second,
+ * and only on the host-mode path — see the module comment.
  */
 export function agentDnsServers(): string[] {
   const raw = process.env.BLACKHOUSE_AGENT_DNS;
