@@ -4,6 +4,7 @@ import * as schema from "../db/schema.js";
 import { streamBus } from "../lib/stream-bus.js";
 import { getPtyHub } from "./pty-hub.js";
 import { planInjection } from "./injector.js";
+import { channelPreamble } from "./prompt-preamble.js";
 import { getProfile } from "./adapters/profiles.js";
 
 type AgentRow = typeof schema.agents.$inferSelect;
@@ -46,16 +47,44 @@ export async function deliverRun(
     .where(eq(schema.agentBlueprints.id, agent.blueprintId))
     .limit(1);
 
+  // The channel the agent is answering in — the one fact the PTY never carried.
+  // Looked up here rather than folded into `runs.prompt` at mention time,
+  // because that column is the record of what the human actually said, and
+  // because both delivery paths (a fresh mention and the drainer releasing a
+  // queued run) funnel through this function precisely so they cannot drift.
+  const [channel] = run.channelId
+    ? await db
+        .select({ slug: schema.channels.slug })
+        .from(schema.channels)
+        .where(eq(schema.channels.id, run.channelId))
+        .limit(1)
+    : [];
+
   const hub = getPtyHub();
   await hub.ensureAttached(agent.id);
 
   const mode = run.injectionMode === "interrupt" ? "interrupt" : "queue";
-  for (const step of planInjection(run.prompt, getProfile(blueprint?.cli), { mode })) {
-    await hub.write(agent.id, step.bytes, { source: "inject" });
-    if (step.delayAfterMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, step.delayAfterMs));
-    }
-  }
+
+  // `inject`, not a loop of `write`. `write({source:"inject"})` forwards to
+  // `inject` with a single step, so driving a multi-chunk paste through it took
+  // and released the mutex once per chunk and left `injecting` false in every
+  // inter-chunk gap. A peer keystroke arriving mid-paste was therefore written
+  // straight through rather than buffered — precisely the interleaving the
+  // mutex exists to prevent — and the terminal's "injecting" banner strobed
+  // once per chunk. `inject` holds the lock across the chunks *and* the gaps,
+  // which also puts the timing in one place instead of duplicating this sleep
+  // loop at every call site.
+  const profile = getProfile(blueprint?.cli);
+  await hub.inject(
+    agent.id,
+    planInjection(run.prompt, profile, {
+      mode,
+      preamble: channelPreamble({
+        slug: channel?.slug,
+        bracketedPaste: profile.bracketedPaste,
+      }),
+    }),
+  );
 
   await db
     .update(schema.runs)

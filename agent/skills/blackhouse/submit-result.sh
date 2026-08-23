@@ -46,12 +46,33 @@ USAGE
   exit 2
 }
 
+# No args used to mean "print usage". It now depends on stdin: a human running
+# this by hand at a terminal wants the usage, whereas
+# `cat report.html | submit-result.sh --title "..."` is the ordinary path now
+# that the channel is optional, and it arrives with no positional at all.
 case "${1:-}" in
-  "" | -h | --help | help) usage ;;
+  -h | --help | help) usage ;;
+  "") [ -t 0 ] && usage ;;
 esac
 
-CHANNEL="${1#\#}"
-shift
+# The channel is optional.
+#
+# It was required, and an agent is never told which channel it is answering in —
+# the prompt written to its terminal carried the human's message and nothing
+# else. So this script asked for a fact the agent did not have, and with
+# membership in more than one channel the answer was a guess. Omitted, the
+# server resolves it from the run this agent is currently answering.
+#
+# Content arrives on stdin only, so a leading positional is unambiguous: it is a
+# channel unless it looks like a flag.
+CHANNEL=""
+case "${1:-}" in
+  "" | -*) : ;;
+  *)
+    CHANNEL="${1#\#}"
+    shift
+    ;;
+esac
 
 TITLE=""
 KIND="html"
@@ -89,10 +110,6 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-if [ -z "$CHANNEL" ]; then
-  echo "$SELF: channel is required (e.g. '#general'). Run list-channels.sh." >&2
-  exit 1
-fi
 
 BODY=""
 if [ -z "$URL" ]; then
@@ -109,7 +126,8 @@ PAYLOAD=$(jq -n \
   --arg kind "$KIND" \
   --arg body "$BODY" \
   --arg url "$URL" \
-  '{channel: $channel, kind: $kind}
+  '{kind: $kind}
+   + (if $channel == "" then {} else {channel: $channel} end)
    + (if $title == "" then {} else {title: $title} end)
    + (if $body  == "" then {} else {body: $body} end)
    + (if $url   == "" then {} else {url: $url} end)')
@@ -141,4 +159,9 @@ if [ -z "$ARTIFACT_ID" ]; then
   exit 1
 fi
 
-echo "Published ${TITLE:-artifact} to #$CHANNEL — id=$ARTIFACT_ID kind=$KIND"
+# Report the channel the SERVER resolved, not the one this script guessed.
+# When the channel is inferred the agent has no idea where it went, so a wrong
+# inference has to be visible in the terminal a human is watching rather than
+# discovered later in the wrong room.
+LANDED=$(printf '%s' "$RESPONSE" | jq -r '.channel.slug // empty' 2>/dev/null || true)
+echo "Published ${TITLE:-artifact} to #${LANDED:-$CHANNEL} — id=$ARTIFACT_ID kind=$KIND"

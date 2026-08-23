@@ -17,6 +17,8 @@ import {
 } from "../agents/events.js";
 import { parseMentions } from "../lib/mentions.js";
 
+type ChannelRow = typeof schema.channels.$inferSelect;
+
 type AgentRow = typeof schema.agents.$inferSelect;
 
 /**
@@ -300,15 +302,26 @@ const routes = app
 
     const parsed = z
       .object({
-        channel: z.string().min(1),
+        // Optional: the agent is not told which channel it is answering in, so
+        // requiring it here asked for a fact it does not have. See
+        // `resolveTargetChannel`.
+        channel: z.string().min(1).optional(),
         body: z.string().min(1).max(20_000),
         requestId: z.string().max(200).optional(),
       })
       .safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "Invalid message" }, 400);
 
-    const channel = await resolveChannel(parsed.data.channel);
-    if (!channel) return c.json({ error: "Channel not found" }, 404);
+    const openRun = await openRunFor(agent.id);
+    const resolved = await resolveWritableChannel(
+      agent.id,
+      resolveTargetChannel({
+        explicitKey: parsed.data.channel,
+        openRunChannelId: openRun?.channelId,
+      }),
+    );
+    if ("error" in resolved) return resolved.error;
+    const channel = resolved.channel;
 
     // Dedup on (author, requestId): an agent retrying a failed post should not
     // double-post. Enforced by a partial unique index; we surface the existing
@@ -401,7 +414,7 @@ const routes = app
 
     const parsed = z
       .object({
-        channel: z.string().min(1),
+        channel: z.string().min(1).optional(),
         title: z.string().max(200).optional(),
         kind: z.enum(["html", "file", "link", "text"]).default("html"),
         body: z.string().max(2_000_000).optional(),
@@ -410,8 +423,16 @@ const routes = app
       .safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "Invalid artifact" }, 400);
 
-    const channel = await resolveChannel(parsed.data.channel);
-    if (!channel) return c.json({ error: "Channel not found" }, 404);
+    const openRun = await openRunFor(agent.id);
+    const resolved = await resolveWritableChannel(
+      agent.id,
+      resolveTargetChannel({
+        explicitKey: parsed.data.channel,
+        openRunChannelId: openRun?.channelId,
+      }),
+    );
+    if ("error" in resolved) return resolved.error;
+    const channel = resolved.channel;
 
     const [message] = await db
       .insert(schema.messages)
@@ -430,9 +451,14 @@ const routes = app
         channelId: channel.id,
         messageId: message.id,
         agentId: agent.id,
+        // The turn that produced it. The column has always existed and was
+        // never written, so no artifact could be traced back to the run that
+        // made it — and the run is now also what supplies the channel, so it is
+        // in hand anyway.
+        runId: openRun?.id ?? null,
         kind: parsed.data.kind,
         title: parsed.data.title ?? null,
-        contentType: parsed.data.kind === "html" ? "text/html" : null,
+        contentType: contentTypeFor(parsed.data.kind),
         body: parsed.data.body ?? null,
         url: parsed.data.url ?? null,
         sizeBytes: parsed.data.body ? Buffer.byteLength(parsed.data.body, "utf8") : null,
@@ -450,8 +476,126 @@ const routes = app
       messageId: message.id,
     });
 
-    return c.json({ artifact, message }, 201);
+    // `channel` echoes back what the server resolved, not what the caller
+    // guessed. When the channel was inferred the script prints this, so a wrong
+    // inference is visible in the terminal a human is watching rather than
+    // discovered later in the wrong room.
+    return c.json({ artifact, message, channel: { id: channel.id, slug: channel.slug } }, 201);
   });
+
+/**
+ * Which channel a script meant, when it did not say.
+ *
+ * An agent is not told where it is. The PTY receives the human's message body
+ * and nothing else, so `submit-result.sh '#channel'` asked for a fact the agent
+ * had never been given — with membership in more than one room the destination
+ * was a guess. Observed: asked for a report, the agent published it to an
+ * external service instead, because that was the only delivery path it could
+ * actually complete.
+ *
+ * The run it is answering knows the channel, so the server answers instead of
+ * the agent. Kept pure and separate from the routes so the rule is testable
+ * without a database, the way `canReceiveQueuedRun` is in `agents/queue.ts`.
+ *
+ * Note the ordering: an explicit channel always wins. The injected prompt now
+ * carries a channel line, but that line sits in the same flat text stream as
+ * the human's message — a body whose first line imitates it is indistinguishable
+ * to the agent. So the prompt is a hint, this is the authority, and a private
+ * channel is still gated on membership below.
+ */
+export type TargetChannel =
+  | { source: "explicit"; key: string }
+  | { source: "run"; channelId: string }
+  | { source: "none" };
+
+export function resolveTargetChannel(input: {
+  explicitKey?: string | null;
+  openRunChannelId?: string | null;
+}): TargetChannel {
+  const explicit = input.explicitKey?.trim();
+  if (explicit) return { source: "explicit", key: explicit };
+  if (input.openRunChannelId) return { source: "run", channelId: input.openRunChannelId };
+  return { source: "none" };
+}
+
+/** The message a script prints when it has no channel and no run to borrow one from. */
+export const NO_CHANNEL_MESSAGE =
+  "No channel given and no run in flight — this agent was not answering a channel prompt. " +
+  "Pass '#channel'; run list-channels.sh to see yours.";
+
+/** The agent's newest unfinished run. One place, because three callers want it. */
+async function openRunFor(agentId: string) {
+  const [run] = await db
+    .select()
+    .from(schema.runs)
+    .where(and(eq(schema.runs.agentId, agentId), eq(schema.runs.status, "running")))
+    .orderBy(sql`${schema.runs.queuedAt} DESC`)
+    .limit(1);
+  return run ?? null;
+}
+
+/**
+ * Resolve a target channel to a row the agent is allowed to write to.
+ *
+ * Membership is checked, but not required outright. `db/seed.ts` creates
+ * `#general` and adds nobody, so demanding membership would break every
+ * existing deployment the moment it shipped — the same trap `channelAccess`
+ * documents for humans. The rule that closes the real hole without that cost:
+ *
+ *  - inferred from the run  → allow; the harness put the agent there
+ *  - explicit and public    → allow
+ *  - explicit and private   → members only, and a non-member gets "not found"
+ *                             rather than a 403, because a private channel must
+ *                             not confirm it exists
+ */
+async function resolveWritableChannel(
+  agentId: string,
+  target: TargetChannel,
+): Promise<{ channel: ChannelRow } | { error: Response }> {
+  if (target.source === "none") {
+    return { error: Response.json({ error: NO_CHANNEL_MESSAGE }, { status: 409 }) };
+  }
+
+  const channel =
+    target.source === "run"
+      ? await channelById(target.channelId)
+      : await resolveChannel(target.key);
+  if (!channel) return { error: Response.json({ error: "Channel not found" }, { status: 404 }) };
+
+  if (target.source === "explicit" && channel.isPrivate) {
+    const [member] = await db
+      .select({ id: schema.channelMembers.id })
+      .from(schema.channelMembers)
+      .where(
+        and(
+          eq(schema.channelMembers.channelId, channel.id),
+          eq(schema.channelMembers.agentId, agentId),
+        ),
+      )
+      .limit(1);
+    if (!member) return { error: Response.json({ error: "Channel not found" }, { status: 404 }) };
+  }
+
+  return { channel };
+}
+
+/**
+ * The Content-Type an artifact body is served as.
+ *
+ * `text` used to fall through to null alongside `link` and `file`, which have
+ * no body at all — so a text artifact was stored with nothing saying how to
+ * render it, and the client had to guess.
+ */
+function contentTypeFor(kind: "html" | "file" | "link" | "text"): string | null {
+  if (kind === "html") return "text/html";
+  if (kind === "text") return "text/plain";
+  return null;
+}
+
+async function channelById(id: string) {
+  const [row] = await db.select().from(schema.channels).where(eq(schema.channels.id, id)).limit(1);
+  return row ?? null;
+}
 
 async function resolveChannel(key: string) {
   const cleaned = key.replace(/^#/, "");

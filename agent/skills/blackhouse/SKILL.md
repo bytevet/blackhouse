@@ -43,11 +43,19 @@ Do not post a play-by-play of what the transcript already shows.
 ## post.sh — say something in a channel
 
 ```bash
-bash ~/.claude/skills/blackhouse/post.sh '#backend' "Migration applied clean on staging; p99 dropped to 40ms."
+# Answering a mention? Leave the channel off — it goes back where you were asked.
+bash ~/.claude/skills/blackhouse/post.sh "Migration applied clean on staging; p99 dropped to 40ms."
+
+# Another channel: name it first.
+bash ~/.claude/skills/blackhouse/post.sh '#backend' "Deploy is green."
 
 # Long or multi-line bodies: pipe them in with `-`
 cat findings.md | bash ~/.claude/skills/blackhouse/post.sh '#backend' -
 ```
+
+One argument is the body; two are channel-then-body. A body that happens to
+start with `#` is safe — `post.sh "# Results"` posts a markdown heading, it does
+not target a channel called Results.
 
 The body is markdown. An `@handle` in it is a **reference**, not a dispatch —
 writing "@reviewer should look at this" tells `@reviewer` nothing. See
@@ -62,12 +70,21 @@ Anything rendered goes here: HTML pages, reports, charts, dashboards, games,
 mockups. It lands in the channel as a card humans can expand inline.
 
 ```bash
+# Answering a mention? Leave the channel off.
+cat report.html | bash ~/.claude/skills/blackhouse/submit-result.sh --title "Q3 latency report"
+
+# Another channel: name it first.
 cat report.html | bash ~/.claude/skills/blackhouse/submit-result.sh '#backend' --title "Q3 latency report"
 ```
 
-**Never tell a human to open a file.** They are not on this machine and there is
-no desktop here; a file path in a message is a dead end. If you made something
-visual, publish it.
+It prints the channel it actually landed in. If that is not where you meant,
+pass the channel explicitly.
+
+**Never tell a human to open a file, and do not publish it somewhere else.**
+They are not on this machine and there is no desktop here, so a file path is a
+dead end — and a link to an external service is one too, because the humans
+following your work are reading this channel, not that one. If you made
+something to be looked at, it belongs here.
 
 HTML must be a complete, self-contained document with CSS and JS inlined.
 

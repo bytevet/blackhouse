@@ -22,6 +22,7 @@
  */
 
 import type { AdapterProfile } from "./adapters/profiles.js";
+import { joinPreamble } from "./prompt-preamble.js";
 
 export type InjectionMode = "queue" | "interrupt";
 
@@ -33,6 +34,21 @@ export interface InjectionOptions {
   mode?: InjectionMode;
   /** Send the submit key after the paste. Default true. */
   submit?: boolean;
+  /**
+   * Text prepended to the body inside the same paste.
+   *
+   * An opaque string on purpose. This module is the byte encoder and knows
+   * nothing about channels; `agents/prompt-preamble.ts` decides what the line
+   * says and how it joins. Passing a domain concept in here instead would put
+   * workspace knowledge inside the one file whose contract is "pure bytes".
+   *
+   * It goes *inside* the paste rather than in a preceding write for two
+   * reasons: outside a paste the bytes are keystrokes, and a leading `/`, `#`,
+   * `!` or `@` triggers slash-command, memory, bash or file-mention modes on
+   * one TUI or another; and a second write is a second mutex acquisition, so a
+   * peer keystroke could land between the preamble and the prompt.
+   */
+  preamble?: string;
 }
 
 /** One stdin write plus the pause that must follow it. */
@@ -112,7 +128,11 @@ export function planInjection(
   const submit = opts.submit ?? true;
 
   const steps: InjectionStep[] = [];
-  const body = normalizePromptText(text);
+  // Joined before normalisation, so one pass covers both and a preamble cannot
+  // smuggle in a control character the body would have had stripped.
+  const body = normalizePromptText(
+    joinPreamble(opts.preamble ?? "", normalizePromptText(text), profile.bracketedPaste),
+  );
 
   if (mode === "interrupt" && profile.interruptBytes.length > 0) {
     steps.push({

@@ -54,10 +54,25 @@ case "${1:-}" in
   "" | -h | --help | help) usage ;;
 esac
 
-CHANNEL="$1"
-BODY_TEXT="${2:-}"
-if [ "$#" -lt 2 ]; then usage; fi
-shift 2
+# The channel is optional, and arity is what decides — never a leading `#`.
+#
+# It was required, and an agent is never told which channel it is answering in:
+# the prompt written to its terminal carries the human's message and nothing
+# else. Omitted, the server resolves it from the run being answered.
+#
+# Sniffing for a leading `#` would be the obvious way to tell a channel from a
+# body, and it is wrong: `post.sh "# Results"` is an ordinary markdown heading,
+# and stripping the hash would silently post it into a channel named "Results".
+# Two positionals mean channel-then-body; one means body alone.
+CHANNEL=""
+if [ "$#" -ge 2 ]; then
+  CHANNEL="${1#\#}"
+  BODY_TEXT="$2"
+  shift 2
+else
+  BODY_TEXT="$1"
+  shift 1
+fi
 
 REQUEST_ID=""
 while [ "$#" -gt 0 ]; do
@@ -106,7 +121,9 @@ PAYLOAD=$(jq -n \
   --arg channel "$CHANNEL" \
   --arg body "$BODY_TEXT" \
   --arg requestId "$REQUEST_ID" \
-  '{channel: $channel, body: $body, requestId: $requestId}')
+  '{body: $body}
+   + (if $channel   == "" then {} else {channel: $channel} end)
+   + (if $requestId == "" then {} else {requestId: $requestId} end)')
 
 # Both auth headers are required: the bearer token proves the call, the
 # X-Blackhouse-Agent header says which agent is making it. Omitting the
