@@ -156,6 +156,13 @@ const app = new Hono<AuthEnv>()
         envVars: z.array(z.object({ key: z.string(), value: z.string() })).optional(),
         volumeMounts: volumeMountSchema.optional(),
         dockerfileContent: z.string().nullable().optional(),
+        // Egress was settable only in the database, and the service flags did
+        // not exist. Both decide whether an agent can reach the internet at
+        // all, so they belong on the form rather than in psql.
+        egressPolicy: z.enum(["none", "allowlist", "open"]).optional(),
+        egressAllowlist: z.array(z.string().min(1).max(253)).optional(),
+        enableIde: z.boolean().optional(),
+        enableBrowser: z.boolean().optional(),
       }),
     ),
     async (c) => {
@@ -164,10 +171,28 @@ const app = new Hono<AuthEnv>()
       const values: Partial<typeof schema.agentBlueprints.$inferInsert> = {
         cli: data.cli,
         name: data.name,
-        agentCommand: data.agentCommand ?? null,
-        envVars: data.envVars ?? null,
-        volumeMounts: data.volumeMounts ?? null,
-        dockerfileContent: data.dockerfileContent ?? null,
+        // Omitted means "leave alone", not "clear".
+        //
+        // These used to be `?? null`, so a PUT that sent only the fields it
+        // meant to change wiped every field it did not. Demonstrated the hard
+        // way: updating a blueprint's egress policy nulled its `agentCommand`,
+        // and the next agent from it refused to start because the entrypoint
+        // had nothing to exec. An explicit `null` in the payload still clears
+        // the field — `!== undefined` distinguishes the two, where `??` cannot.
+        ...(data.agentCommand !== undefined && { agentCommand: data.agentCommand }),
+        ...(data.envVars !== undefined && { envVars: data.envVars }),
+        ...(data.volumeMounts !== undefined && { volumeMounts: data.volumeMounts }),
+        ...(data.dockerfileContent !== undefined && {
+          dockerfileContent: data.dockerfileContent,
+        }),
+        // `??` not `?? null`: these four have non-null column defaults, and
+        // omitting a field from the payload must leave the stored value alone
+        // rather than reset it. A form that only edits the name should not
+        // silently disable an agent's egress.
+        ...(data.egressPolicy !== undefined && { egressPolicy: data.egressPolicy }),
+        ...(data.egressAllowlist !== undefined && { egressAllowlist: data.egressAllowlist }),
+        ...(data.enableIde !== undefined && { enableIde: data.enableIde }),
+        ...(data.enableBrowser !== undefined && { enableBrowser: data.enableBrowser }),
         updatedAt: new Date(),
       };
 
@@ -192,6 +217,13 @@ const app = new Hono<AuthEnv>()
         envVars: z.array(z.object({ key: z.string(), value: z.string() })).optional(),
         volumeMounts: volumeMountSchema.optional(),
         dockerfileContent: z.string().nullable().optional(),
+        // Egress was settable only in the database, and the service flags did
+        // not exist. Both decide whether an agent can reach the internet at
+        // all, so they belong on the form rather than in psql.
+        egressPolicy: z.enum(["none", "allowlist", "open"]).optional(),
+        egressAllowlist: z.array(z.string().min(1).max(253)).optional(),
+        enableIde: z.boolean().optional(),
+        enableBrowser: z.boolean().optional(),
       }),
     ),
     async (c) => {
@@ -201,10 +233,28 @@ const app = new Hono<AuthEnv>()
       const values: Partial<typeof schema.agentBlueprints.$inferInsert> = {
         cli: data.cli,
         name: data.name,
-        agentCommand: data.agentCommand ?? null,
-        envVars: data.envVars ?? null,
-        volumeMounts: data.volumeMounts ?? null,
-        dockerfileContent: data.dockerfileContent ?? null,
+        // Omitted means "leave alone", not "clear".
+        //
+        // These used to be `?? null`, so a PUT that sent only the fields it
+        // meant to change wiped every field it did not. Demonstrated the hard
+        // way: updating a blueprint's egress policy nulled its `agentCommand`,
+        // and the next agent from it refused to start because the entrypoint
+        // had nothing to exec. An explicit `null` in the payload still clears
+        // the field — `!== undefined` distinguishes the two, where `??` cannot.
+        ...(data.agentCommand !== undefined && { agentCommand: data.agentCommand }),
+        ...(data.envVars !== undefined && { envVars: data.envVars }),
+        ...(data.volumeMounts !== undefined && { volumeMounts: data.volumeMounts }),
+        ...(data.dockerfileContent !== undefined && {
+          dockerfileContent: data.dockerfileContent,
+        }),
+        // `??` not `?? null`: these four have non-null column defaults, and
+        // omitting a field from the payload must leave the stored value alone
+        // rather than reset it. A form that only edits the name should not
+        // silently disable an agent's egress.
+        ...(data.egressPolicy !== undefined && { egressPolicy: data.egressPolicy }),
+        ...(data.egressAllowlist !== undefined && { egressAllowlist: data.egressAllowlist }),
+        ...(data.enableIde !== undefined && { enableIde: data.enableIde }),
+        ...(data.enableBrowser !== undefined && { enableBrowser: data.enableBrowser }),
         updatedAt: new Date(),
       };
 
@@ -458,7 +508,24 @@ const app = new Hono<AuthEnv>()
   // ---------------------------------------------------------------------------
   .get("/docker", adminMiddleware, async (c) => {
     const rows = await db.select().from(schema.dockerConfigs).limit(1);
-    return c.json(rows[0] ?? null);
+    const row = rows[0];
+    if (!row) return c.json(null);
+
+    /**
+     * The client key never goes back out.
+     *
+     * A Docker daemon is root on its host, so `tlsKey` is the most dangerous
+     * value this app stores, and it was being sent to every admin's browser on
+     * every settings load — where it lands in memory, in devtools, and in any
+     * response cache along the way. Nothing rendered it; it was returned only
+     * because the row was returned whole.
+     *
+     * `hasTlsKey` is what the UI actually needs: whether one is configured.
+     * Writing a new key still works, because the PUT preserves what it is not
+     * given rather than requiring the old value to be echoed back.
+     */
+    const { tlsKey, ...safe } = row;
+    return c.json({ ...safe, hasTlsKey: tlsKey !== null && tlsKey !== "" });
   })
 
   .put(
@@ -473,19 +540,42 @@ const app = new Hono<AuthEnv>()
         tlsCa: z.string().optional(),
         tlsCert: z.string().optional(),
         tlsKey: z.string().optional(),
+        /**
+         * The switch that makes an egress policy binding rather than advisory.
+         *
+         * It has always been a column with no way to set it, so a blueprint
+         * could say `allowlist` while agents ran unrestricted — and, more
+         * sharply, the CONNECT proxy never stood up. Under gVisor that proxy is
+         * also the only working name resolution an agent has, so leaving this
+         * unsettable left agents unable to reach anything at all.
+         */
+        egressEnforce: z.boolean().optional(),
       }),
     ),
     async (c) => {
       const data = c.req.valid("json");
       const existing = await db.select().from(schema.dockerConfigs).limit(1);
 
+      /**
+       * Omitted means "leave alone", and `egressEnforce` is written.
+       *
+       * Both halves were wrong. `?? null` meant a payload that carried only the
+       * field it wanted to change silently cleared the daemon host and its TLS
+       * material — a settings page that saved one switch could take the
+       * workspace off its Docker daemon. And `egressEnforce` was validated,
+       * accepted, and then dropped on the floor: the write returned 200 while
+       * the column stayed false, so enforcement could not be turned on at all.
+       *
+       * An explicit `null` still clears a field. Only absence is preserving.
+       */
       const values = {
-        socketPath: data.socketPath ?? "/var/run/docker.sock",
-        host: data.host ?? null,
-        port: data.port ?? null,
-        tlsCa: data.tlsCa ?? null,
-        tlsCert: data.tlsCert ?? null,
-        tlsKey: data.tlsKey ?? null,
+        ...(data.socketPath !== undefined && { socketPath: data.socketPath }),
+        ...(data.host !== undefined && { host: data.host }),
+        ...(data.port !== undefined && { port: data.port }),
+        ...(data.tlsCa !== undefined && { tlsCa: data.tlsCa }),
+        ...(data.tlsCert !== undefined && { tlsCert: data.tlsCert }),
+        ...(data.tlsKey !== undefined && { tlsKey: data.tlsKey }),
+        ...(data.egressEnforce !== undefined && { egressEnforce: data.egressEnforce }),
         updatedAt: new Date(),
       };
 
@@ -500,7 +590,7 @@ const app = new Hono<AuthEnv>()
       } else {
         const inserted = await db
           .insert(schema.dockerConfigs)
-          .values({ id: 1, ...values })
+          .values({ id: 1, socketPath: "/var/run/docker.sock", ...values })
           .returning();
         result = inserted[0];
       }
