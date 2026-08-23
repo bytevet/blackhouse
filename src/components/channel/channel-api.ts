@@ -220,6 +220,25 @@ export function fetchAgentArtifacts(agentId: string, signal?: AbortSignal): Prom
   return request<ArtifactRow[]>(`/api/agents/${encodeURIComponent(agentId)}/artifacts`, { signal });
 }
 
+/**
+ * Artifact metadata for the cards in one channel.
+ *
+ * Replaces asking every agent in the transcript for its own last 50 artifacts
+ * and merging the answers: that was one request per author, it returned rows
+ * from other channels, and it silently missed anything that had scrolled out
+ * of an agent's window. Artifacts belong to a channel, so ask the channel.
+ */
+export function fetchChannelArtifacts(
+  key: string,
+  ids: string[],
+  signal?: AbortSignal,
+): Promise<ArtifactRow[]> {
+  const query = ids.length > 0 ? `?ids=${encodeURIComponent(ids.join(","))}` : "";
+  return request<ArtifactRow[]>(`/api/channels/${encodeURIComponent(key)}/artifacts${query}`, {
+    signal,
+  });
+}
+
 export function fetchDispatches(signal?: AbortSignal): Promise<DispatchRow[]> {
   return request<DispatchRow[]>("/api/dispatches", { signal });
 }

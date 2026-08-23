@@ -149,13 +149,12 @@ const mockArtifact: ArtifactView = {
   title: "checkout-flow-map.html",
   sizeBytes: 24_576,
   description: "rendered HTML",
-  previewNodes: [
-    { label: "checkout/page.tsx", depth: 0, tone: "info" },
-    { label: "actions.ts", depth: 1, tone: "neutral" },
-    { label: "payments/stripe.ts", depth: 1, tone: "accent" },
-    { label: "webhooks/stripe ⚠", depth: 1, tone: "warning" },
-    { label: "db/schema.ts · orders", depth: 2, tone: "neutral" },
-  ],
+  // A real content route, because the card's `html` branch frames it. The id is
+  // fictional, so the frame shows the server's 404 — which is the honest mock:
+  // the shape is right and nothing pretends a body exists.
+  contentUrl: "/api/artifacts/art_flowmap/content",
+  url: null,
+  contentType: "text/html",
 };
 
 const AGENT_REPLY_BODY = `The checkout flow touches **4 modules**. The payments call sites you'll need to migrate:

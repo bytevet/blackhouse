@@ -6,8 +6,8 @@ import { useResource } from "@/hooks/use-resource";
 import {
   approveDispatch as approveDispatchRequest,
   denyDispatch as denyDispatchRequest,
-  fetchAgentArtifacts,
   fetchChannel,
+  fetchChannelArtifacts,
   fetchDispatches,
   fetchMessages,
   postMessage,
@@ -310,42 +310,67 @@ export function useChannelData(slug: string, currentUser: UserView | null): Chan
 
   // --- Artifact enrichment ------------------------------------------------
 
-  // `messages.body` already gives an artifact card its title, so this only adds
-  // kind and size. Attempts are remembered so a missing artifact (deleted, or
-  // past the agent's 50-row window) is not re-fetched on every render.
-  const attemptedArtifacts = useRef(new Set<string>());
+  /**
+   * Artifact ids the server has already answered for.
+   *
+   * "Answered", not "asked". The previous version marked an id the moment it
+   * built the request and swallowed the rejection, so a single failed fetch —
+   * a dropped connection, a 500, a reload mid-flight — poisoned that artifact
+   * for the life of the tab: the card kept its title from `messages.body` and
+   * never gained a kind, a size or a body, with nothing anywhere saying why.
+   *
+   * A successful response marks every id it was asked about, including ones it
+   * returned no row for. That case is an answer too — the artifact is deleted,
+   * or lives in another channel — and re-asking on every render would not
+   * change it.
+   */
+  const resolvedArtifacts = useRef(new Set<string>());
+  /** Ids in an outstanding request, so a re-render mid-flight does not duplicate it. */
+  const pendingArtifacts = useRef(new Set<string>());
 
   useEffect(() => {
-    const missing = rows.filter((row) => {
-      if (row.kind !== "artifact") return false;
-      const id = row.metadata?.artifactId;
-      return typeof id === "string" && !attemptedArtifacts.current.has(id);
-    });
-    if (missing.length === 0) return;
+    if (!slug) return;
 
-    for (const row of missing) attemptedArtifacts.current.add(String(row.metadata?.artifactId));
-    const agentIds = [
-      ...new Set(missing.map((row) => row.authorAgentId).filter((id): id is string => Boolean(id))),
+    const wanted = [
+      ...new Set(
+        rows
+          .filter((row) => row.kind === "artifact")
+          .map((row) => row.metadata?.artifactId)
+          .filter((id): id is string => typeof id === "string")
+          .filter((id) => !resolvedArtifacts.current.has(id) && !pendingArtifacts.current.has(id)),
+      ),
     ];
-    if (agentIds.length === 0) return;
+    if (wanted.length === 0) return;
 
+    for (const id of wanted) pendingArtifacts.current.add(id);
+    const mine = generation.current;
     let live = true;
-    void Promise.all(agentIds.map((id) => fetchAgentArtifacts(id).catch(() => []))).then(
-      (lists) => {
-        if (!live) return;
-        const flat = lists.flat();
-        if (flat.length === 0) return;
+
+    // One request for the whole screen, scoped to this channel — not one per
+    // author, which is what it used to be.
+    fetchChannelArtifacts(slug, wanted)
+      .then((list) => {
+        if (!live || mine !== generation.current) return;
+        for (const id of wanted) resolvedArtifacts.current.add(id);
+        if (list.length === 0) return;
         setArtifacts((prev) => {
           const next = { ...prev };
-          for (const artifact of flat) next[artifact.id] = artifact;
+          for (const artifact of list) next[artifact.id] = artifact;
           return next;
         });
-      },
-    );
+      })
+      .catch(() => {
+        // Deliberately left unresolved: the next render retries. A transient
+        // failure must not be indistinguishable from "this artifact is gone".
+      })
+      .finally(() => {
+        for (const id of wanted) pendingArtifacts.current.delete(id);
+      });
+
     return () => {
       live = false;
     };
-  }, [rows]);
+  }, [rows, slug]);
 
   // --- The one SSE subscription -------------------------------------------
 

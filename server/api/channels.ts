@@ -31,6 +31,9 @@ const postMessageSchema = z.object({
 
 const DEFAULT_PAGE = 50;
 
+/** Ceiling on one artifact batch — both the `?ids=` list and the rows returned. */
+const ARTIFACT_BATCH_LIMIT = 100;
+
 async function channelBySlugOrId(key: string) {
   const isUuid = /^[0-9a-f-]{36}$/i.test(key);
   const [row] = await db
@@ -495,6 +498,63 @@ const app = new Hono<AuthEnv>()
       hasMore,
       nextCursor: hasMore && last ? `${last.createdAt.toISOString()},${last.id}` : null,
     });
+  })
+
+  /**
+   * Artifact metadata for this channel, in one request.
+   *
+   * The transcript used to enrich its artifact cards by asking every *author*
+   * for its 50 most recent artifacts and merging the lists — N requests for a
+   * channel with N agents in it, each returning rows from rooms the transcript
+   * is not showing, and each silently missing anything older than that window.
+   * Artifacts belong to a channel, so the channel answers for them.
+   *
+   * `?ids=` filters to the cards actually on screen; without it the newest
+   * page is returned so a fresh scrollback needs no id list at all. Both are
+   * constrained to `channel.id`, which is what makes one `channelAccess` check
+   * cover every row in the response.
+   *
+   * `body` is never selected — a channel's worth of inline HTML is not a list
+   * payload. `GET /api/artifacts/:id/content` serves one body at a time.
+   */
+  .get("/:key/artifacts", authMiddleware, async (c) => {
+    const channel = await channelBySlugOrId(c.req.param("key")!);
+    if (!channel) return c.json({ error: "Channel not found" }, 404);
+
+    const access = await channelAccess(channel, c.get("session").user);
+    if (!access.canRead) return notFound(c);
+
+    // Non-UUIDs are dropped rather than passed through: Postgres rejects them
+    // at parse time, so one junk id in the query string would 500 the whole
+    // batch instead of returning the rows that do exist.
+    const ids = (c.req.query("ids") ?? "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter((id) => /^[0-9a-f-]{36}$/i.test(id))
+      .slice(0, ARTIFACT_BATCH_LIMIT);
+
+    const rows = await db
+      .select({
+        id: schema.artifacts.id,
+        kind: schema.artifacts.kind,
+        title: schema.artifacts.title,
+        contentType: schema.artifacts.contentType,
+        url: schema.artifacts.url,
+        sizeBytes: schema.artifacts.sizeBytes,
+        createdAt: schema.artifacts.createdAt,
+        channelId: schema.artifacts.channelId,
+        agentId: schema.artifacts.agentId,
+      })
+      .from(schema.artifacts)
+      .where(
+        ids.length > 0
+          ? and(eq(schema.artifacts.channelId, channel.id), inArray(schema.artifacts.id, ids))
+          : eq(schema.artifacts.channelId, channel.id),
+      )
+      .orderBy(desc(schema.artifacts.createdAt))
+      .limit(ARTIFACT_BATCH_LIMIT);
+
+    return c.json(rows);
   })
 
   /**

@@ -15,6 +15,7 @@ import { detectRuntimes } from "./sandbox/registry.js";
 import authRoutes from "./api/auth.js";
 import agentsRoutes from "./api/agents.js";
 import channelsRoutes from "./api/channels.js";
+import artifactsRoutes from "./api/artifacts.js";
 import streamRoutes from "./api/stream.js";
 import agentRuntimeRoutes from "./api/agent-runtime.js";
 import dispatchRoutes from "./api/dispatches.js";
@@ -62,6 +63,7 @@ const routes = app
   .route("/api/auth", authRoutes)
   .route("/api/agents", agentsRoutes)
   .route("/api/channels", channelsRoutes)
+  .route("/api/artifacts", artifactsRoutes)
   .route("/api/stream", streamRoutes)
   .route("/api/agent-runtime", agentRuntimeRoutes)
   .route("/api/dispatches", dispatchRoutes)

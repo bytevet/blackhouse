@@ -115,8 +115,8 @@ export function MessageTurn({
               whiteSpace: "nowrap",
             }}
           >
-            {turn.toolCallCount} tool calls · {duration(turn.durationMs)} ·{" "}
-            {compactCount(turn.tokens)} tokens
+            {turn.toolCallCount} tool calls · {duration(turn.durationMs)}
+            {turn.tokens !== null && <> · {compactCount(turn.tokens)} tokens</>}
           </span>
 
           <span

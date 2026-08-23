@@ -107,12 +107,25 @@ export interface DispatchRow {
   createdRunId?: string | null;
 }
 
-/** An `artifacts` row as `GET /api/agents/:id/artifacts` returns it. */
+/**
+ * An `artifacts` row as `GET /api/channels/:key/artifacts` returns it.
+ *
+ * Everything past `kind` is optional so a caller can hand in the narrower
+ * shape an older endpoint returns — and so the mapping tests can write a row
+ * literal without restating columns they are not asserting on.
+ */
 export interface ArtifactRow {
   id: string;
   kind: ArtifactKind;
   title?: string | null;
   sizeBytes?: number | null;
+  /** Agent-supplied. Displayed, never used to decide how a body is rendered. */
+  contentType?: string | null;
+  /** External location for `link`/`file`. Agent-supplied, so never an iframe src. */
+  url?: string | null;
+  channelId?: string;
+  agentId?: string | null;
+  createdAt?: WireDate;
 }
 
 /**
@@ -378,21 +391,58 @@ export function mapTranscript(input: MapTranscriptInput): TranscriptEntry[] {
   const entries: TranscriptEntry[] = [];
   let group: MessageRow[] = [];
 
+  const ordered = sortMessages(messages);
+
+  /**
+   * Runs that have ended, gathered before grouping.
+   *
+   * `turn_end` cannot be read off the group that needs it — see `turnFor`.
+   */
+  const endedRuns = new Set<string>();
+  for (const message of ordered) {
+    if (message.kind === "event" && (message.metadata ?? {}).eventType === "turn_end") {
+      endedRuns.add(runKey(message));
+    }
+  }
+
+  /**
+   * A turn row summarises tool traffic, so a group with no tool traffic is not
+   * a turn row.
+   *
+   * Event rows carry more than tool calls: `turn_start`, `turn_end`, `usage`
+   * and `status` are all bookkeeping. A turn normally opens with `turn_start`,
+   * then says something, then starts calling tools — and because grouping
+   * breaks on the prose in the middle, `turn_start` was left alone in a group
+   * of its own and rendered as its own summary row. The channel showed two
+   * rows for one turn, the first reading "worked 0 tool calls · 0s · running",
+   * which describes an agent doing nothing at the exact moment it was working.
+   * A turn with no tools at all — "Hey, I'm here" — produced two such rows and
+   * no real one.
+   *
+   * Dropping them loses nothing: prose renders as prose, and that a turn is in
+   * flight is already carried by the agent's activity pill and status dot,
+   * which is where CLAUDE.md puts the process signal.
+   */
   const flush = () => {
     if (group.length === 0) return;
     const head = group[0];
+    const turn = turnFor(group, runs, endedRuns);
+    if (turn.toolCallCount === 0) {
+      group = [];
+      return;
+    }
     entries.push({
       kind: "turn",
       id: head.id,
       seq: toSeq(head.seq),
       createdAt: toDate(head.createdAt),
       agent: agentFor(head.authorAgentId),
-      turn: turnFor(group, runs),
+      turn,
     });
     group = [];
   };
 
-  for (const message of sortMessages(messages)) {
+  for (const message of ordered) {
     if (message.kind === "event") {
       const head = group[0];
       const sameRun = head && runKey(head) === runKey(message);
@@ -476,7 +526,11 @@ function runKey(message: MessageRow): string {
  * long. `Math.max` guards the other direction — a run row that has not caught
  * up with the events we can already see must not under-report either.
  */
-function turnFor(group: MessageRow[], runs: Record<string, RunSummary>): TurnView {
+function turnFor(
+  group: MessageRow[],
+  runs: Record<string, RunSummary>,
+  endedRuns: Set<string>,
+): TurnView {
   const head = group[0];
   const tail = group[group.length - 1];
   const runId = head.runId ?? `local:${head.id}`;
@@ -486,7 +540,11 @@ function turnFor(group: MessageRow[], runs: Record<string, RunSummary>): TurnVie
     .map(toolCallFromMessage)
     .filter((call): call is ToolCallView => call !== null);
 
-  const sawTurnEnd = group.some((m) => (m.metadata ?? {}).eventType === "turn_end");
+  // Run-level, not group-level. `turn_end` is one row, and it lands in whatever
+  // group happens to be open when it arrives — which, once prose has split a
+  // turn in two, is routinely not the group holding the tool calls. Asking the
+  // group left the visible half of a finished turn reading "running" forever.
+  const sawTurnEnd = endedRuns.has(runKey(head));
   const started = run?.startedAt ? toDate(run.startedAt) : toDate(head.createdAt);
   const finished = run?.finishedAt ? toDate(run.finishedAt) : toDate(tail.createdAt);
 
@@ -495,7 +553,12 @@ function turnFor(group: MessageRow[], runs: Record<string, RunSummary>): TurnVie
     status: run?.status ?? (sawTurnEnd ? "done" : "running"),
     toolCallCount: Math.max(run?.toolCallCount ?? 0, toolCalls.length),
     durationMs: Math.max(0, finished.getTime() - started.getTime()),
-    tokens: (run?.tokensIn ?? 0) + (run?.tokensOut ?? 0),
+    // Null unless the server actually sent usage. A `run.updated` frame carries
+    // only `{id, status}`, so `run` existing proves nothing about tokens.
+    tokens:
+      run?.tokensIn === undefined && run?.tokensOut === undefined
+        ? null
+        : (run?.tokensIn ?? 0) + (run?.tokensOut ?? 0),
     toolCalls,
   };
 }
@@ -561,8 +624,28 @@ function artifactFor(message: MessageRow, artifacts: Record<string, ArtifactRow>
     title: row?.title ?? message.body ?? null,
     sizeBytes: row?.sizeBytes ?? null,
     description: artifactDescription(kind),
-    // The real render lands in the card's iframe; the mini-preview stays empty
-    // rather than inventing structure the artifact may not have.
-    previewNodes: [],
+    // `html` and `text` have a body on this origin; `link` and `file` do not,
+    // and the server 404s their content route. Deciding that here rather than
+    // in the card keeps the "what can be rendered" rule in one place, next to
+    // the kind that determines it.
+    contentUrl: hasBody(kind) ? artifactContentUrl(artifactId) : null,
+    url: row?.url ?? null,
+    contentType: row?.contentType ?? null,
   };
+}
+
+/** Kinds whose bytes live in `artifacts.body` rather than behind `artifacts.url`. */
+export function hasBody(kind: ArtifactKind): boolean {
+  return kind === "html" || kind === "text";
+}
+
+/**
+ * Where a body is served from.
+ *
+ * A function, and exported, because the card renders this into an `iframe src`
+ * and a test needs to assert the exact string. Encoded even though the id is a
+ * uuid: it arrives from `messages.metadata`, which is written by an agent.
+ */
+export function artifactContentUrl(artifactId: string): string {
+  return `/api/artifacts/${encodeURIComponent(artifactId)}/content`;
 }

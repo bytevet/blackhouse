@@ -147,10 +147,20 @@ export function ResultViewer({ agentId, updatedAt, onDelete }: ResultViewerProps
       ) : (
         /* The artifact is agent-authored HTML: it renders in a sandboxed frame
          * on a white ground regardless of theme, since it carries no `--ny-*`
-         * tokens of its own and would otherwise be unreadable in dark mode. */
+         * tokens of its own and would otherwise be unreadable in dark mode.
+         *
+         * `allow-scripts` WITHOUT `allow-same-origin`, and the pair is the
+         * whole point. Granting both together lets the framed document call
+         * `parent.document`, read this origin's storage, and issue same-origin
+         * requests — which is to say it is not sandboxed at all, against
+         * content this project defines as untrusted and model-authored. The
+         * document needs an opaque origin, and omitting `allow-same-origin` is
+         * what gives it one; scripts still run. Nothing here depends on
+         * same-origin: the "Source" view fetches through the parent, which a
+         * frame's sandbox does not constrain. */
         <iframe
           src={`${resultUrl}?t=${cacheBuster}`}
-          sandbox="allow-scripts allow-same-origin"
+          sandbox="allow-scripts"
           style={{ flex: 1, minHeight: 0, border: 0, background: "#fff" }}
           title="Agent result"
         />

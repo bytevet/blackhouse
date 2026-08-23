@@ -147,6 +147,68 @@ describe("mapTranscript — the kind fan-out", () => {
     const entry = entries[0] as Extract<TranscriptEntry, { kind: "artifact" }>;
     expect(entry.artifact.title).toBe("report.html");
     expect(entry.artifact.sizeBytes).toBeNull();
+    // The card is still addressable: `metadata.artifactId` is enough to point
+    // the iframe at a body, and the row only ever added kind and size.
+    expect(entry.artifact.contentUrl).toBe("/api/artifacts/art-missing/content");
+  });
+
+  /**
+   * The card's whole job is to show the artifact, and for a long time it showed
+   * an empty box instead — `artifactFor` hardcoded an empty preview and no
+   * endpoint served a body at all. What decides whether there is anything to
+   * frame is `kind`, so that is what these pin.
+   */
+  it("points html and text cards at the content route", () => {
+    for (const kind of ["html", "text"] as const) {
+      const entries = mapTranscript({
+        ...base,
+        messages: [
+          message({
+            kind: "artifact",
+            authorKind: "agent",
+            authorAgentId: SCOUT.id,
+            body: `out.${kind}`,
+            metadata: { artifactId: `art-${kind}` },
+          }),
+        ],
+        artifacts: { [`art-${kind}`]: { id: `art-${kind}`, kind } },
+      });
+      const entry = entries[0] as Extract<TranscriptEntry, { kind: "artifact" }>;
+      expect(entry.artifact.contentUrl).toBe(`/api/artifacts/art-${kind}/content`);
+      expect(entry.artifact.url).toBeNull();
+    }
+  });
+
+  it("gives link and file cards no content URL, only their own url", () => {
+    // They have no `artifacts.body` row to serve, and the server 404s their
+    // content route. A card that pointed an iframe at that 404 would be the
+    // empty box again, wearing a different hat.
+    for (const kind of ["link", "file"] as const) {
+      const entries = mapTranscript({
+        ...base,
+        messages: [
+          message({
+            kind: "artifact",
+            authorKind: "agent",
+            authorAgentId: SCOUT.id,
+            body: "somewhere else",
+            metadata: { artifactId: `art-${kind}` },
+          }),
+        ],
+        artifacts: {
+          [`art-${kind}`]: {
+            id: `art-${kind}`,
+            kind,
+            url: "https://example.com/report.pdf",
+            contentType: "application/pdf",
+          },
+        },
+      });
+      const entry = entries[0] as Extract<TranscriptEntry, { kind: "artifact" }>;
+      expect(entry.artifact.contentUrl).toBeNull();
+      expect(entry.artifact.url).toBe("https://example.com/report.pdf");
+      expect(entry.artifact.contentType).toBe("application/pdf");
+    }
   });
 
   it("attaches the queued chip to the message that triggered the run", () => {
@@ -528,5 +590,155 @@ describe("row helpers", () => {
       { id: "c", seq: "1", kind: "text", authorKind: "user", createdAt: "2026-08-15T11:00:00Z" },
     ]);
     expect(rows.map((r) => r.id)).toEqual(["c", "a", "b"]);
+  });
+});
+
+describe("mapTranscript — bookkeeping events are not turns", () => {
+  /**
+   * Reported from a live channel: one agent turn drew *two* summary rows, the
+   * first reading `worked 0 tool calls · 0s · running`.
+   *
+   * The shape that does it is the ordinary shape of a turn. `turn_start` opens
+   * it, the agent says what it is about to do, and only then does it start
+   * calling tools. Grouping breaks on that prose, so `turn_start` was left
+   * alone in a group of its own — and a group of one bookkeeping event still
+   * became a row, claiming zero work at the exact moment the agent was working.
+   */
+  const RUN = "run-gdp";
+
+  const turnStart = () =>
+    message({
+      kind: "event",
+      authorKind: "agent",
+      authorAgentId: SCOUT.id,
+      runId: RUN,
+      metadata: { eventType: "turn_start" },
+    });
+
+  const prose = () =>
+    message({
+      kind: "text",
+      authorKind: "agent",
+      authorAgentId: SCOUT.id,
+      runId: RUN,
+      body: "I'll pull real data from the World Bank API and build the report.",
+      metadata: { eventType: "assistant_text" },
+    });
+
+  it("draws one turn row for a turn that prose splits in two", () => {
+    const entries = mapTranscript({
+      ...base,
+      messages: [
+        message({ kind: "text", authorKind: "user", authorUserId: DANA.id, body: "@scout go" }),
+        turnStart(),
+        prose(),
+        toolUse(RUN, { glyph: "▶", verb: "Ran", target: "curl worldbank" }),
+        toolUse(RUN, { glyph: "▶", verb: "Ran", target: "python report.py" }),
+      ],
+    });
+
+    const turns = entries.filter(
+      (e): e is Extract<TranscriptEntry, { kind: "turn" }> => e.kind === "turn",
+    );
+    expect(turns).toHaveLength(1);
+    expect(turns[0].turn.toolCallCount).toBe(2);
+
+    // The prose is still its own message — dropping the empty row must not
+    // take the sentence the agent actually said with it.
+    expect(entries.filter((e) => e.kind === "agent-text")).toHaveLength(1);
+  });
+
+  it("draws no turn row at all when a turn calls no tools", () => {
+    // "@scout hi" → "Hey — I'm here." Previously this rendered two empty
+    // summary rows around one sentence, and no real row anywhere.
+    const entries = mapTranscript({
+      ...base,
+      messages: [
+        turnStart(),
+        prose(),
+        message({
+          kind: "event",
+          authorKind: "agent",
+          authorAgentId: SCOUT.id,
+          runId: RUN,
+          metadata: { eventType: "turn_end" },
+        }),
+      ],
+    });
+
+    expect(entries.filter((e) => e.kind === "turn")).toHaveLength(0);
+    expect(entries.filter((e) => e.kind === "agent-text")).toHaveLength(1);
+  });
+
+  it("reports unknown token usage as unknown, not as zero", () => {
+    /**
+     * `GET /api/channels/:key/messages` returns no run data, and a
+     * `run.updated` frame carries only `{id, status}` — so the client is never
+     * told what a turn cost. Summing the missing fields to `0` printed
+     * `0 tokens` under every turn in every channel: a measurement nobody made,
+     * rendered with the same confidence as the tool count beside it.
+     */
+    const entries = mapTranscript({
+      ...base,
+      messages: [turnStart(), prose(), toolUse(RUN, { glyph: "▶", verb: "Ran", target: "curl" })],
+      // What a live `run.updated` frame actually gives us.
+      runs: { [RUN]: { id: RUN, status: "running" } },
+    });
+
+    const turns = entries.filter(
+      (e): e is Extract<TranscriptEntry, { kind: "turn" }> => e.kind === "turn",
+    );
+    expect(turns[0].turn.tokens).toBeNull();
+  });
+
+  it("still reports a genuine zero as zero", () => {
+    // The distinction only earns its keep if a real measurement of nothing is
+    // still rendered. Hiding that would be the same error in the other
+    // direction.
+    const entries = mapTranscript({
+      ...base,
+      messages: [turnStart(), prose(), toolUse(RUN, { glyph: "▶", verb: "Ran", target: "curl" })],
+      runs: { [RUN]: { id: RUN, status: "done", tokensIn: 0, tokensOut: 0 } },
+    });
+
+    const turns = entries.filter(
+      (e): e is Extract<TranscriptEntry, { kind: "turn" }> => e.kind === "turn",
+    );
+    expect(turns[0].turn.tokens).toBe(0);
+  });
+
+  it("reads turn_end from the run, not from whichever group it landed in", () => {
+    // `turn_end` arrives after the tool calls and lands in its own group. Read
+    // per-group, the group holding the tools never sees it and a finished turn
+    // reads "running" for as long as the page is open.
+    const entries = mapTranscript({
+      ...base,
+      messages: [
+        turnStart(),
+        prose(),
+        toolUse(RUN, { glyph: "▶", verb: "Ran", target: "curl worldbank" }),
+        message({
+          kind: "text",
+          authorKind: "agent",
+          authorAgentId: SCOUT.id,
+          runId: RUN,
+          body: "Done — report written.",
+          metadata: { eventType: "assistant_text" },
+        }),
+        message({
+          kind: "event",
+          authorKind: "agent",
+          authorAgentId: SCOUT.id,
+          runId: RUN,
+          metadata: { eventType: "turn_end" },
+        }),
+      ],
+    });
+
+    const turns = entries.filter(
+      (e): e is Extract<TranscriptEntry, { kind: "turn" }> => e.kind === "turn",
+    );
+    expect(turns).toHaveLength(1);
+    expect(turns[0].turn.status).toBe("done");
   });
 });

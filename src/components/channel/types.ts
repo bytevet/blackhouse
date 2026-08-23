@@ -83,25 +83,42 @@ export interface TurnView {
   status: RunStatus;
   toolCallCount: number;
   durationMs: number;
-  /** `tokens_in + tokens_out`. */
-  tokens: number;
+  /**
+   * `tokens_in + tokens_out`, or null when the client has no usage data.
+   *
+   * Nullable because "we were not told" and "the turn cost nothing" are
+   * different facts and only one of them is ever true here. Rendering the
+   * first as `0 tokens` invented a measurement.
+   */
+  tokens: number | null;
   toolCalls: ToolCallView[];
 }
 
-/** An `artifacts` row rendered as an inline card. */
+/**
+ * An `artifacts` row rendered as an inline card.
+ *
+ * The card used to carry `previewNodes` — a hand-built list of chips standing
+ * in for a render that did not exist yet. Every real artifact arrived with that
+ * array empty, so the card drew an empty 150px box under a correct title, which
+ * is the worst of both: it looks like the feature works and shows nothing.
+ *
+ * These three fields replace it with the real thing. Which one is populated is
+ * decided by `kind` and nothing else:
+ *
+ * - `contentUrl` — same-origin route serving the body, for `html` and `text`.
+ *   `null` for `link`/`file`, which have no body.
+ * - `url` — the agent-supplied external location, for `link` and `file`. Never
+ *   navigated to without `rel="noopener noreferrer"`, and never used as an
+ *   iframe source.
+ * - `contentType` — also agent-supplied, and shown to the reader rather than
+ *   trusted; the server decides what a body is actually served as.
+ */
 export interface ArtifactView extends Pick<Artifact, "id" | "kind" | "title" | "sizeBytes"> {
   /** Human label under the title — "rendered HTML", "patch", … */
   description: string;
-  /** Nodes of the mini preview. Presentational stand-in for the real render. */
-  previewNodes: ArtifactPreviewNode[];
-}
-
-/** One box in the artifact mini-preview. */
-export interface ArtifactPreviewNode {
-  label: string;
-  /** Indent level inside the preview, 0-2. */
-  depth: number;
-  tone: StatusTone | "accent";
+  contentUrl: string | null;
+  url: string | null;
+  contentType: string | null;
 }
 
 /** A `dispatch_requests` row plus the joined handles the card displays. */
